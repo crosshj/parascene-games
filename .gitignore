@@ -1,1 +1,6 @@
 .DS_Store
+.cursor/rules/builds.mdc
+/build/
+runner/build/
+runner/dist/
+/runner/tools/__pycache__

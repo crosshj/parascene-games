@@ -1,0 +1,28 @@
+# Pose guide for the image editor. The canvas is 1024x1024.
+# Empty pixels are #FF00FF, or any pixel with alpha below 128.
+# Cells are 128x160, 8 columns, counted left to right, then down.
+# 160 does not divide 1024, so the bottom 64 pixels stay empty.
+#
+#   0  1  2  3  4  5  6  7
+#   8  9 10 11 12 13 14 15
+#  16 17 18 19 20 21 22 23
+#
+# Keep each pose inside its cell. Feet sit on the bottom edge of the cell,
+# except the tuck, whose feet pull up. Bright magenta inside a character
+# is treated as empty.
+# This file is the map for runner.png. Save a painted character as
+# name.runner.png, for example blazer.runner.png. The part before the
+# dot is the name on the menu. The part after it selects this sheet.
+#
+# run    0-7    contact, passing, knee up, reach, then the other foot
+# jump   8-15   squat, crouch, launch, rise, stretch, tuck, fall, land
+# left   16-19  lean left, shallow to deep
+# right  20-23  lean right, shallow to deep
+
+frame 128 160
+pack 32 40
+
+run 0-7
+jump 8-15
+left 16-19
+right 20-23
