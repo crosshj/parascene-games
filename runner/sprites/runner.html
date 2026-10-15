@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>runner</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #141018;
+    --panel: #221c28;
+    --line: #3a3144;
+    --text: #f2e9f6;
+    --muted: #b3a4be;
+    --accent: #7ee0d2;
+    --hot: #ffd15a;
+    --bad: #ff8aa0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.4 ui-sans-serif, system-ui, sans-serif;
+  }
+  main { padding: 16px 20px; }
+  .hint { color: var(--muted); margin: 2px 0 0; }
+  label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+  select, button, input[type="number"], input[type="file"] {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+  }
+  button { cursor: pointer; }
+  button[aria-pressed="true"], button.active {
+    background: #2d4a46;
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: start; }
+  .field { display: grid; gap: 4px; align-content: start; }
+  .field-label {
+    min-height: calc(12px * 1.4);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .status { margin: 0; color: var(--bad); }
+  .status:empty { display: none; }
+  .stage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .controls {
+    flex: 1 1 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 240px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .panel h2 { margin: 0 0 8px; font-size: 13px; font-weight: 650; color: var(--muted); }
+  .checker, #sheet {
+    background:
+      linear-gradient(45deg, #2a2430 25%, transparent 25%),
+      linear-gradient(-45deg, #2a2430 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2430 75%),
+      linear-gradient(-45deg, transparent 75%, #2a2430 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-color: #18141c;
+  }
+  .checker {
+    display: grid;
+    place-items: center;
+    min-height: 96px;
+  }
+  canvas.pixel { image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; }
+  #sheet { width: min(100%, 1024px); height: auto; cursor: crosshair; }
+  #height-px, #top-px { width: 5.5em; }
+  dialog {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    width: min(420px, calc(100vw - 32px));
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+  dialog .fields { display: grid; gap: 12px; margin: 0 0 16px; }
+  dialog .actions { display: flex; justify-content: space-between; gap: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <dialog id="files">
+    <div class="fields">
+      <label>Sheet
+        <select id="sheet-pick"></select>
+      </label>
+      <label>Open PNG
+        <input id="png-file" type="file" accept="image/png">
+      </label>
+      <label>Map
+        <input id="txt-file" type="file" accept=".txt,text/plain">
+      </label>
+    </div>
+    <div class="actions">
+      <button id="files-clear" type="button">Clear browser storage</button>
+      <button id="files-close" type="button">Close</button>
+    </div>
+  </dialog>
+  <div class="stage">
+    <section class="panel">
+      <h2 id="source-title">Cell</h2>
+      <div class="checker"><canvas id="source" class="pixel"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2 id="pack-title">Packed</h2>
+      <div class="checker"><canvas id="packed" class="pixel"></canvas></div>
+    </section>
+    <div class="controls">
+      <p class="status" id="status"></p>
+      <div class="row" id="anims"></div>
+      <div class="row">
+        <div class="field"><span class="field-label"></span><button id="prev" type="button">Previous</button></div>
+        <div class="field"><span class="field-label"></span><button id="next" type="button">Next</button></div>
+        <div class="field"><span class="field-label"></span><button id="play" type="button" aria-pressed="false">Play</button></div>
+        <div class="field">
+          <span class="field-label">Frames / second</span>
+          <input id="fps" type="number" min="1" max="60" value="15">
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><span class="field-label"></span><button id="top-dec" type="button" aria-label="Trim one pixel from the top">−</button></div>
+        <div class="field">
+          <span class="field-label">top</span>
+          <input id="top-px" type="number" step="1" value="0">
+        </div>
+        <div class="field"><span class="field-label"></span><button id="top-inc" type="button" aria-label="Add one pixel on the top">+</button></div>
+        <div class="field"><span class="field-label"></span><button id="height-dec" type="button" aria-label="Shrink the bottom one pixel">−</button></div>
+        <div class="field">
+          <span class="field-label">bottom</span>
+          <input id="height-px" type="number" min="1" step="1" value="1">
+        </div>
+        <div class="field"><span class="field-label"></span><button id="height-inc" type="button" aria-label="Stretch the bottom one pixel">+</button></div>
+      </div>
+      <div class="row">
+        <div class="field"><span class="field-label"></span><button id="load" type="button">Load</button></div>
+        <div class="field"><span class="field-label"></span><button id="save-image" type="button">Save image</button></div>
+      </div>
+    </div>
+  </div>
+  <section class="panel" style="margin-top: 16px;">
+    <h2>Sheet</h2>
+    <p class="hint">Click a cell. The bright box is the frame on screen. Cyan boxes belong to the selected animation.</p>
+    <canvas id="sheet"></canvas>
+  </section>
+</main>
+<script>
+const KNOWN_SHEETS = ["runner.png", "blazer.runner.png"];
+const SHEET_SIZE = 1024;
+
+const statusEl = document.querySelector("#status");
+const sheetPick = document.querySelector("#sheet-pick");
+const animsEl = document.querySelector("#anims");
+const sourceCanvas = document.querySelector("#source");
+const packedCanvas = document.querySelector("#packed");
+const sheetCanvas = document.querySelector("#sheet");
+const playBtn = document.querySelector("#play");
+
+let map = null;
+let sheet = null;
+let sheets = [];
+let animIndex = 0;
+let frameIndex = 0;
+let playing = false;
+let lastTick = 0;
+let heightDelta = 0;
+let topDelta = 0;
+const heightDeltas = {};
+const topDeltas = {};
+let scaled = null;
+let scaledKey = "";
+const PLACE_KEY = "runner-viewer-place";
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("runner-viewer", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("files")) {
+        request.result.createObjectStore("files");
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbGet(key) {
+  const db = await idbOpen();
+  try {
+    return await new Promise((resolve, reject) => {
+      const get = db.transaction("files", "readonly").objectStore("files").get(key);
+      get.onsuccess = () => resolve(get.result);
+      get.onerror = () => reject(get.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function idbPut(key, value) {
+  const db = await idbOpen();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("files", "readwrite");
+      tx.objectStore("files").put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function idbDelete() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase("runner-viewer");
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("storage is still open in another tab"));
+  });
+}
+
+async function idbKeys() {
+  const db = await idbOpen();
+  try {
+    return await new Promise((resolve, reject) => {
+      const get = db.transaction("files", "readonly").objectStore("files").getAllKeys();
+      get.onsuccess = () => resolve(get.result);
+      get.onerror = () => reject(get.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function readPlace() {
+  try {
+    return JSON.parse(localStorage.getItem(PLACE_KEY) || "null");
+  } catch (error) {
+    return null;
+  }
+}
+
+function rememberPlace() {
+  if (!map || !sheet) return;
+  const place = {
+    sheet: sheet.name,
+    anim: currentAnim().name,
+    frame: frameIndex,
+    fps: document.querySelector("#fps").value,
+    heights: heightDeltas,
+    tops: topDeltas,
+  };
+  localStorage.setItem(PLACE_KEY, JSON.stringify(place));
+}
+
+function applyPlace(place) {
+  if (!place || !map || !sheet) return;
+  if (place.fps) document.querySelector("#fps").value = place.fps;
+  const animAt = animList().findIndex((anim) => anim.name === place.anim);
+  if (animAt >= 0) animIndex = animAt;
+  const count = currentAnim().frames.length;
+  const frame = place.frame | 0;
+  frameIndex = frame >= 0 && frame < count ? frame : 0;
+  if (place.heights && typeof place.heights === "object") {
+    Object.assign(heightDeltas, place.heights);
+  }
+  if (sheet && Object.prototype.hasOwnProperty.call(heightDeltas, sheet.name)) {
+    heightDelta = heightDeltas[sheet.name] | 0;
+    scaled = null;
+  }
+  if (place.tops && typeof place.tops === "object") {
+    Object.assign(topDeltas, place.tops);
+  }
+  if (sheet && Object.prototype.hasOwnProperty.call(topDeltas, sheet.name)) {
+    topDelta = topDeltas[sheet.name] | 0;
+  }
+  syncAdjustInputs();
+}
+
+function setStatus(text) {
+  statusEl.textContent = text || "";
+}
+
+function parseMap(text) {
+  let frameW = null;
+  let frameH = null;
+  let packW = null;
+  let packH = null;
+  const anims = [];
+  const notes = {};
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const hash = raw.indexOf("#");
+    const code = (hash < 0 ? raw : raw.slice(0, hash)).trim();
+    const comment = hash < 0 ? "" : raw.slice(hash + 1).trim();
+    const noted = comment.match(/^([A-Za-z_]\w*)\s+\d+(?:-\d+)?(?:[,\s]+\d+(?:-\d+)?)*\s+(.+)$/);
+    if (noted) notes[noted[1].toLowerCase()] = noted[2].trim();
+    if (!code) return;
+    const parts = code.replace(/,/g, " ").split(/\s+/);
+    const line = i + 1;
+    if (parts[0] === "frame") {
+      if (parts.length !== 3) throw new Error(`line ${line}: expected frame WIDTH HEIGHT`);
+      frameW = Number(parts[1]);
+      frameH = Number(parts[2]);
+      return;
+    }
+    if (parts[0] === "pack") {
+      if (parts.length !== 3) throw new Error(`line ${line}: expected pack WIDTH HEIGHT`);
+      packW = Number(parts[1]);
+      packH = Number(parts[2]);
+      return;
+    }
+    if (frameW == null) throw new Error(`line ${line}: set the cell size with frame WIDTH HEIGHT first`);
+    const frames = [];
+    for (const token of parts.slice(1)) {
+      if (token.includes("-")) {
+        const [a, b] = token.split("-", 2).map(Number);
+        if (!Number.isInteger(a) || !Number.isInteger(b) || b < a) {
+          throw new Error(`line ${line}: bad range ${token}`);
+        }
+        for (let n = a; n <= b; n++) frames.push(n);
+      } else {
+        const n = Number(token);
+        if (!Number.isInteger(n)) throw new Error(`line ${line}: bad frame ${token}`);
+        frames.push(n);
+      }
+    }
+    if (!frames.length) throw new Error(`line ${line}: ${parts[0]} needs at least one frame`);
+    anims.push({ name: parts[0], frames, note: notes[parts[0].toLowerCase()] || "" });
+  });
+  if (frameW == null || !anims.length) throw new Error("map needs a frame size and at least one animation");
+  if (packW == null) {
+    packW = frameW;
+    packH = frameH;
+  }
+  return { frameW, frameH, packW, packH, anims };
+}
+
+function isMagenta(r, g, b, a) {
+  if (a < 128) return true;
+  return r >= 220 && b >= 220 && g <= 48 && Math.abs(r - b) <= 48;
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`could not load ${src}`));
+    image.src = src;
+  });
+}
+
+async function imageToSheet(image, name, url) {
+  const canvas = document.createElement("canvas");
+  canvas.width = SHEET_SIZE;
+  canvas.height = SHEET_SIZE;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(image, 0, 0, SHEET_SIZE, SHEET_SIZE);
+  const data = ctx.getImageData(0, 0, SHEET_SIZE, SHEET_SIZE).data;
+  return { name, url, w: SHEET_SIZE, h: SHEET_SIZE, data, rev: ++imageToSheet.rev };
+}
+
+imageToSheet.rev = 0;
+
+function contentHeight() {
+  return Math.max(1, sheet.h + heightDelta);
+}
+
+function viewHeight() {
+  return Math.max(sheet.h, topDelta + contentHeight(), 1);
+}
+
+function colsRows() {
+  const cols = Math.floor(sheet.w / map.frameW);
+  const rows = Math.floor(viewHeight() / map.frameH);
+  return { cols, rows, limit: cols * rows };
+}
+
+function scaledSheet() {
+  const destH = Math.max(1, sheet.h + heightDelta);
+  const key = `${sheet.name}:${sheet.rev}:${destH}`;
+  if (scaled && scaledKey === key) return scaled;
+  const out = new Uint8ClampedArray(sheet.w * destH * 4);
+  for (let y = 0; y < destH; y++) {
+    const sy = Math.min(sheet.h - 1, Math.floor(y * sheet.h / destH));
+    const src = sy * sheet.w * 4;
+    out.set(sheet.data.subarray(src, src + sheet.w * 4), y * sheet.w * 4);
+  }
+  scaled = { w: sheet.w, h: destH, data: out };
+  scaledKey = key;
+  return scaled;
+}
+
+function placedSheet() {
+  const image = scaledSheet();
+  const viewH = viewHeight();
+  const out = new Uint8ClampedArray(image.w * viewH * 4);
+  for (let y = 0; y < image.h; y++) {
+    const dy = y + topDelta;
+    if (dy < 0 || dy >= viewH) continue;
+    const src = y * image.w * 4;
+    out.set(image.data.subarray(src, src + image.w * 4), dy * image.w * 4);
+  }
+  return { w: image.w, h: viewH, data: out };
+}
+
+function syncAdjustInputs() {
+  const height = document.querySelector("#height-px");
+  const top = document.querySelector("#top-px");
+  if (!sheet) return;
+  if (height) {
+    height.value = String(contentHeight());
+    height.max = String(sheet.h * 3);
+  }
+  if (top) {
+    top.value = String(topDelta);
+    top.min = String(-sheet.h * 2);
+    top.max = String(sheet.h * 2);
+  }
+}
+
+function setHeightDelta(next) {
+  if (!sheet) return;
+  const limit = sheet.h * 3;
+  heightDelta = Math.max(1 - sheet.h, Math.min(limit - sheet.h, next | 0));
+  heightDeltas[sheet.name] = heightDelta;
+  scaled = null;
+  syncAdjustInputs();
+  render();
+}
+
+function setTopDelta(next) {
+  if (!sheet) return;
+  const limit = sheet.h * 2;
+  topDelta = Math.max(-limit, Math.min(limit, next | 0));
+  topDeltas[sheet.name] = topDelta;
+  syncAdjustInputs();
+  render();
+}
+
+function animList() {
+  const { limit } = colsRows();
+  if (limit < 1) return map.anims;
+  return map.anims.concat([{
+    name: "all",
+    frames: Array.from({ length: limit }, (_, i) => i),
+    note: "Every cell on the sheet, including ones the map does not name.",
+  }]);
+}
+
+function currentAnim() {
+  const list = animList();
+  if (animIndex >= list.length) animIndex = 0;
+  return list[animIndex];
+}
+
+function currentCell() {
+  return currentAnim().frames[frameIndex];
+}
+
+function cellOrigin(index) {
+  const { cols } = colsRows();
+  return {
+    x: (index % cols) * map.frameW,
+    y: Math.floor(index / cols) * map.frameH,
+  };
+}
+
+function readCell(index) {
+  const image = placedSheet();
+  const { frameW, frameH } = map;
+  const { x, y } = cellOrigin(index);
+  const out = new Uint8ClampedArray(frameW * frameH * 4);
+  for (let row = 0; row < frameH; row++) {
+    const sy = y + row;
+    if (sy < 0 || sy >= image.h || x < 0 || x + frameW > image.w) continue;
+    const src = (sy * image.w + x) * 4;
+    out.set(image.data.subarray(src, src + frameW * 4), row * frameW * 4);
+  }
+  return out;
+}
+
+function keyPixels(pixels) {
+  const out = new Uint8ClampedArray(pixels);
+  for (let i = 0; i < out.length; i += 4) {
+    if (isMagenta(out[i], out[i + 1], out[i + 2], out[i + 3])) out[i + 3] = 0;
+  }
+  return out;
+}
+
+function sampleEnd(start, next, limit) {
+  const end = next === Math.floor(next) ? Math.floor(next) : Math.floor(next) + 1;
+  return Math.min(limit, Math.max(Math.floor(start) + 1, end));
+}
+
+function packCell(index) {
+  const raw = readCell(index);
+  const { frameW, frameH, packW, packH } = map;
+  const out = new Uint8ClampedArray(packW * packH * 4);
+  for (let y = 0; y < packH; y++) {
+    const sy0 = y * frameH / packH;
+    const sy1 = (y + 1) * frameH / packH;
+    const y0 = Math.floor(sy0);
+    const y1 = sampleEnd(sy0, sy1, frameH);
+    for (let x = 0; x < packW; x++) {
+      const sx0 = x * frameW / packW;
+      const sx1 = (x + 1) * frameW / packW;
+      const x0 = Math.floor(sx0);
+      const x1 = sampleEnd(sx0, sx1, frameW);
+      let rs = 0, gs = 0, bs = 0, n = 0;
+      for (let yy = y0; yy < y1; yy++) {
+        for (let xx = x0; xx < x1; xx++) {
+          const i = (yy * frameW + xx) * 4;
+          if (isMagenta(raw[i], raw[i + 1], raw[i + 2], raw[i + 3])) continue;
+          rs += raw[i];
+          gs += raw[i + 1];
+          bs += raw[i + 2];
+          n++;
+        }
+      }
+      const o = (y * packW + x) * 4;
+      if (n) {
+        out[o] = Math.floor(rs / n);
+        out[o + 1] = Math.floor(gs / n);
+        out[o + 2] = Math.floor(bs / n);
+        out[o + 3] = 255;
+      }
+    }
+  }
+  return out;
+}
+
+function blit(canvas, pixels, w, h, scale) {
+  const scratch = document.createElement("canvas");
+  scratch.width = w;
+  scratch.height = h;
+  scratch.getContext("2d").putImageData(new ImageData(pixels, w, h), 0, 0);
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+}
+
+function drawSource() {
+  blit(sourceCanvas, keyPixels(readCell(currentCell())), map.frameW, map.frameH, 1.5);
+  document.querySelector("#source-title").textContent =
+    `Cell ${map.frameW}×${map.frameH}`;
+}
+
+function drawPacked() {
+  const pixels = packCell(currentCell());
+  const scale = Math.max(2, Math.round(map.frameW * 1.5 / map.packW));
+  blit(packedCanvas, pixels, map.packW, map.packH, scale);
+  document.querySelector("#pack-title").textContent =
+    `Packed ${map.packW}×${map.packH}`;
+}
+
+function renderAnims() {
+  animsEl.innerHTML = "";
+  animList().forEach((anim, i) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const end = anim.frames[anim.frames.length - 1];
+    button.textContent = anim.frames.length ? `${anim.name} ${anim.frames[0]}–${end}` : anim.name;
+    button.className = i === animIndex ? "active" : "";
+    button.addEventListener("click", () => {
+      animIndex = i;
+      frameIndex = 0;
+      render();
+    });
+    const field = document.createElement("div");
+    field.className = "field";
+    const caption = document.createElement("span");
+    caption.className = "field-label";
+    field.append(caption, button);
+    animsEl.appendChild(field);
+  });
+}
+
+function drawSheet() {
+  const { cols, rows } = colsRows();
+  const image = placedSheet();
+  sheetCanvas.width = image.w;
+  sheetCanvas.height = image.h;
+  const ctx = sheetCanvas.getContext("2d");
+  const pixels = keyPixels(image.data);
+  ctx.putImageData(new ImageData(pixels, image.w, image.h), 0, 0);
+  ctx.lineWidth = 2;
+  const used = new Set(currentAnim().frames);
+  ctx.strokeStyle = "rgba(126, 224, 210, 0.85)";
+  currentAnim().frames.forEach((cell) => {
+    if (cell < 0 || cell >= cols * rows) return;
+    const o = cellOrigin(cell);
+    ctx.strokeRect(o.x + 1, o.y + 1, map.frameW - 2, map.frameH - 2);
+  });
+  ctx.font = "16px ui-sans-serif, system-ui, sans-serif";
+  for (let index = 0; index < cols * rows; index++) {
+    const o = cellOrigin(index);
+    ctx.fillStyle = used.has(index) ? "#041614" : "rgba(0,0,0,0.45)";
+    ctx.fillRect(o.x + 4, o.y + 4, 28, 18);
+    ctx.fillStyle = used.has(index) ? "#7ee0d2" : "#ffffff";
+    ctx.fillText(String(index), o.x + 6, o.y + 18);
+  }
+  const hot = currentCell();
+  if (hot >= 0 && hot < cols * rows) {
+    const o = cellOrigin(hot);
+    ctx.strokeStyle = "#ffd15a";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(o.x + 2, o.y + 2, map.frameW - 4, map.frameH - 4);
+  }
+}
+
+function render() {
+  if (!map || !sheet) return;
+  const count = currentAnim().frames.length;
+  if (frameIndex >= count) frameIndex = 0;
+  if (frameIndex < 0) frameIndex = count - 1;
+  renderAnims();
+  drawSource();
+  drawPacked();
+  drawSheet();
+  const { cols, rows } = colsRows();
+  const bad = currentAnim().frames.filter((cell) => cell < 0 || cell >= cols * rows);
+  if (sheet.w % map.frameW) {
+    setStatus(`${sheet.name} width ${sheet.w} is not a multiple of cell width ${map.frameW}.`);
+  } else if (bad.length) {
+    setStatus(`${currentAnim().name} uses cells outside the ${cols}×${rows} grid: ${bad.join(", ")}`);
+  } else {
+    setStatus("");
+  }
+  rememberPlace();
+}
+
+function step(delta) {
+  const count = currentAnim().frames.length;
+  frameIndex = (frameIndex + delta + count) % count;
+  render();
+}
+
+function setPlaying(on) {
+  playing = on;
+  playBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  playBtn.textContent = on ? "Pause" : "Play";
+  if (on) lastTick = performance.now();
+}
+
+function tick(now) {
+  if (playing && map && sheet) {
+    const fps = Math.max(1, Number(document.querySelector("#fps").value) || 15);
+    if (now - lastTick >= 1000 / fps) {
+      lastTick = now;
+      step(1);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+function selectSheet(name) {
+  const found = sheets.find((item) => item.name === name);
+  if (!found) return;
+  sheet = found;
+  frameIndex = 0;
+  heightDelta = heightDeltas[name] || 0;
+  topDelta = topDeltas[name] || 0;
+  scaled = null;
+  sheetPick.value = name;
+  syncAdjustInputs();
+  render();
+}
+
+function saveImage() {
+  if (!sheet) return;
+  const image = placedSheet();
+  const out = new Uint8ClampedArray(SHEET_SIZE * SHEET_SIZE * 4);
+  const rows = Math.min(SHEET_SIZE, image.h);
+  const cols = Math.min(SHEET_SIZE, image.w);
+  for (let y = 0; y < rows; y++) {
+    const src = y * image.w * 4;
+    out.set(image.data.subarray(src, src + cols * 4), y * SHEET_SIZE * 4);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = SHEET_SIZE;
+  canvas.height = SHEET_SIZE;
+  canvas.getContext("2d").putImageData(new ImageData(out, SHEET_SIZE, SHEET_SIZE), 0, 0);
+  canvas.toBlob((blob) => {
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = sheet.name;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, "image/png");
+}
+
+function addSheetOption(item) {
+  if ([...sheetPick.options].some((option) => option.value === item.name)) return;
+  const option = document.createElement("option");
+  option.value = item.name;
+  option.textContent = item.name;
+  sheetPick.appendChild(option);
+}
+
+async function useMapText(text) {
+  map = parseMap(text);
+  animIndex = 0;
+  frameIndex = 0;
+  if (sheet) render();
+}
+
+async function loadMapUrl(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`could not load ${url}`);
+  await useMapText(await response.text());
+}
+
+async function loadSheetUrl(url) {
+  const image = await loadImage(url);
+  const item = await imageToSheet(image, url.split("/").pop(), url);
+  sheets = sheets.filter((entry) => entry.name !== item.name).concat(item);
+  addSheetOption(item);
+  return item;
+}
+
+async function openPngFile(file) {
+  const url = URL.createObjectURL(file);
+  const image = await loadImage(url);
+  const item = await imageToSheet(image, file.name, url);
+  sheets = sheets.filter((entry) => entry.name !== item.name).concat(item);
+  addSheetOption(item);
+  await idbPut("png:" + file.name, file);
+  selectSheet(item.name);
+}
+
+async function openMapFile(file) {
+  const text = await file.text();
+  await useMapText(text);
+  await idbPut("map", text);
+}
+
+async function clearBrowserStorage() {
+  localStorage.removeItem(PLACE_KEY);
+  await idbDelete();
+  for (const item of sheets) {
+    if (item.url && item.url.startsWith("blob:")) URL.revokeObjectURL(item.url);
+  }
+  for (const key of Object.keys(heightDeltas)) delete heightDeltas[key];
+  for (const key of Object.keys(topDeltas)) delete topDeltas[key];
+  heightDelta = 0;
+  topDelta = 0;
+  scaled = null;
+  animIndex = 0;
+  frameIndex = 0;
+  sheets = [];
+  sheet = null;
+  sheetPick.replaceChildren();
+  document.querySelector("#png-file").value = "";
+  document.querySelector("#txt-file").value = "";
+  document.querySelector("#fps").value = "15";
+  let note = "Browser storage cleared.";
+  try {
+    await loadMapUrl("runner.txt");
+  } catch (error) {
+    note = error.message;
+  }
+  for (const name of KNOWN_SHEETS) {
+    try {
+      await loadSheetUrl(name);
+    } catch (error) {
+      /* A character sheet is optional. */
+    }
+  }
+  const name = sheets[0] && sheets[0].name;
+  if (name && map) selectSheet(name);
+  setStatus(note);
+}
+
+const filesDialog = document.querySelector("#files");
+document.querySelector("#load").addEventListener("click", () => filesDialog.showModal());
+document.querySelector("#files-clear").addEventListener("click", async () => {
+  try {
+    await clearBrowserStorage();
+    filesDialog.close();
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+document.querySelector("#files-close").addEventListener("click", () => filesDialog.close());
+filesDialog.addEventListener("click", (event) => {
+  if (event.target === filesDialog) filesDialog.close();
+});
+sheetPick.addEventListener("change", () => selectSheet(sheetPick.value));
+document.querySelector("#prev").addEventListener("click", () => step(-1));
+document.querySelector("#next").addEventListener("click", () => step(1));
+playBtn.addEventListener("click", () => setPlaying(!playing));
+document.querySelector("#fps").addEventListener("change", () => { lastTick = performance.now(); });
+document.querySelector("#top-dec").addEventListener("click", () => setTopDelta(topDelta - 1));
+document.querySelector("#top-inc").addEventListener("click", () => setTopDelta(topDelta + 1));
+document.querySelector("#top-px").addEventListener("change", (event) => {
+  setTopDelta(Number(event.target.value) | 0);
+});
+document.querySelector("#height-dec").addEventListener("click", () => setHeightDelta(heightDelta - 1));
+document.querySelector("#height-inc").addEventListener("click", () => setHeightDelta(heightDelta + 1));
+document.querySelector("#height-px").addEventListener("change", (event) => {
+  setHeightDelta((Number(event.target.value) | 0) - sheet.h);
+});
+document.querySelector("#save-image").addEventListener("click", saveImage);
+
+document.querySelector("#png-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    await openPngFile(file);
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+
+document.querySelector("#txt-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    await openMapFile(file);
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+
+document.addEventListener("dragover", (event) => event.preventDefault());
+document.addEventListener("drop", async (event) => {
+  event.preventDefault();
+  const png = [...event.dataTransfer.files].find((item) => /\.png$/i.test(item.name));
+  const text = [...event.dataTransfer.files].find((item) => /\.txt$/i.test(item.name));
+  try {
+    if (text) await openMapFile(text);
+    if (png) await openPngFile(png);
+  } catch (error) {
+    setStatus(error.message);
+  }
+});
+
+sheetCanvas.addEventListener("click", (event) => {
+  if (!map || !sheet) return;
+  const rect = sheetCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (sheetCanvas.width / rect.width);
+  const y = (event.clientY - rect.top) * (sheetCanvas.height / rect.height);
+  const col = Math.floor(x / map.frameW);
+  const row = Math.floor(y / map.frameH);
+  const { cols, rows } = colsRows();
+  if (col < 0 || row < 0 || col >= cols || row >= rows) return;
+  const cell = row * cols + col;
+  const list = animList();
+  const inCurrent = list[animIndex].frames.indexOf(cell);
+  if (inCurrent >= 0) {
+    frameIndex = inCurrent;
+    render();
+    return;
+  }
+  for (let i = 0; i < list.length; i++) {
+    const at = list[i].frames.indexOf(cell);
+    if (at >= 0) {
+      animIndex = i;
+      frameIndex = at;
+      render();
+      return;
+    }
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.target.matches("input, select, textarea")) return;
+  if (!map || !sheet) return;
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    step(-1);
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    step(1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    animIndex = (animIndex + animList().length - 1) % animList().length;
+    frameIndex = 0;
+    render();
+  } else if (event.key === "ArrowDown") {
+    event.preventDefault();
+    animIndex = (animIndex + 1) % animList().length;
+    frameIndex = 0;
+    render();
+  } else if (event.key === " ") {
+    event.preventDefault();
+    setPlaying(!playing);
+  }
+});
+
+requestAnimationFrame(tick);
+
+(async function boot() {
+  const place = readPlace();
+  if (place && place.heights) Object.assign(heightDeltas, place.heights);
+  if (place && place.tops) Object.assign(topDeltas, place.tops);
+  let mapFromDisk = false;
+  try {
+    await loadMapUrl("runner.txt");
+    mapFromDisk = true;
+  } catch (error) {
+    try {
+      const savedMap = await idbGet("map");
+      if (savedMap) await useMapText(savedMap);
+      else setStatus(`${error.message}. Open runner.txt with the Map picker.`);
+    } catch (stored) {
+      setStatus(stored.message);
+    }
+  }
+  for (const name of KNOWN_SHEETS) {
+    try {
+      await loadSheetUrl(name);
+    } catch (error) {
+      /* A character sheet is optional. The file picker still opens one. */
+    }
+  }
+  try {
+    const keys = await idbKeys();
+    for (const key of keys) {
+      if (typeof key !== "string" || !key.startsWith("png:")) continue;
+      const name = key.slice(4);
+      if (sheets.some((item) => item.name === name)) continue;
+      const blob = await idbGet(key);
+      if (!blob) continue;
+      const url = URL.createObjectURL(blob);
+      const image = await loadImage(url);
+      const item = await imageToSheet(image, name, url);
+      sheets = sheets.filter((entry) => entry.name !== item.name).concat(item);
+      addSheetOption(item);
+    }
+  } catch (error) {
+    setStatus(error.message);
+  }
+  const wanted = place && sheets.some((item) => item.name === place.sheet)
+    ? place.sheet
+    : sheets[0] && sheets[0].name;
+  if (wanted && map) {
+    selectSheet(wanted);
+    applyPlace(place);
+    render();
+  } else if (!sheets.length) {
+    setStatus("Open a character PNG. runner.png and name.runner.png sit beside this page.");
+  } else if (!map && !mapFromDisk) {
+    setStatus("Open runner.txt with the Map picker.");
+  }
+})();
+</script>
+</body>
+</html>
