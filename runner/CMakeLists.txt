@@ -28,19 +28,40 @@ add_custom_command(
 	VERBATIM
 )
 
+set(SCREEN_H "${CMAKE_CURRENT_BINARY_DIR}/screen_art.h")
+add_custom_command(
+	OUTPUT "${SCREEN_H}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_screens.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/screens" "${SCREEN_H}"
+	DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_screens.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_sprites.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/screens/parascene.png"
+		"${CMAKE_CURRENT_SOURCE_DIR}/screens/title.png"
+	VERBATIM
+)
+
+set(SOUND_H "${CMAKE_CURRENT_BINARY_DIR}/sound_bank.h")
+add_custom_command(
+	OUTPUT "${SOUND_H}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_sounds.py" "${SOUND_H}"
+	DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_sounds.py"
+	VERBATIM
+)
+
 set(TRACK_WAV ${CMAKE_CURRENT_BINARY_DIR}/track.wav)
 add_custom_command(
 	OUTPUT ${TRACK_WAV}
 	COMMAND ${AFCONVERT} -f WAVE -d LEI16@44100 -c 2
-		${CMAKE_CURRENT_SOURCE_DIR}/runner1.mp3 ${TRACK_WAV}
-	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/runner1.mp3
+		${CMAKE_CURRENT_SOURCE_DIR}/audio/runner1.mp3 ${TRACK_WAV}
+	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/audio/runner1.mp3
 	VERBATIM
 )
 
 psn00bsdk_add_executable(runner NOGPREL src/main.c)
 target_include_directories(runner PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-set_source_files_properties(src/main.c PROPERTIES OBJECT_DEPENDS "${SPRITE_H}")
-add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}")
+set_source_files_properties(src/main.c PROPERTIES
+	OBJECT_DEPENDS "${SPRITE_H};${SCREEN_H};${SOUND_H}")
+add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}")
 add_dependencies(runner sprite_sheet)
 
 psn00bsdk_add_cd_image(

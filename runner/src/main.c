@@ -11,6 +11,8 @@
 #include <psxspu.h>
 #include <inline_c.h>
 #include "sprite_sheet.h"
+#include "screen_art.h"
+#include "sound_bank.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 240
@@ -21,17 +23,33 @@
 #define CLIP 64
 #define STEP 256
 #define FAR 4200
-#define CAM_H 100
+#define CAM_H 170
+#define HORIZON_Y 72
 #define CHAR_Z 200
 #define LANE 150
 #define ROAD_HALF 280
 #define SHOULDER 640
 
 enum {
-    ST_MENU,
+    ST_BOOT,
+    ST_TITLE,
+    ST_SELECT,
     ST_RUN,
-    ST_HIT
+    ST_PAUSE,
+    ST_HIT,
+    ST_OVER
 };
+
+/* Studio logo timing, in frames: black, fade in, hold, fade out, black. */
+#define BOOT_IN 20
+#define BOOT_SHOWN (BOOT_IN + 30)
+#define BOOT_HOLD (BOOT_SHOWN + 120)
+#define BOOT_OUT (BOOT_HOLD + 30)
+#define BOOT_END (BOOT_OUT + 20)
+#define FADE 30
+
+#define MUSIC_FULL 128
+#define MUSIC_PAUSED 40
 
 typedef struct {
     DISPENV disp;
@@ -55,7 +73,10 @@ static uint8_t pad_buff[2][34];
 static uint16_t gpu_tpage[SPR_PAGE_COUNT];
 static uint16_t gpu_clut[SPR_CHAR_COUNT];
 
-static int state = ST_MENU;
+static int state = ST_BOOT;
+static int tick;
+static int leaving;
+static int pick;
 static int scroll;
 static int lane;
 static int character;
@@ -67,7 +88,15 @@ static int distance, best, shown;
 static int hit_timer;
 static uint16_t held, prev;
 
-static int cd_on, cd_heard, cd_cool;
+static int cd_on, cd_wait, cd_started;
+static int music_level = MUSIC_FULL;
+static uint16_t art_tpage[ART_COUNT];
+static uint16_t art_clutid[ART_COUNT];
+static uint32_t snd_addr[SND_COUNT];
+static int snd_voice;
+
+/* audio/runner1.mp3 is 154 seconds, plus the short pregap before the song. */
+#define CD_LOOP_FRAMES (154 * 60 + 50)
 
 static int iabs(int v) { return v < 0 ? -v : v; }
 
@@ -89,11 +118,17 @@ static uint16_t pad_held(void) {
     w = pad->btn;
     if (!(w & PAD_LEFT)) b |= PAD_LEFT;
     if (!(w & PAD_RIGHT)) b |= PAD_RIGHT;
+    if (!(w & PAD_UP)) b |= PAD_UP;
+    if (!(w & PAD_DOWN)) b |= PAD_DOWN;
     if (!(w & PAD_CROSS)) b |= PAD_CROSS;
+    if (!(w & PAD_CIRCLE)) b |= PAD_CIRCLE;
+    if (!(w & PAD_TRIANGLE)) b |= PAD_TRIANGLE;
     if (!(w & PAD_START)) b |= PAD_START;
     if (pad->type != PAD_ID_DIGITAL) {
         if (pad->ls_x < 64) b |= PAD_LEFT;
         if (pad->ls_x > 192) b |= PAD_RIGHT;
+        if (pad->ls_y < 64) b |= PAD_UP;
+        if (pad->ls_y > 192) b |= PAD_DOWN;
     }
     return b;
 }
@@ -335,15 +370,34 @@ static void gantry(int z) {
     wall(-edge, edge, z, 200, 228, 140, 150, 168);
 }
 
-static void obstacle(int z, int lane_i) {
-    int x, w = 70, h = 76, d = 64;
-    if (z < CLIP || z >= FAR)
+static void face(int x0, int y0, int z0, int x1, int y1, int z1,
+                 int x2, int y2, int z2, int x3, int y3, int z3,
+                 int sortz, int r, int g, int b) {
+    dim(&r, &g, &b, sortz);
+    quad(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, sortz, r, g, b);
+}
+
+#define OBST_H 52
+#define OBST_D 112
+
+static void obstacle(int zc, int lane_i) {
+    int x, x0, x1, z, z1, w = 64, h = OBST_H, d = OBST_D;
+    if (zc < CLIP || zc >= FAR)
         return;
     x = lane_i * LANE;
-    lid(x - w + 6, z + 6, x + w - 6, z + d, h, 255, 176, 72);
-    side(x - w, z, z + d, 0, h, 160, 48, 24);
-    side(x + w, z, z + d, 0, h, 160, 48, 24);
-    wall(x - w, x + w, z, 0, h, 220, 72, 36);
+    x0 = x - w;
+    x1 = x + w;
+    z = zc - d / 2;
+    z1 = zc + d / 2;
+    if (z1 >= FAR)
+        z1 = FAR - 1;
+    /* Back, then sides, then the lit top, then the front. Nearer sort values
+     * draw later, so the front stays outside the other faces. */
+    face(x0, h, z1, x1, h, z1, x0, 0, z1, x1, 0, z1, z1, 110, 40, 16);
+    face(x0, h, z, x0, h, z1, x0, 0, z, x0, 0, z1, z + d / 2, 150, 52, 20);
+    face(x1, h, z1, x1, h, z, x1, 0, z1, x1, 0, z, z + d / 2, 186, 72, 28);
+    face(x0, h, z1, x1, h, z1, x0, h, z, x1, h, z, z + d / 4, 255, 196, 96);
+    face(x0, h, z, x1, h, z, x0, 0, z, x1, 0, z, z, 232, 108, 36);
 }
 
 static int obstacle_lane(int band) {
@@ -397,8 +451,6 @@ static void draw_ground(void) {
         shoulder_color(band, &rr, &gg, &bb);
         flat(-ROAD_HALF - SHOULDER, z, -ROAD_HALF, z1, 0, rr, gg, bb);
         flat(ROAD_HALF, z, ROAD_HALF + SHOULDER, z1, 0, rr, gg, bb);
-        flat(-ROAD_HALF, z, -ROAD_HALF + 10, z1, 1, 180, 180, 170);
-        flat(ROAD_HALF - 10, z, ROAD_HALF, z1, 1, 180, 180, 170);
         if (((scroll + z) / 128 & 1) == 0) {
             int zmid = z + (z1 - z) / 2;
             flat(-half - 8, z, -half + 8, zmid, 2, 220, 190, 48);
@@ -433,13 +485,77 @@ static void draw_world(void) {
     }
 }
 
+#define SHADOW_W 64
+#define SHADOW_H 32
+
+static uint16_t shadow_tex[SHADOW_W * SHADOW_H];
+static uint16_t shadow_tpage;
+
+static void upload_shadow(void) {
+    int x, y;
+    RECT rect;
+    int lim = SHADOW_W * SHADOW_W * SHADOW_H * SHADOW_H;
+    for (y = 0; y < SHADOW_H; y++) {
+        for (x = 0; x < SHADOW_W; x++) {
+            int dx = x * 2 - (SHADOW_W - 1);
+            int dy = y * 2 - (SHADOW_H - 1);
+            int d = dx * dx * SHADOW_H * SHADOW_H + dy * dy * SHADOW_W * SHADOW_W;
+            int v = 0;
+            if (d < lim) {
+                int t = (lim - d) * 255 / lim;
+                t = t * t / 255;
+                v = t * 4 / 255;
+            }
+            shadow_tex[y * SHADOW_W + x] =
+                (uint16_t)(v | (v << 5) | (v << 10) | 0x8000);
+        }
+    }
+    setRECT(&rect, 768, 256, SHADOW_W, SHADOW_H);
+    LoadImage(&rect, (const uint32_t *)shadow_tex);
+    DrawSync(0);
+    shadow_tpage = getTPage(2, 2, 768, 256);
+}
+
 static void draw_shadow(void) {
-    int w = 34 - player_y / 8;
-    int z0 = CHAR_Z - 18;
-    int z1 = CHAR_Z + 18;
-    if (w < 8)
-        w = 8;
-    flat(player_x - w, z0, player_x + w, z1, 3, 16, 16, 20);
+    int w = 44 - player_y / 5;
+    int depth = 34 - player_y / 8;
+    int z0, z1, tone, bucket;
+    XY far_l, far_r, near_l, near_r;
+    POLY_FT4 *spr;
+    if (w < 14)
+        w = 14;
+    if (depth < 12)
+        depth = 12;
+    z0 = CHAR_Z - depth / 2;
+    z1 = z0 + depth;
+    project(player_x - w, 2, z1, &far_l);
+    project(player_x + w, 2, z1, &far_r);
+    project(player_x - w, 2, z0, &near_l);
+    project(player_x + w, 2, z0, &near_r);
+    if (!xy_ok(&far_l) || !xy_ok(&far_r) || !xy_ok(&near_l) || !xy_ok(&near_r))
+        return;
+    if (!edge_ok(far_l, far_r) || !edge_ok(near_l, near_r) ||
+        !edge_ok(far_l, near_l) || !edge_ok(far_r, near_r))
+        return;
+    tone = 128 - player_y;
+    if (tone < 40)
+        tone = 40;
+    /* One slot in front of the road under the feet, so the near half is not covered. */
+    bucket = (CHAR_Z >> OT_SHIFT) - 1;
+    if (bucket < 1)
+        bucket = 1;
+    spr = alloc_prim(bucket, sizeof(POLY_FT4));
+    if (!spr)
+        return;
+    setPolyFT4(spr);
+    setSemiTrans(spr, 1);
+    setRGB0(spr, tone, tone, tone);
+    setXY4(spr,
+        far_l.x, far_l.y, far_r.x, far_r.y,
+        near_l.x, near_l.y, near_r.x, near_r.y);
+    setUVWH(spr, 0, 0, SHADOW_W - 1, SHADOW_H - 1);
+    spr->tpage = shadow_tpage;
+    spr->clut = 0;
 }
 
 static int anim_count(int anim) {
@@ -505,7 +621,9 @@ static void draw_runner(void) {
         h = 8;
     w = h * spr_base_fw[spr_char_base[character]] / spr_base_fh[spr_char_base[character]];
     frame = posed_frame();
-    bucket = CHAR_Z >> OT_SHIFT;
+    bucket = (CHAR_Z >> OT_SHIFT) - 1;
+    if (bucket < 1)
+        bucket = 1;
     spr = alloc_prim(bucket, sizeof(POLY_FT4));
     if (!spr)
         return;
@@ -545,10 +663,114 @@ static void hud_center(int y, const char *s) {
     hud((SCREEN_W - n * 8) / 2, y, s);
 }
 
+static void panel(int bucket, int x, int y, int w, int h) {
+    TILE *t = alloc_prim(bucket, sizeof(TILE));
+    if (t) {
+        setTile(t);
+        setXY0(t, x, y);
+        setWH(t, w, h);
+        setRGB0(t, 8, 12, 28);
+    }
+    t = alloc_prim(bucket, sizeof(TILE));
+    if (t) {
+        setTile(t);
+        setXY0(t, x - 2, y - 2);
+        setWH(t, w + 4, h + 4);
+        setRGB0(t, 120, 140, 200);
+    }
+}
+
+static void draw_art(int id, int x, int y, int bright) {
+    POLY_FT4 *p;
+    int w = art_w[id], h = art_h[id];
+    if (bright <= 0)
+        return;
+    if (bright > 128)
+        bright = 128;
+    p = alloc_prim(2, sizeof(POLY_FT4));
+    if (!p)
+        return;
+    setPolyFT4(p);
+    setRGB0(p, bright, bright, bright);
+    setXYWH(p, x, y, w, h);
+    setUVWH(p, 0, 0, w - 1, h - 1);
+    p->tpage = art_tpage[id];
+    p->clut = art_clutid[id];
+}
+
+static void draw_preview(int cx, int feet_y, int scale) {
+    POLY_FT4 *p;
+    int base = spr_char_base[character];
+    int fw = spr_base_fw[base], fh = spr_base_fh[base];
+    int w = fw * scale, h = fh * scale;
+    int frame = play_frame(SPR_ANIM_RUN, (anim_tick / 4) % anim_count(SPR_ANIM_RUN));
+    int uv = spr_base_uv_off[base] + frame;
+    p = alloc_prim(1, sizeof(POLY_FT4));
+    if (!p)
+        return;
+    setPolyFT4(p);
+    setRGB0(p, 128, 128, 128);
+    setXYWH(p, cx - w / 2, feet_y - h, w, h);
+    setUVWH(p, spr_frame_u[uv], spr_char_v[character] + spr_frame_v[uv], fw - 1, fh - 1);
+    p->tpage = gpu_tpage[spr_char_page[character]];
+    p->clut = gpu_clut[character];
+}
+
+static int fade_in(int t) {
+    return t >= FADE ? 128 : t * 128 / FADE;
+}
+
+static void draw_boot(void) {
+    int b = 0;
+    int id = ART_PARASCENE;
+    if (tick >= BOOT_IN && tick < BOOT_SHOWN)
+        b = (tick - BOOT_IN) * 128 / (BOOT_SHOWN - BOOT_IN);
+    else if (tick >= BOOT_SHOWN && tick < BOOT_HOLD)
+        b = 128;
+    else if (tick >= BOOT_HOLD && tick < BOOT_OUT)
+        b = (BOOT_OUT - tick) * 128 / (BOOT_OUT - BOOT_HOLD);
+    draw_art(id, (SCREEN_W - art_w[id]) / 2, (SCREEN_H - art_h[id]) / 2, b);
+}
+
+static void draw_title(void) {
+    int id = ART_TITLE;
+    int b = fade_in(tick);
+    if (leaving > 0)
+        b = leaving * 128 / FADE;
+    draw_art(id, (SCREEN_W - art_w[id]) / 2, 52, b);
+    if (tick < FADE || leaving > 0)
+        return;
+    if (((tick - FADE) / 30) % 2 == 0)
+        hud_center(176, "PRESS START");
+    hud_center(220, "(C) 2026 PARASCENE GAMES");
+}
+
+static void draw_select(void) {
+    char line[40];
+    panel(3, 60, 20, 200, 200);
+    hud_center(32, "CHOOSE YOUR RUNNER");
+    draw_preview(SCREEN_W / 2, 168, 3);
+    snprintf(line, sizeof line, SPR_CHAR_COUNT > 1 ? "< %s >" : "%s", spr_char_name[character]);
+    hud_center(180, line);
+    hud_center(200, "X SELECT   TRIANGLE BACK");
+}
+
+static const char *const k_pause_items[] = { "CONTINUE", "QUIT TO TITLE" };
+static const char *const k_over_items[] = { "RUN AGAIN", "CHANGE RUNNER", "QUIT TO TITLE" };
+
+static void draw_menu(int y, const char *const *items, int count) {
+    char line[40];
+    int i;
+    for (i = 0; i < count; i++) {
+        snprintf(line, sizeof line, i == pick ? "> %s <" : "  %s  ", items[i]);
+        hud_center(y + i * 16, line);
+    }
+}
+
 static void draw_ui(void) {
     char line[80];
     TILE *bar;
-    if (state == ST_RUN) {
+    if (state == ST_RUN || state == ST_HIT || state == ST_PAUSE) {
         bar = alloc_prim(1, sizeof(TILE));
         if (bar) {
             setTile(bar);
@@ -556,31 +778,19 @@ static void draw_ui(void) {
             setWH(bar, SCREEN_W, 22);
             setRGB0(bar, 8, 12, 24);
         }
-        snprintf(line, sizeof line, "RUN %d     X JUMP   START MENU", distance);
+        snprintf(line, sizeof line, "RUN %d     X JUMP   START PAUSE", distance);
         hud(8, 8, line);
-        return;
     }
-    bar = alloc_prim(1, sizeof(TILE));
-    if (bar) {
-        setTile(bar);
-        setXY0(bar, 28, 24);
-        setWH(bar, 264, shown ? 112 : 104);
-        setRGB0(bar, 8, 12, 28);
-    }
-    snprintf(line, sizeof line, "< %s >", spr_char_name[character]);
-    if (shown) {
-        hud_center(36, "WIPED OUT");
+    if (state == ST_PAUSE) {
+        panel(3, 80, 80, 160, 84);
+        hud_center(94, "PAUSED");
+        draw_menu(118, k_pause_items, 2);
+    } else if (state == ST_OVER) {
+        panel(3, 52, 56, 216, 132);
+        hud_center(70, "WIPED OUT");
         snprintf(line, sizeof line, "DISTANCE %d   BEST %d", shown, best);
-        hud_center(52, line);
-        snprintf(line, sizeof line, "< %s >", spr_char_name[character]);
-        hud_center(72, line);
-        hud_center(92, "START OR X TO RUN");
-    } else {
-        hud_center(32, "RUNNER");
-        hud_center(48, line);
-        hud(56, 68, "LEFT RIGHT  CHARACTER");
-        hud(56, 84, "START OR X   RUN");
-        hud(56, 100, "X            JUMP");
+        hud_center(88, line);
+        draw_menu(116, k_over_items, 3);
     }
 }
 
@@ -595,11 +805,12 @@ static void collide(void) {
         if (!has_obstacle(b))
             continue;
         oz = b * STEP + STEP / 2;
-        if (iabs(oz - pz) > 60)
+        if (iabs(oz - pz) > OBST_D / 2)
             continue;
         x = obstacle_lane(b) * LANE;
-        if (iabs(player_x - x) < 80 && player_y < 72) {
+        if (iabs(player_x - x) < 80 && player_y < OBST_H - 4) {
             state = ST_HIT;
+            tick = 0;
             hit_timer = 50;
             shown = distance;
             if (distance > best)
@@ -609,37 +820,136 @@ static void collide(void) {
     }
 }
 
+static void play_sound(int id);
+static void music_start(void);
+static void music_volume(int level);
+
+static void go(int next) {
+    state = next;
+    tick = 0;
+    pick = 0;
+    leaving = 0;
+}
+
+static void start_run(void) {
+    go(ST_RUN);
+    scroll = 0;
+    lane = 0;
+    player_x = 0;
+    player_y = 0;
+    player_vy = 0;
+    jump_wind = 0;
+    land_hold = 0;
+    distance = 0;
+}
+
+static int confirm(void) {
+    return edge(PAD_CROSS) || edge(PAD_START);
+}
+
+static int back(void) {
+    return edge(PAD_TRIANGLE) || edge(PAD_CIRCLE);
+}
+
+static void menu_move(int count) {
+    if (edge(PAD_UP) && !edge(PAD_DOWN)) {
+        pick = (pick + count - 1) % count;
+        play_sound(SND_MOVE);
+    }
+    if (edge(PAD_DOWN) && !edge(PAD_UP)) {
+        pick = (pick + 1) % count;
+        play_sound(SND_MOVE);
+    }
+}
+
+/* Returns 0 when the screen is not moving the runner on the road. */
+static int update_screens(void) {
+    switch (state) {
+    case ST_BOOT:
+        if (tick < BOOT_HOLD && tick > BOOT_SHOWN && confirm())
+            tick = BOOT_HOLD;
+        if (tick >= BOOT_END) {
+            go(ST_TITLE);
+            music_start();
+        }
+        return 0;
+    case ST_TITLE:
+        if (leaving > 0) {
+            if (--leaving == 0)
+                go(ST_SELECT);
+        } else if (tick >= FADE / 2 && confirm()) {
+            play_sound(SND_START);
+            leaving = FADE;
+        }
+        scroll += 8;
+        return 0;
+    case ST_SELECT:
+        if (SPR_CHAR_COUNT > 1) {
+            if (edge(PAD_LEFT) && !edge(PAD_RIGHT)) {
+                character = (character + SPR_CHAR_COUNT - 1) % SPR_CHAR_COUNT;
+                play_sound(SND_MOVE);
+            }
+            if (edge(PAD_RIGHT) && !edge(PAD_LEFT)) {
+                character = (character + 1) % SPR_CHAR_COUNT;
+                play_sound(SND_MOVE);
+            }
+        }
+        if (confirm()) {
+            play_sound(SND_SELECT);
+            start_run();
+        } else if (back()) {
+            play_sound(SND_BACK);
+            go(ST_TITLE);
+        }
+        scroll += 8;
+        anim_tick++;
+        return 0;
+    case ST_PAUSE:
+        menu_move(2);
+        if (edge(PAD_START) || back() || (edge(PAD_CROSS) && pick == 0)) {
+            play_sound(edge(PAD_CROSS) ? SND_SELECT : edge(PAD_START) ? SND_PAUSE : SND_BACK);
+            music_volume(MUSIC_FULL);
+            state = ST_RUN;
+        } else if (edge(PAD_CROSS)) {
+            play_sound(SND_SELECT);
+            music_volume(MUSIC_FULL);
+            go(ST_TITLE);
+        }
+        return 0;
+    case ST_OVER:
+        menu_move(3);
+        if (confirm()) {
+            play_sound(SND_SELECT);
+            if (pick == 0)
+                start_run();
+            else
+                go(pick == 1 ? ST_SELECT : ST_TITLE);
+        }
+        return 0;
+    default:
+        return 1;
+    }
+}
+
 static void update(void) {
     int speed = 0;
     int target;
     int dx;
     held = pad_held();
-    if (state != ST_RUN && SPR_CHAR_COUNT > 1) {
-        if (edge(PAD_LEFT))
-            character = (character + SPR_CHAR_COUNT - 1) % SPR_CHAR_COUNT;
-        if (edge(PAD_RIGHT))
-            character = (character + 1) % SPR_CHAR_COUNT;
+    tick++;
+    if (!update_screens()) {
+        prev = held;
+        return;
     }
-    if (state == ST_MENU) {
-        speed = 8;
-        if (edge(PAD_START) || edge(PAD_CROSS)) {
-            state = ST_RUN;
-            scroll = 0;
-            lane = 0;
-            player_x = 0;
-            player_y = 0;
-            player_vy = 0;
-            jump_wind = 0;
-            land_hold = 0;
-            distance = 0;
-        }
-    } else if (state == ST_RUN) {
+    if (state == ST_RUN) {
         speed = 20;
         if (edge(PAD_START)) {
-            state = ST_MENU;
-            shown = 0;
-            jump_wind = 0;
-            land_hold = 0;
+            play_sound(SND_PAUSE);
+            music_volume(MUSIC_PAUSED);
+            state = ST_PAUSE;
+            pick = 0;
+            prev = held;
+            return;
         }
         if (edge(PAD_LEFT) && !edge(PAD_RIGHT) && lane > -1)
             lane--;
@@ -655,11 +965,11 @@ static void update(void) {
         }
         distance = scroll / 48;
         collide();
-    } else {
+    } else if (state == ST_HIT) {
         if (hit_timer > 0)
             hit_timer--;
         else {
-            state = ST_MENU;
+            go(ST_OVER);
             jump_wind = 0;
             land_hold = 0;
         }
@@ -705,6 +1015,53 @@ static void upload_sprite(void) {
     }
 }
 
+static void upload_art(void) {
+    int i;
+    RECT rect;
+    for (i = 0; i < ART_COUNT; i++) {
+        setRECT(&rect, art_vram_x[i], art_vram_y[i], art_stride[i] / 2, art_h[i]);
+        LoadImage(&rect, (const uint32_t *)(art_pix + art_off[i]));
+        DrawSync(0);
+        art_tpage[i] = getTPage(1, 0, art_vram_x[i], art_vram_y[i]);
+        setRECT(&rect, art_clut_x[i], art_clut_y[i], 256, 1);
+        LoadImage(&rect, (const uint32_t *)art_clut[i]);
+        DrawSync(0);
+        art_clutid[i] = getClut(art_clut_x[i], art_clut_y[i]);
+    }
+}
+
+/* The first 4 KB of SPU RAM hold capture buffers, and psxspu puts a dummy
+ * sample at 0x1000, so the sounds start after it. */
+#define SND_SPU_BASE 0x1010
+#define SND_VOICE_FIRST 0
+#define SND_VOICES 4
+
+static void upload_sounds(void) {
+    int i;
+    uint32_t addr = SND_SPU_BASE;
+    SpuSetTransferMode(SPU_TRANSFER_BY_DMA);
+    for (i = 0; i < SND_COUNT; i++) {
+        snd_addr[i] = addr;
+        SpuSetTransferStartAddr(addr);
+        SpuWrite((const uint32_t *)(snd_data + snd_off[i]), snd_len[i]);
+        SpuIsTransferCompleted(SPU_TRANSFER_WAIT);
+        addr += snd_len[i];
+    }
+}
+
+static void play_sound(int id) {
+    int ch = SND_VOICE_FIRST + snd_voice;
+    snd_voice = (snd_voice + 1) % SND_VOICES;
+    SpuSetKey(0, 1 << ch);
+    SPU_CH_FREQ(ch) = getSPUSampleRate(SND_RATE);
+    SPU_CH_ADDR(ch) = getSPUAddr(snd_addr[id]);
+    SPU_CH_VOL_L(ch) = 0x2c00;
+    SPU_CH_VOL_R(ch) = 0x2c00;
+    SPU_CH_ADSR1(ch) = 0x00ff;
+    SPU_CH_ADSR2(ch) = 0x0000;
+    SpuSetKey(1, 1 << ch);
+}
+
 static void setup_video(void) {
     int i;
     ResetGraph(0);
@@ -720,7 +1077,8 @@ static void setup_video(void) {
     ClearOTagR(ctx.buffers[0].ot, OT_LENGTH);
     FntLoad(960, 0);
     InitGeom();
-    gte_SetGeomOffset(SCREEN_W / 2, SCREEN_H / 2);
+    /* A raised horizon looks down on the road without tilting the camera. */
+    gte_SetGeomOffset(SCREEN_W / 2, HORIZON_Y);
     gte_SetGeomScreen(SCREEN_W / 2);
     {
         static SVECTOR rot __attribute__((aligned(4)));
@@ -732,6 +1090,8 @@ static void setup_video(void) {
         gte_SetTransMatrix(&mtx);
     }
     upload_sprite();
+    upload_shadow();
+    upload_art();
     SetDispMask(1);
 }
 
@@ -756,9 +1116,9 @@ static int cd_play(void) {
     if (!CdControlB(CdlPlay, 0, 0))
         return 0;
     CdControl(CdlDemute, 0, 0);
-    mix.val0 = 128;
+    mix.val0 = (uint8_t)music_level;
     mix.val1 = 0;
-    mix.val2 = 128;
+    mix.val2 = (uint8_t)music_level;
     mix.val3 = 0;
     CdMix(&mix);
     SpuSetCommonMasterVolume(0x3fff, 0x3fff);
@@ -767,25 +1127,31 @@ static int cd_play(void) {
 }
 
 static void cd_service(void) {
-    int st;
-    if (!cd_on)
+    if (!cd_on || cd_wait == 0)
         return;
-    if (cd_cool > 0) {
-        cd_cool--;
+    cd_wait--;
+    if (cd_wait > 0)
         return;
-    }
-    st = CdStatus();
-    if (st & CdlStatPlay) {
-        cd_heard = 1;
-        return;
-    }
-    if (st & CdlStatSeek)
-        return;
-    if (!cd_heard)
-        return;
-    cd_heard = 0;
     if (cd_play())
-        cd_cool = 90;
+        cd_wait = CD_LOOP_FRAMES;
+}
+
+static void music_start(void) {
+    if (!cd_on || cd_started)
+        return;
+    cd_started = 1;
+    cd_wait = cd_play() ? CD_LOOP_FRAMES : 0;
+}
+
+/* 128 is full volume. The track keeps playing; only the mix changes. */
+static void music_volume(int level) {
+    CdlATV mix;
+    music_level = level;
+    mix.val0 = (uint8_t)level;
+    mix.val1 = 0;
+    mix.val2 = (uint8_t)level;
+    mix.val3 = 0;
+    CdMix(&mix);
 }
 
 static void flip(void) {
@@ -805,23 +1171,32 @@ int main(int argc, const char **argv) {
     (void)argv;
     setup_video();
     SpuInit();
+    upload_sounds();
     InitPAD(pad_buff[0], 34, pad_buff[1], 34);
     StartPAD();
     ChangeClearPAD(0);
     cd_on = CdInit();
-    if (cd_on && cd_play())
-        cd_cool = 90;
 
     for (;;) {
-        int sr, sg, sb;
+        int sr = 0, sg = 0, sb = 0;
         update();
         cd_service();
-        sky_color(&sr, &sg, &sb);
+        if (state == ST_BOOT) {
+            draw_boot();
+        } else if (state == ST_TITLE) {
+            draw_title();
+        } else {
+            sky_color(&sr, &sg, &sb);
+            draw_world();
+            if (state == ST_SELECT) {
+                draw_select();
+            } else {
+                draw_runner();
+                draw_shadow();
+                draw_ui();
+            }
+        }
         setRGB0(&ctx.buffers[ctx.active].draw, sr, sg, sb);
-        draw_world();
-        draw_shadow();
-        draw_runner();
-        draw_ui();
         flip();
     }
     return 0;
