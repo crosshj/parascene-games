@@ -48,6 +48,15 @@ add_custom_command(
 	VERBATIM
 )
 
+set(LUMEN_SKY_H "${CMAKE_CURRENT_BINARY_DIR}/lumen_sky.h")
+add_custom_command(
+	OUTPUT "${LUMEN_SKY_H}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_lumen_sky.py" "${LUMEN_SKY_H}"
+	DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_lumen_sky.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_sprites.py"
+	VERBATIM
+)
+
 set(TRACK_WAV ${CMAKE_CURRENT_BINARY_DIR}/track.wav)
 add_custom_command(
 	OUTPUT ${TRACK_WAV}
@@ -57,11 +66,22 @@ add_custom_command(
 	VERBATIM
 )
 
-psn00bsdk_add_executable(runner NOGPREL src/main.c)
+file(GLOB RUNNER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
+psn00bsdk_add_executable(runner NOGPREL ${RUNNER_SOURCES})
 target_include_directories(runner PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+# A disc that runs each level with collisions off and prints frame costs
+# to the TTY. Configure it in its own folder, such as runner/build/profile;
+# it keeps its disc there instead of copying it to the repository root.
+option(RUNNER_PROFILE "Build the frame-cost profiling disc" OFF)
+if(RUNNER_PROFILE)
+	target_compile_definitions(runner PRIVATE RUNNER_PROFILE)
+endif()
 set_source_files_properties(src/main.c PROPERTIES
 	OBJECT_DEPENDS "${SPRITE_H};${SCREEN_H};${SOUND_H}")
-add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}")
+set_source_files_properties(src/level_lumenwild.c PROPERTIES
+	OBJECT_DEPENDS "${LUMEN_SKY_H}")
+add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}" "${LUMEN_SKY_H}")
 add_dependencies(runner sprite_sheet)
 
 psn00bsdk_add_cd_image(
@@ -74,6 +94,7 @@ psn00bsdk_add_cd_image(
 # The repo-root build folder receives the disc only. CMake's own files stay
 # in the binary directory (runner/build).
 get_filename_component(DISC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build" ABSOLUTE)
+if(NOT RUNNER_PROFILE)
 add_custom_command(
 	TARGET runner_iso POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E make_directory "${DISC_DIR}"
@@ -83,3 +104,4 @@ add_custom_command(
 		"${CMAKE_CURRENT_BINARY_DIR}/runner.cue" "${DISC_DIR}/runner.cue"
 	VERBATIM
 )
+endif()

@@ -1,34 +1,20 @@
 /* A chase camera on a straight road. The runner is one camera-facing
- * sprite. The road and the things beside it are flat polygons. */
+ * sprite. The scenery around the road comes from the chosen level. */
 
 #include <stdio.h>
 #include <stdint.h>
 #include <psxgpu.h>
-#include <psxgte.h>
 #include <psxpad.h>
 #include <psxapi.h>
 #include <psxcd.h>
 #include <psxspu.h>
-#include <inline_c.h>
+#include "world.h"
+#include "course.h"
+#include "level.h"
+#include "profile.h"
 #include "sprite_sheet.h"
 #include "screen_art.h"
 #include "sound_bank.h"
-
-#define SCREEN_W 320
-#define SCREEN_H 240
-#define OT_LENGTH 512
-#define OT_SHIFT 4
-#define BUFFER_LENGTH (32 * 1024)
-
-#define CLIP 64
-#define STEP 256
-#define FAR 4200
-#define CAM_H 170
-#define HORIZON_Y 72
-#define CHAR_Z 200
-#define LANE 150
-#define ROAD_HALF 280
-#define SHOULDER 640
 
 enum {
     ST_BOOT,
@@ -51,24 +37,6 @@ enum {
 #define MUSIC_FULL 128
 #define MUSIC_PAUSED 40
 
-typedef struct {
-    DISPENV disp;
-    DRAWENV draw;
-    uint32_t ot[OT_LENGTH];
-    uint8_t buffer[BUFFER_LENGTH];
-} RenderBuffer;
-
-typedef struct {
-    RenderBuffer buffers[2];
-    uint8_t *next;
-    int active;
-} RenderContext;
-
-typedef struct {
-    int16_t x, y;
-} __attribute__((aligned(4))) XY;
-
-static RenderContext ctx;
 static uint8_t pad_buff[2][34];
 static uint16_t gpu_tpage[SPR_PAGE_COUNT];
 static uint16_t gpu_clut[SPR_CHAR_COUNT];
@@ -80,6 +48,7 @@ static int pick;
 static int scroll;
 static int lane;
 static int character;
+static int level_index;
 static int anim_tick;
 static int jump_wind;
 static int land_hold;
@@ -97,14 +66,6 @@ static int snd_voice;
 
 /* audio/runner1.mp3 is 154 seconds, plus the short pregap before the song. */
 #define CD_LOOP_FRAMES (154 * 60 + 50)
-
-static int iabs(int v) { return v < 0 ? -v : v; }
-
-static int clamp(int v, int lo, int hi) {
-    if (v < lo) return lo;
-    if (v > hi) return hi;
-    return v;
-}
 
 static uint16_t pad_held(void) {
     PADTYPE *pad = (PADTYPE *)pad_buff[0];
@@ -135,354 +96,6 @@ static uint16_t pad_held(void) {
 
 static int edge(uint16_t bit) {
     return (held & bit) && !(prev & bit);
-}
-
-static void *alloc_prim(int z, size_t size) {
-    RenderBuffer *buf = &ctx.buffers[ctx.active];
-    uint8_t *prim;
-    if (z < 1) z = 1;
-    if (z >= OT_LENGTH) z = OT_LENGTH - 1;
-    if (ctx.next + size > buf->buffer + BUFFER_LENGTH)
-        return 0;
-    prim = ctx.next;
-    addPrim(&buf->ot[z], prim);
-    ctx.next += size;
-    return prim;
-}
-
-static int project(int x, int y, int z, XY *out) {
-    SVECTOR v __attribute__((aligned(4)));
-    int sz = 0;
-    v.vx = (short)clamp(x, -16000, 16000);
-    v.vy = (short)clamp(CAM_H - y, -16000, 16000);
-    v.vz = (short)z;
-    v.pad = 0;
-    gte_ldv0(&v);
-    gte_rtps();
-    gte_stsxy(out);
-    gte_stsz(&sz);
-    return sz;
-}
-
-static void dim(int *r, int *g, int *b, int z) {
-    int s = 280 - z / 16;
-    if (s < 72) s = 72;
-    if (s > 255) s = 255;
-    *r = (*r * s) >> 8;
-    *g = (*g * s) >> 8;
-    *b = (*b * s) >> 8;
-}
-
-/* Vertices past this screen range make the GPU drop a stray triangle. */
-#define SAFE_X0 (-200)
-#define SAFE_X1 (SCREEN_W + 200)
-
-static int xy_ok(const XY *p) {
-    return p->x >= -1000 && p->x <= 1000 && p->y >= -1000 && p->y <= 1000;
-}
-
-static int edge_ok(XY a, XY b) {
-    int dx = iabs(a.x - b.x);
-    int dy = iabs(a.y - b.y);
-    return (dx > dy ? dx : dy) <= 480;
-}
-
-static void quad(int x0, int y0, int z0, int x1, int y1, int z1,
-                 int x2, int y2, int z2, int x3, int y3, int z3,
-                 int sortz, int r, int g, int b) {
-    XY p0, p1, p2, p3;
-    int bucket;
-    POLY_F4 *poly;
-    if (z0 < 8 || z1 < 8 || z2 < 8 || z3 < 8)
-        return;
-    project(x0, y0, z0, &p0);
-    project(x1, y1, z1, &p1);
-    project(x2, y2, z2, &p2);
-    project(x3, y3, z3, &p3);
-    if (!xy_ok(&p0) || !xy_ok(&p1) || !xy_ok(&p2) || !xy_ok(&p3))
-        return;
-    if (!edge_ok(p0, p1) || !edge_ok(p2, p3) || !edge_ok(p0, p2) || !edge_ok(p1, p3))
-        return;
-    bucket = sortz >> OT_SHIFT;
-    poly = alloc_prim(bucket, sizeof(POLY_F4));
-    if (!poly)
-        return;
-    setPolyF4(poly);
-    setRGB0(poly, clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255));
-    setXY4(poly, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
-}
-
-static void x_limits(int z, int *lo, int *hi) {
-    if (z < 1)
-        z = 1;
-    *lo = (SAFE_X0 - SCREEN_W / 2) * z / (SCREEN_W / 2);
-    *hi = (SAFE_X1 - SCREEN_W / 2) * z / (SCREEN_W / 2);
-}
-
-/* A horizontal quad. sort_far keeps a ground strip behind objects standing on it. */
-static void slab(int xa, int z0, int xb, int z1, int y, int r, int g, int b, int sort_far) {
-    int znear, zfar, left, right;
-    int nlo, nhi, flo, fhi, nl, nr, fl, fr;
-    int span, step, slices, i;
-    if (z0 < z1) { znear = z0; zfar = z1; }
-    else { znear = z1; zfar = z0; }
-    if (xa < xb) { left = xa; right = xb; }
-    else { left = xb; right = xa; }
-    if (znear < 8 || left >= right)
-        return;
-    x_limits(znear, &nlo, &nhi);
-    x_limits(zfar, &flo, &fhi);
-    nl = clamp(left, nlo, nhi);
-    nr = clamp(right, nlo, nhi);
-    fl = clamp(left, flo, fhi);
-    fr = clamp(right, flo, fhi);
-    if (nl >= nr || fl >= fr)
-        return;
-    dim(&r, &g, &b, znear);
-    span = nr - nl;
-    step = znear / 2;
-    if (step < 16)
-        step = 16;
-    slices = span / step;
-    if (slices < 1)
-        slices = 1;
-    if (slices > 16)
-        slices = 16;
-    for (i = 0; i < slices; i++) {
-        int x0 = nl + span * i / slices;
-        int x1 = nl + span * (i + 1) / slices;
-        int u0 = fl + (fr - fl) * i / slices;
-        int u1 = fl + (fr - fl) * (i + 1) / slices;
-        quad(x0, y, znear, x1, y, znear, u0, y, zfar, u1, y, zfar,
-             sort_far ? zfar : znear, r, g, b);
-    }
-}
-
-static void flat(int xa, int z0, int xb, int z1, int y, int r, int g, int b) {
-    slab(xa, z0, xb, z1, y, r, g, b, 1);
-}
-
-static void lid(int xa, int z0, int xb, int z1, int y, int r, int g, int b) {
-    slab(xa, z0, xb, z1, y, r, g, b, 0);
-}
-
-static void wall(int xa, int xb, int z, int ya, int yb, int r, int g, int b) {
-    int left, right, y0, y1, lo, hi, step, x;
-    if (z < 8)
-        return;
-    if (xa < xb) { left = xa; right = xb; }
-    else { left = xb; right = xa; }
-    if (ya < yb) { y0 = ya; y1 = yb; }
-    else { y0 = yb; y1 = ya; }
-    x_limits(z, &lo, &hi);
-    left = clamp(left, lo, hi);
-    right = clamp(right, lo, hi);
-    if (left >= right || y0 == y1)
-        return;
-    dim(&r, &g, &b, z);
-    step = z / 2;
-    if (step < 16)
-        step = 16;
-    for (x = left; x < right; ) {
-        int x2 = x + step;
-        if (x2 > right)
-            x2 = right;
-        quad(x, y0, z, x2, y0, z, x, y1, z, x2, y1, z, z, r, g, b);
-        x = x2;
-    }
-}
-
-static void side(int x, int z0, int z1, int ya, int yb, int r, int g, int b) {
-    int znear, zfar, y0, y1, z, step;
-    if (z0 < z1) { znear = z0; zfar = z1; }
-    else { znear = z1; zfar = z0; }
-    if (ya < yb) { y0 = ya; y1 = yb; }
-    else { y0 = yb; y1 = ya; }
-    while (znear < zfar) {
-        int lo, hi;
-        x_limits(znear, &lo, &hi);
-        if (x >= lo && x <= hi)
-            break;
-        znear += 16;
-    }
-    if (znear >= zfar)
-        return;
-    dim(&r, &g, &b, znear);
-    step = 80;
-    for (z = znear; z < zfar; ) {
-        int z2 = z + step;
-        int lo, hi;
-        if (z2 > zfar)
-            z2 = zfar;
-        x_limits(z2, &lo, &hi);
-        if (x < lo || x > hi)
-            break;
-        quad(x, y0, z, x, y0, z2, x, y1, z, x, y1, z2, z, r, g, b);
-        z = z2;
-    }
-}
-
-static const int k_height[12] = {
-    0, 180, 320, 90, 0, 240, 70, 380, 150, 0, 260, 120
-};
-
-static const uint8_t k_bcol[6][3] = {
-    {176, 72, 64},
-    {64, 96, 168},
-    {150, 124, 64},
-    {56, 132, 112},
-    {132, 76, 148},
-    {96, 100, 112}
-};
-
-static void building(int band, int z, int side_sign) {
-    int h = k_height[(band * (side_sign < 0 ? 1 : 5) + 3) % 12];
-    int inner, outer, depth, c;
-    int r, g, b;
-    if (h <= 0 || z < CLIP || z >= FAR)
-        return;
-    inner = side_sign * (ROAD_HALF + 36);
-    outer = side_sign * (ROAD_HALF + 150);
-    depth = 160;
-    if (z + depth >= FAR)
-        depth = FAR - z - 1;
-    if (depth < 24)
-        return;
-    c = (band + (side_sign < 0 ? 0 : 2)) % 6;
-    r = k_bcol[c][0];
-    g = k_bcol[c][1];
-    b = k_bcol[c][2];
-    /* A roof above the camera is the underside, and it fights the front face. */
-    if (h < CAM_H)
-        lid(inner, z + 6, outer, z + depth, h, r + 28, g + 28, b + 20);
-    side(inner, z, z + depth, 0, h, r * 3 / 4, g * 3 / 4, b * 3 / 4);
-    wall(inner, outer, z, 0, h, r, g, b);
-    if (h > 140)
-        wall(inner + side_sign * 18, outer - side_sign * 18, z, 48, h - 48, 24, 28, 36);
-}
-
-static void gantry(int z) {
-    int edge = ROAD_HALF + 8;
-    if (z < CLIP || z >= FAR)
-        return;
-    wall(-edge - 36, -edge, z, 0, 230, 168, 176, 188);
-    wall(edge, edge + 36, z, 0, 230, 168, 176, 188);
-    wall(-edge, edge, z, 200, 228, 140, 150, 168);
-}
-
-static void face(int x0, int y0, int z0, int x1, int y1, int z1,
-                 int x2, int y2, int z2, int x3, int y3, int z3,
-                 int sortz, int r, int g, int b) {
-    dim(&r, &g, &b, sortz);
-    quad(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, sortz, r, g, b);
-}
-
-#define OBST_H 52
-#define OBST_D 112
-
-static void obstacle(int zc, int lane_i) {
-    int x, x0, x1, z, z1, w = 64, h = OBST_H, d = OBST_D;
-    if (zc < CLIP || zc >= FAR)
-        return;
-    x = lane_i * LANE;
-    x0 = x - w;
-    x1 = x + w;
-    z = zc - d / 2;
-    z1 = zc + d / 2;
-    if (z1 >= FAR)
-        z1 = FAR - 1;
-    /* Back, then sides, then the lit top, then the front. Nearer sort values
-     * draw later, so the front stays outside the other faces. */
-    face(x0, h, z1, x1, h, z1, x0, 0, z1, x1, 0, z1, z1, 110, 40, 16);
-    face(x0, h, z, x0, h, z1, x0, 0, z, x0, 0, z1, z + d / 2, 150, 52, 20);
-    face(x1, h, z1, x1, h, z, x1, 0, z1, x1, 0, z, z + d / 2, 186, 72, 28);
-    face(x0, h, z1, x1, h, z1, x0, h, z, x1, h, z, z + d / 4, 255, 196, 96);
-    face(x0, h, z, x1, h, z, x0, 0, z, x1, 0, z, z, 232, 108, 36);
-}
-
-static int obstacle_lane(int band) {
-    return ((band / 8) % 3) - 1;
-}
-
-static int has_obstacle(int band) {
-    return band >= 8 && (band % 8) == 5;
-}
-
-static void sky_color(int *r, int *g, int *b) {
-    switch ((scroll / (STEP * 8)) & 3) {
-    case 0: *r = 48; *g = 88; *b = 148; break;
-    case 1: *r = 72; *g = 56; *b = 112; break;
-    case 2: *r = 96; *g = 112; *b = 132; break;
-    default: *r = 36; *g = 64; *b = 96; break;
-    }
-}
-
-static void shoulder_color(int band, int *r, int *g, int *b) {
-    switch ((band >> 3) & 3) {
-    case 0: *r = 40; *g = 92; *b = 36; break;
-    case 1: *r = 28; *g = 64; *b = 40; break;
-    case 2: *r = 132; *g = 108; *b = 56; break;
-    default: *r = 48; *g = 72; *b = 48; break;
-    }
-}
-
-static void road_color(int band, int *r, int *g, int *b) {
-    int alt = band & 1;
-    switch ((band >> 3) & 3) {
-    case 2: *r = 92 + alt * 10; *g = 80; *b = 64; break;
-    case 1: *r = 58; *g = 52; *b = 70 + alt * 8; break;
-    default: *r = 52 + alt * 12; *g = 52 + alt * 12; *b = 58 + alt * 8; break;
-    }
-}
-
-static void draw_ground(void) {
-    int z = CLIP;
-    int half = LANE / 2;
-    while (z < FAR) {
-        int z1 = z + z / 5;
-        int band, rr, gg, bb;
-        if (z1 < z + 24)
-            z1 = z + 24;
-        if (z1 > FAR)
-            z1 = FAR;
-        band = (scroll + z) / STEP;
-        road_color(band, &rr, &gg, &bb);
-        flat(-ROAD_HALF, z, ROAD_HALF, z1, 0, rr, gg, bb);
-        shoulder_color(band, &rr, &gg, &bb);
-        flat(-ROAD_HALF - SHOULDER, z, -ROAD_HALF, z1, 0, rr, gg, bb);
-        flat(ROAD_HALF, z, ROAD_HALF + SHOULDER, z1, 0, rr, gg, bb);
-        if (((scroll + z) / 128 & 1) == 0) {
-            int zmid = z + (z1 - z) / 2;
-            flat(-half - 8, z, -half + 8, zmid, 2, 220, 190, 48);
-            flat(half - 8, z, half + 8, zmid, 2, 220, 190, 48);
-        }
-        z = z1;
-    }
-}
-
-static void draw_world(void) {
-    int band0 = (scroll + CLIP) / STEP;
-    int band1 = (scroll + FAR) / STEP;
-    int band;
-    draw_ground();
-    if (band1 > band0 + 20)
-        band1 = band0 + 20;
-    for (band = band1; band >= band0; band--) {
-        int z = band * STEP - scroll;
-        if (band < 0)
-            continue;
-        if (z >= CLIP && z < FAR) {
-            building(band, z, -1);
-            building(band, z, 1);
-            if ((band % 10) == 0 && band > 0)
-                gantry(z + 48);
-        }
-        if (has_obstacle(band)) {
-            int oz = band * STEP + STEP / 2 - scroll;
-            if (oz >= CLIP && oz < FAR)
-                obstacle(oz, obstacle_lane(band));
-        }
-    }
 }
 
 #define SHADOW_W 64
@@ -643,24 +256,11 @@ static void draw_runner(void) {
     spr->clut = gpu_clut[character];
 }
 
-static void hud(int x, int y, const char *s) {
-    RenderBuffer *buf = &ctx.buffers[ctx.active];
-    int glyphs = 0;
-    const char *p;
-    for (p = s; *p; p++) {
-        if (*p != ' ' && *p != '\n')
-            glyphs++;
-    }
-    if (ctx.next + glyphs * sizeof(SPRT_8) + sizeof(DR_TPAGE) > buf->buffer + BUFFER_LENGTH)
-        return;
-    ctx.next = FntSort(&buf->ot[0], ctx.next, x, y, s);
-}
-
 static void hud_center(int y, const char *s) {
     int n = 0;
     while (s[n])
         n++;
-    hud((SCREEN_W - n * 8) / 2, y, s);
+    text((SCREEN_W - n * 8) / 2, y, s);
 }
 
 static void panel(int bucket, int x, int y, int w, int h) {
@@ -745,14 +345,23 @@ static void draw_title(void) {
     hud_center(220, "(C) 2026 PARASCENE GAMES");
 }
 
-static void draw_select(void) {
+/* The select screen's rows, chosen with up and down. */
+enum { ROW_RUNNER, ROW_LEVEL, ROW_COUNT };
+
+static void select_row(int y, int row, int count, const char *label, const char *name) {
     char line[40];
+    snprintf(line, sizeof line, pick == row && count > 1 ? "%s < %s >" : "%s   %s  ",
+             label, name);
+    hud_center(y, line);
+}
+
+static void draw_select(void) {
     panel(3, 60, 20, 200, 200);
     hud_center(32, "CHOOSE YOUR RUNNER");
-    draw_preview(SCREEN_W / 2, 168, 3);
-    snprintf(line, sizeof line, SPR_CHAR_COUNT > 1 ? "< %s >" : "%s", spr_char_name[character]);
-    hud_center(180, line);
-    hud_center(200, "X SELECT   TRIANGLE BACK");
+    draw_preview(SCREEN_W / 2, 164, 3);
+    select_row(172, ROW_RUNNER, SPR_CHAR_COUNT, "RUNNER", spr_char_name[character]);
+    select_row(186, ROW_LEVEL, level_count, "WORLD ", levels[level_index]->name);
+    hud_center(204, "X SELECT   TRIANGLE BACK");
 }
 
 static const char *const k_pause_items[] = { "CONTINUE", "QUIT TO TITLE" };
@@ -779,7 +388,7 @@ static void draw_ui(void) {
             setRGB0(bar, 8, 12, 24);
         }
         snprintf(line, sizeof line, "RUN %d     X JUMP   START PAUSE", distance);
-        hud(8, 8, line);
+        text(8, 8, line);
     }
     if (state == ST_PAUSE) {
         panel(3, 80, 80, 160, 84);
@@ -862,6 +471,21 @@ static void menu_move(int count) {
     }
 }
 
+/* Left and right step through count choices. */
+static int cycle(int value, int count) {
+    if (count < 2)
+        return value;
+    if (edge(PAD_LEFT) && !edge(PAD_RIGHT)) {
+        value = (value + count - 1) % count;
+        play_sound(SND_MOVE);
+    }
+    if (edge(PAD_RIGHT) && !edge(PAD_LEFT)) {
+        value = (value + 1) % count;
+        play_sound(SND_MOVE);
+    }
+    return value;
+}
+
 /* Returns 0 when the screen is not moving the runner on the road. */
 static int update_screens(void) {
     switch (state) {
@@ -884,16 +508,11 @@ static int update_screens(void) {
         scroll += 8;
         return 0;
     case ST_SELECT:
-        if (SPR_CHAR_COUNT > 1) {
-            if (edge(PAD_LEFT) && !edge(PAD_RIGHT)) {
-                character = (character + SPR_CHAR_COUNT - 1) % SPR_CHAR_COUNT;
-                play_sound(SND_MOVE);
-            }
-            if (edge(PAD_RIGHT) && !edge(PAD_LEFT)) {
-                character = (character + 1) % SPR_CHAR_COUNT;
-                play_sound(SND_MOVE);
-            }
-        }
+        menu_move(ROW_COUNT);
+        if (pick == ROW_RUNNER)
+            character = cycle(character, SPR_CHAR_COUNT);
+        else
+            level_index = cycle(level_index, level_count);
         if (confirm()) {
             play_sound(SND_SELECT);
             start_run();
@@ -964,7 +583,9 @@ static void update(void) {
                 player_vy = 15;
         }
         distance = scroll / 48;
+#ifndef RUNNER_PROFILE
         collide();
+#endif
     } else if (state == ST_HIT) {
         if (hit_timer > 0)
             hit_timer--;
@@ -1063,32 +684,7 @@ static void play_sound(int id) {
 }
 
 static void setup_video(void) {
-    int i;
-    ResetGraph(0);
-    for (i = 0; i < 2; i++) {
-        SetDefDrawEnv(&ctx.buffers[i].draw, 0, i * SCREEN_H, SCREEN_W, SCREEN_H);
-        SetDefDispEnv(&ctx.buffers[i].disp, 0, i * SCREEN_H, SCREEN_W, SCREEN_H);
-        setRGB0(&ctx.buffers[i].draw, 48, 88, 148);
-        ctx.buffers[i].draw.isbg = 1;
-        ctx.buffers[i].draw.dtd = 0;
-    }
-    ctx.active = 0;
-    ctx.next = ctx.buffers[0].buffer;
-    ClearOTagR(ctx.buffers[0].ot, OT_LENGTH);
-    FntLoad(960, 0);
-    InitGeom();
-    /* A raised horizon looks down on the road without tilting the camera. */
-    gte_SetGeomOffset(SCREEN_W / 2, HORIZON_Y);
-    gte_SetGeomScreen(SCREEN_W / 2);
-    {
-        static SVECTOR rot __attribute__((aligned(4)));
-        static VECTOR pos;
-        MATRIX mtx;
-        RotMatrix(&rot, &mtx);
-        TransMatrix(&mtx, &pos);
-        gte_SetRotMatrix(&mtx);
-        gte_SetTransMatrix(&mtx);
-    }
+    world_init();
     upload_sprite();
     upload_shadow();
     upload_art();
@@ -1154,19 +750,8 @@ static void music_volume(int level) {
     CdMix(&mix);
 }
 
-static void flip(void) {
-    RenderBuffer *draw = &ctx.buffers[ctx.active];
-    RenderBuffer *disp = &ctx.buffers[ctx.active ^ 1];
-    DrawSync(0);
-    VSync(0);
-    PutDispEnv(&disp->disp);
-    DrawOTagEnv(&draw->ot[OT_LENGTH - 1], &draw->draw);
-    ctx.active ^= 1;
-    ctx.next = disp->buffer;
-    ClearOTagR(disp->ot, OT_LENGTH);
-}
-
 int main(int argc, const char **argv) {
+    int last_scroll = 0;
     (void)argc;
     (void)argv;
     setup_video();
@@ -1176,28 +761,46 @@ int main(int argc, const char **argv) {
     StartPAD();
     ChangeClearPAD(0);
     cd_on = CdInit();
+#ifdef RUNNER_PROFILE
+    prof_start();
+    start_run();
+    printf("PROF start\n");
+#endif
 
     for (;;) {
         int sr = 0, sg = 0, sb = 0;
-        update();
+        LevelFrame frame;
+        PROF(PF_UPDATE, update());
         cd_service();
+        frame.scroll = scroll;
+        frame.speed = scroll > last_scroll ? scroll - last_scroll : 0;
+        frame.time = anim_tick;
+        last_scroll = scroll;
         if (state == ST_BOOT) {
             draw_boot();
         } else if (state == ST_TITLE) {
             draw_title();
         } else {
-            sky_color(&sr, &sg, &sb);
-            draw_world();
+            const Level *lv = levels[level_index];
+            lv->clear_color(&frame, &sr, &sg, &sb);
+            PROF_LONG(PF_LEVEL, lv->draw(&frame));
             if (state == ST_SELECT) {
                 draw_select();
             } else {
-                draw_runner();
-                draw_shadow();
-                draw_ui();
+                PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_ui()));
             }
         }
-        setRGB0(&ctx.buffers[ctx.active].draw, sr, sg, sb);
-        flip();
+        world_set_clear(sr, sg, sb);
+#ifdef RUNNER_PROFILE
+        if (prof_frame(levels[level_index]->name, world_bytes_used())) {
+            if (++level_index == level_count) {
+                printf("PROF done\n");
+                level_index = 0;
+            }
+            start_run();
+        }
+#endif
+        world_flip();
     }
     return 0;
 }

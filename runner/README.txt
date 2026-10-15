@@ -23,7 +23,8 @@ The text file sets the cell size and names each animation as a list of
 cell numbers, counted left to right, then down. The runner sheet is
 1024x1024: 8 columns of 128x160 cells. A character is another
 PNG named name.base.png, such as blazer.runner.png, at that same size.
-The base sheet is on the select screen too, as RUNNER. Left and right
+The base sheet is on the select screen too, as RUNNER, last in the
+list so painted characters are the default. Left and right
 switch characters, and the build reads the cells from runner.txt. Empty pixels
 are magenta, #FF00FF, and so is any pixel with alpha below 128. Each character is reduced to 15 colors.
 
@@ -39,6 +40,52 @@ treated as empty.
 
 The road, shoulders, buildings, gantries, and obstacles are flat
 polygons.
+
+LEVELS
+------
+Every level runs the same course: three lanes, the same obstacles in
+the same places, and the same collisions. A level only decides how the
+world around the course looks. The select screen offers each level
+under WORLD.
+
+  LUMENWILD   a glowing alien forest (default); far growths are
+              silhouettes, near ones smear into streaks as they rush
+              past. Its sky is a soft texture (tools/make_lumen_sky.py)
+              with a slow CLUT pulse
+  CITY RUN    the road between blocks of buildings
+
+The source is split the same way:
+
+  src/world.c        ordering tables, GTE projection, polygon helpers
+  src/course.c       lanes, obstacle layout, the obstacle box
+  src/levels.c       the list of levels, in select-screen order
+  src/level_*.c      one file per level
+  src/main.c         screens, input, the runner, audio
+
+To add a level, copy level_city.c to level_<name>.c, rename the Level
+it defines, and add it to levels.c. CMake picks up the new file. The
+draw function gets the scroll distance, this frame's speed, and an
+animation clock that stops while the game is paused. It must draw the
+ground and the obstacles from course.h along with its scenery.
+
+To look at the levels without a console, run
+
+  sh runner/tools/preview/preview.sh
+
+It draws each level on the computer, writes PNG stills into
+runner/build/preview, and prints what each frame costs: primitive
+buffer bytes, GTE projections, and pixels filled. The game has 32 KB of
+primitives per frame, shared with the HUD.
+
+To measure real frame time, build the profiling disc:
+
+  cmake -S runner -B runner/build/profile -G Ninja -DRUNNER_PROFILE=ON
+  cmake --build runner/build/profile
+
+Open runner/build/profile/runner.cue in DuckStation with TTY logging on.
+It skips the menus, runs each level for 900 frames with collisions off,
+and prints CPU cycles for each part of the level, and the GPU's drawing
+time, as a share of a 60 Hz frame. The disc stays in that folder.
 
 HOW TO BUILD
 ------------
@@ -59,7 +106,8 @@ DuckStation (runner.bin sits beside it).
 CONTROLS
 --------
   Start or X     skip the studio logo, leave the title screen
-  Left / right   on the select screen, pick a runner
+  Up / down      on the select screen, choose RUNNER or WORLD
+  Left / right   on the select screen, change the chosen row
   X or Start     on the select screen, start the run
   Triangle       on the select screen, back to the title
   Left / right   during a run, change lane

@@ -405,7 +405,9 @@ def characters_in(folder):
         found.append((png, name, base))
     if not bases and not found:
         raise SystemExit("no characters; add runner.png with runner.txt, or name.base.png")
-    return bases + found
+    # Painted characters first; the plain base sheet (RUNNER) is last so
+    # it is not the default pick on the select screen.
+    return found + bases
 
 
 def pack(folder):
