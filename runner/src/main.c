@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <psxgpu.h>
 #include <psxpad.h>
 #include <psxapi.h>
@@ -15,6 +16,7 @@
 #include "sprite_sheet.h"
 #include "screen_art.h"
 #include "sound_bank.h"
+#include "music_tracks.h"
 
 enum {
     ST_BOOT,
@@ -57,15 +59,44 @@ static int distance, best, shown;
 static int hit_timer;
 static uint16_t held, prev;
 
-static int cd_on, cd_wait, cd_started;
+static int cd_on, cd_started;
 static int music_level = MUSIC_FULL;
 static uint16_t art_tpage[ART_COUNT];
 static uint16_t art_clutid[ART_COUNT];
 static uint32_t snd_addr[SND_COUNT];
 static int snd_voice;
 
-/* audio/runner1.mp3 is 154 seconds, plus the short pregap before the song. */
-#define CD_LOOP_FRAMES (154 * 60 + 50)
+/* Shuffled playlist over every track in audio/ (see music_tracks.h). */
+static int music_order[MUSIC_TRACK_COUNT];
+static int music_at;
+static int music_cur = -1;
+
+#ifdef RUNNER_XA_MUSIC
+static CdlLOC xa_loc[MUSIC_TRACK_COUNT];
+static volatile int xa_need_next;
+
+typedef struct {
+    uint8_t file, channel;
+    uint8_t submode, coding_info;
+} XA_Header;
+
+typedef struct {
+    CdlLOC pos;
+    XA_Header xa_header[2];
+    uint8_t data[2048];
+    uint32_t edc;
+    uint8_t ecc[276];
+} XA_Sector;
+
+static XA_Sector xa_sector;
+
+enum {
+    XA_TYPE_AUDIO = 1 << 2,
+    XA_END_OF_FILE = 1 << 7
+};
+#else
+static int cd_wait;
+#endif
 
 static uint16_t pad_held(void) {
     PADTYPE *pad = (PADTYPE *)pad_buff[0];
@@ -691,22 +722,122 @@ static void setup_video(void) {
     SetDispMask(1);
 }
 
-static int cd_play(void) {
+static void music_shuffle(int avoid) {
+    int i, j, t;
+
+    for (i = 0; i < MUSIC_TRACK_COUNT; i++)
+        music_order[i] = i;
+    for (i = MUSIC_TRACK_COUNT - 1; i > 0; i--) {
+        j = rand() % (i + 1);
+        t = music_order[i];
+        music_order[i] = music_order[j];
+        music_order[j] = t;
+    }
+    if (MUSIC_TRACK_COUNT > 1 && avoid >= 0 && music_order[0] == avoid) {
+        j = 1 + rand() % (MUSIC_TRACK_COUNT - 1);
+        t = music_order[0];
+        music_order[0] = music_order[j];
+        music_order[j] = t;
+    }
+    music_at = 0;
+}
+
+#ifdef RUNNER_XA_MUSIC
+static int music_play_track(int track) {
+    uint8_t mode = CdlModeRT | CdlModeSF;
+    CdlFILTER filter;
+    CdlATV mix;
+
+    if (track < 0 || track >= MUSIC_TRACK_COUNT)
+        return 0;
+    music_cur = track;
+    filter.file = 1;
+    filter.chan = 0;
+    if (!CdControlB(CdlSetmode, &mode, 0))
+        return 0;
+    if (!CdControlB(CdlSetfilter, (uint8_t *)&filter, 0))
+        return 0;
+    if (!CdControlB(CdlReadS, &xa_loc[track], 0))
+        return 0;
+    CdControl(CdlDemute, 0, 0);
+    mix.val0 = (uint8_t)music_level;
+    mix.val1 = 0;
+    mix.val2 = (uint8_t)music_level;
+    mix.val3 = 0;
+    CdMix(&mix);
+    SpuSetCommonMasterVolume(0x3fff, 0x3fff);
+    SpuSetCommonCDVolume(0x3fff, 0x3fff);
+    return 1;
+}
+
+static void music_advance(void) {
+    music_at++;
+    if (music_at >= MUSIC_TRACK_COUNT)
+        music_shuffle(music_cur);
+    music_play_track(music_order[music_at]);
+}
+
+static void xa_ready(CdlIntrResult event, uint8_t *payload) {
+    uint8_t sm0, sm1;
+    (void)payload;
+    if (event != CdlDataReady)
+        return;
+    CdGetSector(&xa_sector, (int)(sizeof(XA_Sector) / 4));
+    sm0 = xa_sector.xa_header[0].submode;
+    sm1 = xa_sector.xa_header[1].submode;
+    if ((sm0 & XA_END_OF_FILE) || (sm1 & XA_END_OF_FILE) ||
+        (!(sm0 & XA_TYPE_AUDIO) && !(sm1 & XA_TYPE_AUDIO))) {
+        CdControlF(CdlPause, 0);
+        xa_need_next = 1;
+    }
+}
+
+static void cd_service(void) {
+    if (!xa_need_next)
+        return;
+    xa_need_next = 0;
+    music_advance();
+}
+
+static int music_setup(void) {
+    CdlFILE file;
+    char path[16];
+    int i;
+
+    for (i = 0; i < MUSIC_TRACK_COUNT; i++) {
+        sprintf(path, "\\MUSIC%02d.XA", i);
+        if (!CdSearchFile(&file, path))
+            return 0;
+        xa_loc[i] = file.pos;
+    }
+    srand((unsigned)VSync(-1));
+    EnterCriticalSection();
+    CdReadyCallback(&xa_ready);
+    ExitCriticalSection();
+    return 1;
+}
+#else
+/* CD track 1 is data; audio tracks start at 2. */
+static int music_play_track(int track) {
     uint8_t mode = CdlModeDA;
-    uint8_t track = itob(2);
+    uint8_t cd_track = itob(track + 2);
     uint8_t result[8];
     CdlLOC loc;
     CdlATV mix;
+
+    if (track < 0 || track >= MUSIC_TRACK_COUNT)
+        return 0;
+    music_cur = track;
     if (!CdControlB(CdlSetmode, &mode, 0))
         return 0;
-    if (!CdCommand(CdlGetTD, &track, 1, result))
+    if (!CdCommand(CdlGetTD, &cd_track, 1, result))
         return 0;
     if (CdSync(1, 0) != CdlComplete)
         return 0;
     loc.minute = result[1];
     loc.second = result[2];
     loc.sector = 0;
-    loc.track = track;
+    loc.track = cd_track;
     if (!CdControlB(CdlSetloc, &loc, 0))
         return 0;
     if (!CdControlB(CdlPlay, 0, 0))
@@ -722,24 +853,47 @@ static int cd_play(void) {
     return 1;
 }
 
+static void music_advance(void) {
+    music_at++;
+    if (music_at >= MUSIC_TRACK_COUNT)
+        music_shuffle(music_cur);
+    if (music_play_track(music_order[music_at]))
+        cd_wait = music_cd_frames[music_cur];
+    else
+        cd_wait = 0;
+}
+
 static void cd_service(void) {
     if (!cd_on || cd_wait == 0)
         return;
     cd_wait--;
     if (cd_wait > 0)
         return;
-    if (cd_play())
-        cd_wait = CD_LOOP_FRAMES;
+    music_advance();
 }
+
+static int music_setup(void) {
+    srand((unsigned)VSync(-1));
+    return 1;
+}
+#endif
 
 static void music_start(void) {
     if (!cd_on || cd_started)
         return;
     cd_started = 1;
-    cd_wait = cd_play() ? CD_LOOP_FRAMES : 0;
+    music_shuffle(-1);
+#ifdef RUNNER_XA_MUSIC
+    music_play_track(music_order[music_at]);
+#else
+    if (music_play_track(music_order[music_at]))
+        cd_wait = music_cd_frames[music_cur];
+    else
+        cd_wait = 0;
+#endif
 }
 
-/* 128 is full volume. The track keeps playing; only the mix changes. */
+/* 128 is full volume. The stream keeps playing; only the mix changes. */
 static void music_volume(int level) {
     CdlATV mix;
     music_level = level;
@@ -761,6 +915,8 @@ int main(int argc, const char **argv) {
     StartPAD();
     ChangeClearPAD(0);
     cd_on = CdInit();
+    if (cd_on)
+        cd_on = music_setup();
 #ifdef RUNNER_PROFILE
     prof_start();
     start_run();

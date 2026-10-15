@@ -10,8 +10,11 @@ endif()
 
 project(runner LANGUAGES C VERSION 0.1.0 DESCRIPTION "A flat runner on a 3D road")
 
-find_program(AFCONVERT afconvert REQUIRED)
+find_program(FFMPEG ffmpeg REQUIRED)
 find_program(PYTHON3 python3 REQUIRED)
+
+# CDDA (Red Book) is the default. XA is optional: smaller disc, PS1-ish quality.
+option(RUNNER_XA_MUSIC "Encode music as XA ADPCM instead of CDDA" OFF)
 
 file(GLOB SPRITE_PNGS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/sprites/*.png")
 file(GLOB SPRITE_TXTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/sprites/*.txt")
@@ -57,14 +60,77 @@ add_custom_command(
 	VERBATIM
 )
 
-set(TRACK_WAV ${CMAKE_CURRENT_BINARY_DIR}/track.wav)
-add_custom_command(
-	OUTPUT ${TRACK_WAV}
-	COMMAND ${AFCONVERT} -f WAVE -d LEI16@44100 -c 2
-		${CMAKE_CURRENT_SOURCE_DIR}/audio/runner1.mp3 ${TRACK_WAV}
-	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/audio/runner1.mp3
-	VERBATIM
-)
+file(GLOB AUDIO_MP3S CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/audio/*.mp3")
+list(SORT AUDIO_MP3S)
+list(LENGTH AUDIO_MP3S MUSIC_TRACK_COUNT)
+if(MUSIC_TRACK_COUNT EQUAL 0)
+	message(FATAL_ERROR "runner/audio needs at least one .mp3")
+endif()
+if(MUSIC_TRACK_COUNT GREATER 32)
+	message(FATAL_ERROR "runner/audio has ${MUSIC_TRACK_COUNT} tracks; max is 32")
+endif()
+
+if(RUNNER_XA_MUSIC)
+	find_program(CMAKE_C_COMPILER_HOST NAMES cc clang gcc REQUIRED)
+	set(WAV2XA "${CMAKE_CURRENT_BINARY_DIR}/wav2xa")
+	add_custom_command(
+		OUTPUT "${WAV2XA}"
+		COMMAND ${CMAKE_C_COMPILER_HOST} -O2 -std=c99
+			-I"${CMAKE_CURRENT_SOURCE_DIR}/tools"
+			-o "${WAV2XA}"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/wav2xa.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/libpsxav/adpcm.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/libpsxav/cdrom.c"
+		DEPENDS
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/wav2xa.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/libpsxav/adpcm.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/libpsxav/cdrom.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/libpsxav/libpsxav.h"
+		VERBATIM
+	)
+else()
+	find_program(FFPROBE ffprobe REQUIRED)
+endif()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/tools/write_music_iso.cmake")
+
+set(MUSIC_DISC_DEPS "")
+set(_music_i 0)
+foreach(_mp3 ${AUDIO_MP3S})
+	if(_music_i LESS 10)
+		set(_music_id "0${_music_i}")
+	else()
+		set(_music_id "${_music_i}")
+	endif()
+	if(RUNNER_XA_MUSIC)
+		set(_music_wav "${CMAKE_CURRENT_BINARY_DIR}/MUSIC${_music_id}.wav")
+		set(_music_out "${CMAKE_CURRENT_BINARY_DIR}/MUSIC${_music_id}.xa")
+		add_custom_command(
+			OUTPUT "${_music_wav}"
+			COMMAND ${FFMPEG} -y -i "${_mp3}"
+				-ac 2 -ar 37800 -c:a pcm_s16le "${_music_wav}"
+			DEPENDS "${_mp3}"
+			VERBATIM
+		)
+		add_custom_command(
+			OUTPUT "${_music_out}"
+			COMMAND "${WAV2XA}" -f 37800 -i 1 -F 1 -C 0 "${_music_wav}" "${_music_out}"
+			DEPENDS "${WAV2XA}" "${_music_wav}"
+			VERBATIM
+		)
+	else()
+		set(_music_out "${CMAKE_CURRENT_BINARY_DIR}/TRACK${_music_id}.wav")
+		add_custom_command(
+			OUTPUT "${_music_out}"
+			COMMAND ${FFMPEG} -y -i "${_mp3}"
+				-ac 2 -ar 44100 -c:a pcm_s16le "${_music_out}"
+			DEPENDS "${_mp3}"
+			VERBATIM
+		)
+	endif()
+	list(APPEND MUSIC_DISC_DEPS "${_music_out}")
+	math(EXPR _music_i "${_music_i} + 1")
+endforeach()
 
 file(GLOB RUNNER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
 psn00bsdk_add_executable(runner NOGPREL ${RUNNER_SOURCES})
@@ -77,8 +143,11 @@ option(RUNNER_PROFILE "Build the frame-cost profiling disc" OFF)
 if(RUNNER_PROFILE)
 	target_compile_definitions(runner PRIVATE RUNNER_PROFILE)
 endif()
+if(RUNNER_XA_MUSIC)
+	target_compile_definitions(runner PRIVATE RUNNER_XA_MUSIC)
+endif()
 set_source_files_properties(src/main.c PROPERTIES
-	OBJECT_DEPENDS "${SPRITE_H};${SCREEN_H};${SOUND_H}")
+	OBJECT_DEPENDS "${SPRITE_H};${SCREEN_H};${SOUND_H};${CMAKE_CURRENT_BINARY_DIR}/music_tracks.h")
 set_source_files_properties(src/level_lumenwild.c PROPERTIES
 	OBJECT_DEPENDS "${LUMEN_SKY_H}")
 add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}" "${LUMEN_SKY_H}")
@@ -87,8 +156,8 @@ add_dependencies(runner sprite_sheet)
 psn00bsdk_add_cd_image(
 	runner_iso
 	runner
-	iso.xml
-	DEPENDS runner ${TRACK_WAV} ${CMAKE_CURRENT_SOURCE_DIR}/system.cnf
+	"${CMAKE_CURRENT_BINARY_DIR}/iso.xml"
+	DEPENDS runner ${MUSIC_DISC_DEPS} ${CMAKE_CURRENT_SOURCE_DIR}/system.cnf
 )
 
 # The repo-root build folder receives the disc only. CMake's own files stay
