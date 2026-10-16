@@ -15,6 +15,9 @@ static int cam_fx, cam_fy, cam_fz;
 
 typedef char path_step_ok[(STEP == 256) ? 1 : -1];
 
+#define CAM_PITCH_NUM 3
+#define CAM_PITCH_DEN 4
+
 /* Quarter-turn sine, 0..1024 in steps of 16. 4096 is one. */
 static const int16_t SIN_Q[65] = {
     0, 101, 201, 301, 401, 501, 601, 700, 799, 897, 995, 1092, 1189, 1285,
@@ -146,6 +149,8 @@ void path_begin(int scroll) {
     path_scroll = scroll;
     sample(path_scroll, &cam_x, &cam_y, &cam_z, &cyaw, &cpitch, &croll);
     cam_yaw = cyaw & 4095;
+    /* The camera takes most of the grade, so a hill ahead still reads as one. */
+    cpitch = ang_delta(0, cpitch) * CAM_PITCH_NUM / CAM_PITCH_DEN;
     basis(cyaw, cpitch, croll,
           &cam_rx, &cam_ry, &cam_rz,
           &cam_ux, &cam_uy, &cam_uz,
@@ -154,6 +159,16 @@ void path_begin(int scroll) {
 
 int path_yaw(void) {
     return cam_yaw;
+}
+
+int path_horizon(void) {
+    int sy = isin(cam_yaw);
+    int cy = icos(cam_yaw);
+    int up = dot_q(sy, 0, cy, cam_ux, cam_uy, cam_uz);
+    int fwd = dot_q(sy, 0, cy, cam_fx, cam_fy, cam_fz);
+    if (fwd < 64)
+        fwd = 64;
+    return HORIZON_Y - up * (SCREEN_W / 2) / fwd;
 }
 
 /* Flat deck (pitch=roll=0): right = (cy,0,-sy), up = (0,1,0). */
@@ -225,4 +240,10 @@ const PathSeg *path_at(int s) {
 
 int path_len(void) {
     return active->count;
+}
+
+int path_lap(void) {
+    if (active->rep_x || active->rep_y || active->rep_z)
+        return 0;
+    return active->cycle * STEP;
 }

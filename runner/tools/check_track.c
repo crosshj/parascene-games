@@ -19,6 +19,16 @@ void face(int x0, int y0, int z0, int x1, int y1, int z1,
     (void)sortz; (void)r; (void)g; (void)b;
 }
 
+void quad(int x0, int y0, int z0, int x1, int y1, int z1,
+          int x2, int y2, int z2, int x3, int y3, int z3,
+          int sortz, int r, int g, int b) {
+    face(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, sortz, r, g, b);
+}
+
+void dim(int *r, int *g, int *b, int z) {
+    (void)r; (void)g; (void)b; (void)z;
+}
+
 static int formula_has(int band) {
     return band >= 8 && (band % 8) == 5;
 }
@@ -104,6 +114,41 @@ int main(void) {
     }
     if (!turned) {
         fprintf(stderr, "oval has no quarter turn\n");
+        return 1;
+    }
+    if (!path_open("hill.loop")) {
+        fprintf(stderr, "hill.loop did not open\n");
+        return 1;
+    }
+    path_begin(0);
+    if (path_horizon() != HORIZON_Y) {
+        fprintf(stderr, "hill flat horizon %d\n", path_horizon());
+        return 1;
+    }
+    /* From the foot of the climb, the road ahead rises. */
+    path_begin(1800);
+    path_cam(1800 + 2000, 0, 0, &x, &y, &z);
+    if (y < 100 || z < 1500) {
+        fprintf(stderr, "hill climb ahead %d %d %d\n", x, y, z);
+        return 1;
+    }
+    /* Nose up on the climb drops the horizon on screen. */
+    path_begin(6144);
+    if (path_horizon() < HORIZON_Y + 30) {
+        fprintf(stderr, "hill climb horizon %d\n", path_horizon());
+        return 1;
+    }
+    /* The near deck stays under the camera whatever the grade. */
+    path_cam(6144 + CHAR_Z, 0, 0, &x, &y, &z);
+    if (!near(x, 0, 2) || !near(y, 0, 24) || !near(z, CHAR_Z, 24)) {
+        fprintf(stderr, "hill near deck %d %d %d\n", x, y, z);
+        return 1;
+    }
+    /* One lap later the road is back in the same place, at the same height. */
+    path_begin(65536 + 200);
+    path_cam(65536 + 400, 0, 0, &x, &y, &z);
+    if (!near(x, 0, 2) || !near(y, 0, 2) || !near(z, 200, 4)) {
+        fprintf(stderr, "hill lap %d %d %d\n", x, y, z);
         return 1;
     }
     if (!path_open("straight.run")) {

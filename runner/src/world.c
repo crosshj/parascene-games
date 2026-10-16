@@ -166,6 +166,18 @@ void poly_f4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
     }
 }
 
+void line_f2(XY a, XY b, int bucket, int r, int g, int bl) {
+    LINE_F2 *line;
+    if (!xy_ok(&a) || !xy_ok(&b) || !edge_ok(a, b))
+        return;
+    line = alloc_prim(bucket, sizeof(LINE_F2));
+    if (!line)
+        return;
+    setLineF2(line);
+    setRGB0(line, clamp(r, 0, 255), clamp(g, 0, 255), clamp(bl, 0, 255));
+    setXY2(line, a.x, a.y, b.x, b.y);
+}
+
 void poly_f4v(const XY *p, int bucket, int r, int g, int b, int blend) {
     POLY_F4 *poly;
     int x0 = p[0].x, x1 = x0, y0 = p[0].y, y1 = y0, i;

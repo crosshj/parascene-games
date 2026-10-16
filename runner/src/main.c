@@ -162,16 +162,11 @@ static void upload_shadow(void) {
     shadow_tpage = getTPage(2, 2, 768, 256);
 }
 
-/* Flat oval sits in cool haze — pull the sprite a bit toward that air. */
-static int oval_world(void) {
-    const char *track = levels[level_index]->track;
-    return track && strcmp(track, "bend.flat") == 0;
-}
-
 static void draw_shadow(void) {
+    const Light *light = level_light(levels[level_index]);
     int w = 44 - player_y / 5;
     int depth = 34 - player_y / 8;
-    int z0, z1, tone, bucket, sr, sg, sb;
+    int z0, z1, tone, bucket;
     XY far_l, far_r, near_l, near_r;
     POLY_FT4 *spr;
     if (w < 14)
@@ -192,12 +187,6 @@ static void draw_shadow(void) {
     tone = 128 - player_y;
     if (tone < 40)
         tone = 40;
-    sr = sg = sb = tone;
-    if (oval_world()) {
-        sr = tone * 70 / 128;
-        sg = tone * 82 / 128;
-        sb = tone * 104 / 128;
-    }
     /* One slot in front of the road under the feet, so the near half is not covered. */
     bucket = (CHAR_Z >> OT_SHIFT) - 1;
     if (bucket < 1)
@@ -207,7 +196,11 @@ static void draw_shadow(void) {
         return;
     setPolyFT4(spr);
     setSemiTrans(spr, 1);
-    setRGB0(spr, sr, sg, sb);
+    /* Fainter as the runner rises; the light decides what color it takes. */
+    setRGB0(spr,
+        tone * light->shadow[0] / 128,
+        tone * light->shadow[1] / 128,
+        tone * light->shadow[2] / 128);
     setXY4(spr,
         far_l.x, far_l.y, far_r.x, far_r.y,
         near_l.x, near_l.y, near_r.x, near_r.y);
@@ -286,11 +279,11 @@ static void draw_runner(void) {
     if (!spr)
         return;
     setPolyFT4(spr);
-    if (oval_world())
-        /* Desaturated + cool: GPU multiplies texel RGB by this / 128. */
-        setRGB0(spr, 104, 114, 132);
-    else
-        setRGB0(spr, 128, 128, 128);
+    /* The GPU multiplies each texel by tint / 128: the world's light. */
+    {
+        const uint8_t *tint = level_light(levels[level_index])->tint;
+        setRGB0(spr, tint[0], tint[1], tint[2]);
+    }
     setXY4(spr,
         feet.x - w / 2, feet.y - h,
         feet.x + w / 2, feet.y - h,

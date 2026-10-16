@@ -144,4 +144,5 @@ const Level level_city = {
     "straight.run",
     city_clear,
     city_draw,
+    &light_neutral,
 };

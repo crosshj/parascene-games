@@ -1147,4 +1147,5 @@ const Level level_lumenwild = {
     "straight.run",
     lumen_clear,
     lumen_draw,
+    &light_neutral,
 };

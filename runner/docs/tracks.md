@@ -66,16 +66,17 @@ drops the right edge.
 |---|---|---|---|
 | `straight.run` | runnable | `start`, `cycle` | Continues. The obstacle cycle repeats. |
 | `bend.flat` | runnable | `north`, `east-bend`, `south`, `west-bend` | Closes. One lap returns to its start. The FLAT OVAL world runs it. |
-| `grade.straight` | view | `flat`, `climb`, `ease`, `crest`, `drop`, `settle`, `runout` | Continues. The hill repeats on the same heading. |
+| `hill.loop` | runnable | `start`, one big hill, `turn-back`, two smaller hills, `turn-home`, `home` | Closes. The HILL world runs it. Turns like the oval, with grades on both straights. Both sides lose the same ground to slope: four 4096 ramps out, eight 2048 ramps back, all at 22.5°, with 8192 of flat on each side. |
 | `bank.bend` | view | `enter`, `in-right`, `right`, `out-right`, `in-left`, `left`, `out-left`, `leave` | Continues. Banks right through one bend, then left through the other. Heading returns. |
 | `lanes.count` | view | `one`, `one-to-two`, `two`, `two-to-three`, `three`, `three-to-two`, `two-hold`, `two-to-one`, `one-end` | Continues. The lane changes repeat from one lane. |
 | `fork.lane` | view | `three`, `two-off`, `two-to-one`, `two-back`, `one-off`, `one-to-two`, `one-back`, `joined` | Continues. Three lanes split into two and one, those counts swap, and they merge as three. |
 | `gap.drop` | view | `approach`, `gap`, `landing` | Continues. The gap repeats. |
 
 The game loads a track only when its status is `runnable` and every
-capability it uses is in the implemented set. Today that set is `repeat`
-and `yaw`. `path_open` accepts `straight.run` and `bend.flat`. The viewer
-draws the rest and lists the capability still missing.
+capability it uses is in the implemented set. Today that set is `repeat`,
+`yaw`, and `grade`. `path_open` accepts `straight.run`, `bend.flat`, and
+`hill.loop`. The viewer draws the rest and lists the capability still
+missing.
 
 ## Order
 
@@ -83,7 +84,9 @@ draws the rest and lists the capability still missing.
    name. City and Lumenwild still run the straight road.
 2. **`bend.flat`.** The FLAT OVAL world runs this lap and draws only the
    road. `path_cam` follows yaw, so the camera takes the turns.
-3. **`grade.straight`.** Pitch and height.
+3. **`hill.loop`.** Pitch and height on a closed lap. The HILL world runs
+   it. The camera takes 3/4 of the grade under it, and the backdrop sits
+   on `path_horizon`.
 4. **`bank.bend`.** Roll one way, then the other. The heading returns, so the repeat continues the way it started. The sprite stays upright on screen.
 5. **`lanes.count`.** The road widens or narrows. One lane splits into two, two become three, and each of those merges back. One chain.
 6. **`fork.lane`.** Three lanes split into a two-lane road and a one-lane road. While they are apart, the two becomes one and the one becomes two. They meet again as three.
@@ -111,6 +114,7 @@ banks or climbs.
 ```c
 int path_open(const char *id);                 /* 1 if this build can run it */
 void path_begin(int scroll);                   /* once a frame, before draw */
+int path_horizon(void);                        /* screen y of the level horizon */
 void path_cam(int s, int u, int v, int *x, int *y, int *z);
 int path_project(int s, int u, int v, XY *out);
 const PathSeg *path_at(int s);                 /* segment containing s */
@@ -118,8 +122,8 @@ const PathSeg *path_at(int s);                 /* segment containing s */
 
 `path_begin` is called by `main` and by the preview before a level draws.
 Each world names its track, and `path_open` selects that span first.
-`path_cam` follows yaw. On `straight.run` the yaw is zero, so the frame is
-still `(u, v, s - scroll)`. Pitch and roll stay level on the tracks the
+`path_cam` follows yaw and pitch. On `straight.run` both are zero, so the
+frame is still `(u, v, s - scroll)`. Roll stays level on the tracks the
 game runs.
 
 `path_at` walks the linked span. Past the lead, `s` maps into the cycle,
@@ -132,8 +136,50 @@ at `joined`, which is three lanes.
 `path_at` stays on the main chain until a fork is runnable.
 
 Obstacles and the runner go through this API. City and Lumenwild still
-draw their straight ground with `flat()`. FLAT OVAL draws the lap as
-cross-sections from `path_cam`, and the world around that road stays empty.
+draw their straight ground with `flat()`. FLAT OVAL and HILL draw their
+road with `road.c`: cross-sections from `path_cam`, with width, lane
+dividers, and deck read from each segment. A world gives `road_draw` a
+`RoadStyle` of materials and adds its own scenery, so a new runnable track
+needs a level file of a few lines, not a new road renderer.
+
+Each world also declares one `Light` (`level.h`), and the road and the
+runner both read it:
+
+| Field | Kind | Reaches |
+|---|---|---|
+| `sky` | color | The clear color, and the backdrop's foot |
+| `haze` | color | What distance fades toward: curbs, gantry, the far deck, the air under the ridge |
+| `tint` | multiplier, 128 = none | The runner sprite and the road paint |
+| `shadow` | multiplier, 128 = none | The runner's shadow, channel by channel |
+| `density` | 0..256 | How thick the air is: the far asphalt, the crates, and the ridges give way to `haze` |
+
+`sky` and `haze` are separate, so a red haze can hang under a blue sky.
+At `density` 0 the materials in `RoadStyle` keep the colors the world
+gives them and only the curbs, gantry, and far deck fade to `haze`. Raise
+it and the whole distance goes into the air; the near road stays its own
+color. A world with no light of its own uses `light_neutral`.
+
+`road.c` draws three tiers by camera depth:
+
+| Tier | Depth | What draws |
+|---|---|---|
+| Near | to 1900 | Deck, pulsing curbs, dividers, lit crates |
+| Mid | to 2800 for dividers, to `FAR` (4200) | Deck, crates, and a one-pixel line on each edge that starts as the curb and fades to the far line by `FAR`; crates go one flat color past 1450 |
+| Far | `FAR` to 20000 | Deck shaded from near edge to far edge, the same edge lines, hazed toward the sky. A crate is its front face |
+
+The far tier walks up to 44000 of track ahead, and on a closed track it
+stops one step short of a lap so it never draws the road behind the
+camera. That keeps a turn and the road coming back in view, such as the
+return leg of `hill.loop` seen from its big crest. Spacing follows depth
+(256 to 768) and halves where a chord would turn more than 192 or pitch
+more than 48, so bends stay round and crests keep their outline. Samples
+off screen or out of depth advance 1024 and draw nothing. At most 48
+samples a frame.
+
+Its depth is squeezed into the ordering table buckets between the near
+road and the backdrop, so a crest still covers the road behind it by
+painter's order. Nothing tests visibility: a hidden far piece is a few
+pixels, and the projection is spent either way.
 
 A segment record, as baked:
 
@@ -160,7 +206,7 @@ not the model.
 |---|---|---|---|
 | `straight.run` | none | `path_cam` identity | Continues. Obstacle lanes match the old band formula |
 | `bend.flat` | `yaw` | `path_cam` aims by yaw | Closes. Yaw step ≤ 64 |
-| `grade.straight` | `pitch`, centerline `y` | `path_cam` aims by pitch | Continues. Net pitch returns to 0. Pitch step ≤ 64 |
+| `hill.loop` | `pitch`, centerline `y` | `path_cam` aims by pitch | Closes. Net pitch returns to 0. Pitch step ≤ 64 |
 | `bank.bend` | `roll` | `path_cam` banks the right vector | Continues. Bank goes right, then left, and returns to 0. Roll step ≤ 64 |
 | `lanes.count` | `lanes`, `lanesTo` | road width and lane lines along the chain | Continues from one lane. 1→2, 2→3, 3→2, and 2→1 |
 | `fork.lane` | `fork`, `shift`, `lanes`, `lanesTo` | a second chain, then the join where the chains meet | Continues. 3 splits into 2 and 1, those counts swap, then they merge as 3 |
@@ -182,8 +228,11 @@ the warning on the span.
   bake. Load, or a dropped `.json`, opens another bake file.
 - `src/path.h`, `src/path.c` — the API. `course.c` reads obstacles from
   the baked span.
+- `src/road.h`, `src/road.c` — the shared road for any runnable track.
+- `tools/check_track.c` — host checks for the runnable spans.
 
-Bake, then open `tools/trackview/index.html`:
+Bake, then open `tools/trackview/index.html`. A hash such as
+`index.html#hill.loop` opens that track:
 
 ```
 python3 runner/tools/bake_tracks.py

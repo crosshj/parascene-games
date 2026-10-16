@@ -123,6 +123,7 @@ function marker(at, text, scale) {
 function show(index) {
   current = index;
   const track = catalog.tracks[index];
+  history.replaceState(null, "", "#" + track.id);
   while (root.children.length) root.remove(root.children[0]);
 
   const colors = {};
@@ -355,7 +356,7 @@ function useCatalog(data) {
   catalog = data;
   setStatus("");
   renderList();
-  show(0);
+  show(Math.max(0, catalog.tracks.findIndex((t) => t.id === location.hash.slice(1))));
 }
 
 async function openJsonFile(file) {

@@ -5,7 +5,7 @@
   "width": 560,
   "fullTurn": 4096,
   "maxStep": 64,
-  "implemented": ["repeat", "yaw"],
+  "implemented": ["repeat", "yaw", "grade"],
   "tracks": [
     {
       "id": "straight.run",
@@ -83,21 +83,56 @@
       ]
     },
     {
-      "id": "grade.straight",
-      "name": "Hill",
-      "status": "view",
-      "summary": "A climb onto a flat crest, then back down. The hill repeats on the same heading.",
-      "capabilities": ["grade", "repeat"],
-      "start": "flat",
-      "repeatFrom": "flat",
+      "id": "hill.loop",
+      "name": "Hill loop",
+      "status": "runnable",
+      "summary": "A closed lap. One big hill heading out, a turn back, two smaller hills heading home, a turn, and the straight back to the start.",
+      "capabilities": ["yaw", "grade", "repeat"],
+      "start": "start",
+      "repeatFrom": "start",
       "pieces": [
-        {"id": "flat", "length": 2048, "next": "climb"},
-        {"id": "climb", "length": 4096, "grade": 22.5, "next": "ease"},
+        {"id": "start", "length": 2048, "next": "climb"},
+        {"id": "climb", "length": 4096, "grade": 22.5, "next": "ease",
+         "obstacles": [{"at": 2176, "lane": -1}]},
         {"id": "ease", "length": 4096, "grade": -22.5, "next": "crest"},
-        {"id": "crest", "length": 2048, "next": "drop"},
-        {"id": "drop", "length": 4096, "grade": -22.5, "next": "settle"},
+        {"id": "crest", "length": 2048, "next": "drop",
+         "obstacles": [{"at": 1152, "lane": 1}]},
+        {"id": "drop", "length": 4096, "grade": -22.5, "next": "settle",
+         "obstacles": [{"at": 2176, "lane": 0}]},
         {"id": "settle", "length": 4096, "grade": 22.5, "next": "runout"},
-        {"id": "runout", "length": 2048, "next": "flat"}
+        {"id": "runout", "length": 2048, "next": "turn-back",
+         "obstacles": [{"at": 1152, "lane": -1}]},
+        {"id": "turn-back", "length": 8192, "yaw": 180, "next": "lead",
+         "obstacles": [
+           {"at": 2176, "lane": 0},
+           {"at": 5248, "lane": 1}
+         ]},
+        {"id": "lead", "length": 2048, "next": "climb-a",
+         "obstacles": [{"at": 1152, "lane": 1}]},
+        {"id": "climb-a", "length": 2048, "grade": 22.5, "next": "ease-a"},
+        {"id": "ease-a", "length": 2048, "grade": -22.5, "next": "top-a"},
+        {"id": "top-a", "length": 1024, "next": "drop-a",
+         "obstacles": [{"at": 384, "lane": -1}]},
+        {"id": "drop-a", "length": 2048, "grade": -22.5, "next": "settle-a"},
+        {"id": "settle-a", "length": 2048, "grade": 22.5, "next": "valley"},
+        {"id": "valley", "length": 2048, "next": "climb-b",
+         "obstacles": [{"at": 1152, "lane": 0}]},
+        {"id": "climb-b", "length": 2048, "grade": 22.5, "next": "ease-b"},
+        {"id": "ease-b", "length": 2048, "grade": -22.5, "next": "top-b"},
+        {"id": "top-b", "length": 1024, "next": "drop-b",
+         "obstacles": [{"at": 640, "lane": 1}]},
+        {"id": "drop-b", "length": 2048, "grade": -22.5, "next": "settle-b",
+         "obstacles": [{"at": 1152, "lane": -1}]},
+        {"id": "settle-b", "length": 2048, "grade": 22.5, "next": "tail"},
+        {"id": "tail", "length": 2048, "next": "turn-home",
+         "obstacles": [{"at": 1152, "lane": 0}]},
+        {"id": "turn-home", "length": 8192, "yaw": 180, "next": "home",
+         "obstacles": [
+           {"at": 3200, "lane": -1},
+           {"at": 6272, "lane": 0}
+         ]},
+        {"id": "home", "length": 2048, "next": "start",
+         "obstacles": [{"at": 1152, "lane": 1}]}
       ]
     },
     {

@@ -72,6 +72,8 @@ void poly_f4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
  * it is skipped when off screen or too large for the GPU to draw safely.
  * Cheaper than poly_f4 for scenery that emits hundreds of quads. */
 void poly_f4v(const XY *p, int bucket, int r, int g, int b, int blend);
+/* A one-pixel screen-space line. */
+void line_f2(XY a, XY b, int bucket, int r, int g, int bl);
 /* One screen-space gouraud quad. Colours are per corner in setXY4 order. */
 void poly_g4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
              int bucket,

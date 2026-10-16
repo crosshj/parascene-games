@@ -210,6 +210,17 @@ static Counts render(int cr, int cg, int cb) {
             tri(v0, v1, v2, semi);
             tri(v1, v2, v3, semi);
             n.g4++;
+        } else if ((code & 0xFC) == 0x40) {
+            LINE_F2 *p = links[i].prim;
+            int dx = iabs(p->x1 - p->x0), dy = iabs(p->y1 - p->y0);
+            int steps = dx > dy ? dx : dy, k;
+            for (k = 0; k <= steps; k++) {
+                int xx = steps ? p->x0 + (p->x1 - p->x0) * k / steps : p->x0;
+                int yy = steps ? p->y0 + (p->y1 - p->y0) * k / steps : p->y0;
+                if (xx >= 0 && yy >= 0 && xx < SCREEN_W && yy < SCREEN_H)
+                    plot(xx, yy, p->r0, p->g0, p->b0, semi);
+            }
+            n.f4++;
         } else if ((code & 0xFC) == 0x60) {
             TILE *t = links[i].prim;
             int yy, xx;
@@ -310,8 +321,8 @@ static void write_png(const char *path) {
 
 /* Frames */
 
-/* A stand-in for the runner sprite, at its real depth. */
-static void runner_marker(int scroll) {
+/* A stand-in for the runner sprite, at its real depth, in the world's light. */
+static void runner_marker(int scroll, const Light *light) {
     XY feet;
     int sz = path_project(scroll + CHAR_Z, 0, 0, &feet);
     int h = (78 * (SCREEN_W / 2)) / sz, w = h * 2 / 5;
@@ -321,7 +332,9 @@ static void runner_marker(int scroll) {
     setTile(t);
     setXY0(t, feet.x - w / 2, feet.y - h);
     setWH(t, w, h);
-    setRGB0(t, 230, 230, 236);
+    setRGB0(t, clamp(230 * light->tint[0] / 128, 0, 255),
+            clamp(230 * light->tint[1] / 128, 0, 255),
+            clamp(236 * light->tint[2] / 128, 0, 255));
 }
 
 typedef struct {
@@ -341,7 +354,7 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, const char *
     lv->clear_color(f, &r, &g, &b);
     lv->draw(f);
     if (marker)
-        runner_marker(f->scroll);
+        runner_marker(f->scroll, level_light(lv));
     c.bytes = world_bytes_used();
     c.proj = projections;
     c.n = render(r, g, b);
@@ -363,6 +376,8 @@ int main(int argc, char **argv) {
     static const struct { const char *tag; int scroll, speed; } shots[] = {
         {"run_a", 2600, 20}, {"run_b", 15000, 20}, {"run_c", 31337, 20},
         {"run_d", 47210, 20}, {"paused", 15000, 0}, {"select", 6000, 8},
+        {"crest", 10600, 20}, {"brink", 12100, 20}, {"top", 37000, 20},
+        {"lap", 63600, 20},
     };
     const char *dir = argc > 1 ? argv[1] : ".";
     int i, j;
