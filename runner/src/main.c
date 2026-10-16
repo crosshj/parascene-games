@@ -296,12 +296,11 @@ static void draw_runner(void) {
         feet.x + bx + ux, feet.y + by + uy,
         feet.x - bx, feet.y - by,
         feet.x + bx, feet.y + by);
-    setUVWH(spr,
-        spr_frame_u[spr_base_uv_off[spr_char_base[character]] + frame],
-        spr_char_v[character] + spr_frame_v[spr_base_uv_off[spr_char_base[character]] + frame],
+    frame += spr_char_cell[character];
+    setUVWH(spr, spr_cell_u[frame], spr_cell_v[frame],
         spr_base_fw[spr_char_base[character]] - 1,
         spr_base_fh[spr_char_base[character]] - 1);
-    spr->tpage = gpu_tpage[spr_char_page[character]];
+    spr->tpage = gpu_tpage[spr_cell_page[frame]];
     spr->clut = gpu_clut[character];
 }
 
@@ -353,15 +352,15 @@ static void draw_preview(int cx, int feet_y, int scale) {
     int fw = spr_base_fw[base], fh = spr_base_fh[base];
     int w = fw * scale, h = fh * scale;
     int frame = play_frame(SPR_ANIM_RUN, (anim_tick / 4) % anim_count(SPR_ANIM_RUN));
-    int uv = spr_base_uv_off[base] + frame;
+    int cell = spr_char_cell[character] + frame;
     p = alloc_prim(1, sizeof(POLY_FT4));
     if (!p)
         return;
     setPolyFT4(p);
     setRGB0(p, 128, 128, 128);
     setXYWH(p, cx - w / 2, feet_y - h, w, h);
-    setUVWH(p, spr_frame_u[uv], spr_char_v[character] + spr_frame_v[uv], fw - 1, fh - 1);
-    p->tpage = gpu_tpage[spr_char_page[character]];
+    setUVWH(p, spr_cell_u[cell], spr_cell_v[cell], fw - 1, fh - 1);
+    p->tpage = gpu_tpage[spr_cell_page[cell]];
     p->clut = gpu_clut[character];
 }
 
@@ -406,8 +405,8 @@ static void select_row(int y, int row, int count, const char *label, const char 
 
 static void draw_select(void) {
     panel(3, 60, 20, 200, 200);
-    hud_center(32, "CHOOSE YOUR RUNNER");
-    draw_preview(SCREEN_W / 2, 164, 3);
+    hud_center(24, "CHOOSE YOUR RUNNER");
+    draw_preview(SCREEN_W / 2, 164, 2);
     select_row(172, ROW_RUNNER, SPR_CHAR_COUNT, "RUNNER", spr_char_name[character]);
     select_row(186, ROW_LEVEL, level_count, "WORLD ", levels[level_index]->name);
     hud_center(204, "X SELECT   TRIANGLE BACK");

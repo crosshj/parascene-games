@@ -168,7 +168,7 @@ SHEET_TXT = """\
 # right  20-23  lean right, shallow to deep
 
 frame 128 160
-pack 32 40
+pack 52 64
 
 run 0-7
 jump 8-15

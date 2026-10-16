@@ -17,7 +17,7 @@ import pack_sprites as ps
 
 ART = (
     ("PARASCENE", "parascene.png", (512, 256), (0, 480)),
-    ("TITLE", "title.png", (512, 0), (256, 480)),
+    ("TITLE", "title.png", (512, 0), (0, 482)),
 )
 MAX_W = 256
 MAX_H = 256

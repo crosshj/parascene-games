@@ -161,7 +161,8 @@ def parse_map(path):
     if pack_w is None:
         pack_w, pack_h = frame_w, frame_h
     if pack_w > PAGE_W or pack_h > PAGE_H or pack_w % 4 or pack_h < 1:
-        raise SystemExit(f"{path.name}: packed width must be a multiple of 4 and at most {PAGE_W}")
+        raise SystemExit(f"{path.name}: packed width must be a multiple of 4 and at most {PAGE_W}, "
+                         f"and height at most {PAGE_H}")
     return frame_w, frame_h, pack_w, pack_h, anims
 
 
@@ -317,6 +318,32 @@ class Page:
         self.pix = [0] * (PAGE_W * PAGE_H)
 
 
+class Shelves:
+    """Frames fill a page in rows, then spill to the next page, so a
+    character larger than one page spans two."""
+
+    def __init__(self):
+        self.pages = []
+        self.x = self.y = self.row_h = 0
+
+    def place(self, w, h):
+        if not self.pages or self.x + w > PAGE_W:
+            self.x = 0
+            self.y += self.row_h
+            self.row_h = 0
+        if not self.pages or self.y + h > PAGE_H:
+            if len(self.pages) >= len(PAGE_SLOTS):
+                raise SystemExit("these character sheets do not fit in video memory")
+            self.pages.append(Page(*PAGE_SLOTS[len(self.pages)]))
+            self.x = self.y = self.row_h = 0
+        page = self.pages[-1]
+        u, v = self.x, self.y
+        self.x += w
+        self.row_h = max(self.row_h, h)
+        page.h = max(page.h, v + h)
+        return len(self.pages) - 1, u, v
+
+
 def encode_page(page):
     raw = bytearray(PAGE_W * page.h // 2)
     for i, color in enumerate(page.pix[:PAGE_W * page.h]):
@@ -366,12 +393,6 @@ def layout_for(text):
             if index not in packed_ids:
                 packed_ids.append(index)
             play.append(packed_ids.index(index))
-    cols_per_page = PAGE_W // pack_w
-    block_rows = (len(packed_ids) + cols_per_page - 1) // cols_per_page
-    block_h = block_rows * pack_h
-    if block_h > PAGE_H:
-        raise SystemExit(f"{text.name}: one character's frames do not fit in a texture page")
-    uvs = [((i % cols_per_page) * pack_w, (i // cols_per_page) * pack_h) for i in range(len(packed_ids))]
     return {
         "frame_w": frame_w,
         "frame_h": frame_h,
@@ -382,8 +403,6 @@ def layout_for(text):
         "play": play,
         "begins": begins,
         "counts": counts,
-        "block_h": block_h,
-        "uvs": uvs,
     }
 
 
@@ -423,19 +442,10 @@ def pack(folder):
         grouped[base]["files"].append((png, name))
     bases = [grouped[name] for name in order]
 
-    pages = []
+    shelves = Shelves()
     characters = []
     cluts = []
-
-    def alloc(height):
-        for page in pages:
-            if page.h + height <= PAGE_H:
-                return page
-        if len(pages) >= len(PAGE_SLOTS):
-            raise SystemExit("these character sheets do not fit in video memory")
-        page = Page(*PAGE_SLOTS[len(pages)])
-        pages.append(page)
-        return page
+    cells = []
 
     for base_index, base in enumerate(bases):
         for png, name in base["files"]:
@@ -452,16 +462,16 @@ def pack(folder):
                 raise SystemExit(f"{png.name} has no visible pixels; #FF00FF is empty")
             palette = quantize(samples)
             indexed = to_index(frames, palette)
-            page = alloc(base["block_h"])
-            origin = page.h
-            for i, frame in enumerate(indexed):
-                u, v = base["uvs"][i]
+            first_cell = len(cells)
+            for frame in indexed:
+                page_index, u, v = shelves.place(base["pack_w"], base["pack_h"])
+                page = shelves.pages[page_index]
                 for y in range(base["pack_h"]):
                     for x in range(base["pack_w"]):
-                        page.pix[(origin + v + y) * PAGE_W + u + x] = frame[y * base["pack_w"] + x]
-            page.h += base["block_h"]
+                        page.pix[(v + y) * PAGE_W + u + x] = frame[y * base["pack_w"] + x]
+                cells.append((page_index, u, v))
             label = display_name(name)
-            characters.append((label, pages.index(page), origin, base_index))
+            characters.append((label, first_cell, base_index))
             clut = [0] + [rgb15(*color) for color in palette]
             clut.extend([0] * (16 - len(clut)))
             cluts.append(clut[:16])
@@ -469,10 +479,11 @@ def pack(folder):
 
     return {
         "bases": bases,
-        "pages": pages,
-        "raw_pages": [encode_page(page) for page in pages],
+        "pages": shelves.pages,
+        "raw_pages": [encode_page(page) for page in shelves.pages],
         "characters": characters,
         "cluts": cluts,
+        "cells": cells,
     }
 
 
@@ -484,15 +495,12 @@ def emit(header, packed):
     anim_defs = "\n".join(f"#define SPR_ANIM_{name} {n}" for n, name in enumerate(REQUIRED))
     begin_rows = ",\n".join("    { " + ", ".join(str(v) for v in base["begins"]) + " }" for base in bases)
     count_rows = ",\n".join("    { " + ", ".join(str(v) for v in base["counts"]) + " }" for base in bases)
+    cells = packed["cells"]
     play = []
-    uvs = []
     list_off = []
-    uv_off = []
     for base in bases:
         list_off.append(len(play))
-        uv_off.append(len(uvs))
         play.extend(base["play"])
-        uvs.extend(base["uvs"])
     page_x = ", ".join(str(page.x) for page in pages)
     page_y = ", ".join(str(page.y) for page in pages)
     page_h = ", ".join(str(page.h) for page in pages)
@@ -504,10 +512,9 @@ def emit(header, packed):
         blobs.append(c_bytes(raw))
         cursor += len(raw)
     tex_body = "\n".join(blobs)
-    names = ",\n".join(f'    "{name}"' for name, _page, _v, _base in characters)
-    char_page = ", ".join(str(page) for _name, page, _v, _base in characters)
-    char_v = ", ".join(str(v) for _name, _page, v, _base in characters)
-    char_base = ", ".join(str(base) for _name, _page, _v, base in characters)
+    names = ",\n".join(f'    "{name}"' for name, _cell, _base in characters)
+    char_cell = ", ".join(str(cell) for _name, cell, _base in characters)
+    char_base = ", ".join(str(base) for _name, _cell, base in characters)
     clut_rows = ",\n".join(
         "    { " + ", ".join(f"0x{c:04x}" for c in row) + " }" for row in cluts
     )
@@ -529,10 +536,11 @@ static const uint8_t spr_base_anim_count[SPR_BASE_COUNT][SPR_ANIM_COUNT] = {{
 {count_rows}
 }};
 static const uint16_t spr_base_list_off[SPR_BASE_COUNT] = {{ {", ".join(str(v) for v in list_off)} }};
-static const uint16_t spr_base_uv_off[SPR_BASE_COUNT] = {{ {", ".join(str(v) for v in uv_off)} }};
 static const uint8_t spr_anim_frames[{len(play)}] = {{ {", ".join(str(i) for i in play)} }};
-static const uint8_t spr_frame_u[{len(uvs)}] = {{ {", ".join(str(u) for u, _v in uvs)} }};
-static const uint8_t spr_frame_v[{len(uvs)}] = {{ {", ".join(str(v) for _u, v in uvs)} }};
+/* A character's frame f is cell spr_char_cell[character] + f. */
+static const uint8_t spr_cell_page[{len(cells)}] = {{ {", ".join(str(p) for p, _u, _v in cells)} }};
+static const uint8_t spr_cell_u[{len(cells)}] = {{ {", ".join(str(u) for _p, u, _v in cells)} }};
+static const uint8_t spr_cell_v[{len(cells)}] = {{ {", ".join(str(v) for _p, _u, v in cells)} }};
 static const uint16_t spr_page_x[SPR_PAGE_COUNT] = {{ {page_x} }};
 static const uint16_t spr_page_y[SPR_PAGE_COUNT] = {{ {page_y} }};
 static const uint16_t spr_page_h[SPR_PAGE_COUNT] = {{ {page_h} }};
@@ -541,8 +549,7 @@ static const char spr_char_name[SPR_CHAR_COUNT][16] = {{
 {names}
 }};
 static const uint8_t spr_char_base[SPR_CHAR_COUNT] = {{ {char_base} }};
-static const uint8_t spr_char_page[SPR_CHAR_COUNT] = {{ {char_page} }};
-static const uint8_t spr_char_v[SPR_CHAR_COUNT] = {{ {char_v} }};
+static const uint16_t spr_char_cell[SPR_CHAR_COUNT] = {{ {char_cell} }};
 static const uint16_t spr_clut_x[SPR_CHAR_COUNT] = {{ {", ".join([str(CLUT_X)] * len(characters))} }};
 static const uint16_t spr_clut_y[SPR_CHAR_COUNT] = {{ {", ".join(str(i) for i in range(len(characters)))} }};
 static const uint16_t spr_clut[SPR_CHAR_COUNT][16] __attribute__((aligned(4))) = {{
@@ -561,7 +568,7 @@ def main():
         raise SystemExit("usage: pack_sprites.py sprites-dir output.h")
     packed = pack(sys.argv[1])
     emit(sys.argv[2], packed)
-    who = ", ".join(f"{name} ({packed['bases'][base]['name']})" for name, _p, _v, base in packed["characters"])
+    who = ", ".join(f"{name} ({packed['bases'][base]['name']})" for name, _cell, base in packed["characters"])
     print(f"pages {len(packed['pages'])} characters {who}")
 
 

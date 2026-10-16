@@ -33,7 +33,8 @@ PAGE_W = 256
 # characters render as a solid green block.
 VRAM_X, VRAM_Y = 768, 64
 VRAM_X2 = VRAM_X + 128  # next 8-bit page
-CLUT_X, CLUT_Y = 512, 480
+# Under the framebuffers, clear of the 4-bit sprite pages at x 384 and 640.
+CLUT_X, CLUT_Y = 0, 481
 
 GRAD_COUNT = 32
 # Brightness from sky-dark → full chroma, times a smooth hue ring.
