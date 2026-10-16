@@ -14,7 +14,17 @@ enum {
     PF_GSTREAK,
     PF_OBSTACLES, PF_PATH, PF_SPORES, PF_STREAKS,
     PF_SKYLINE, PF_AURORA, PF_SKY,
+    PF_R_BACKDROP, PF_R_SAMPLE, PF_R_STRIPS, PF_R_DASHES, PF_R_FAR,
+    PF_R_CRATES, PF_R_BRANCH, PF_R_GANTRY,
+    PF_F_SAMPLE, PF_F_STRIPS, PF_F_CRATES,
+    PF_B_SAMPLE, PF_B_STRIPS, PF_B_DASHES, PF_B_CRATES,
     PF_COUNT
+};
+
+/* Events counted per frame, reported for the worst frame. */
+enum {
+    PN_SAMPLE, PN_CLEAR, PN_NEAR, PN_FAR, PN_FORK, PN_STRIP, PN_EDGES, PN_FAR_STRIP,
+    PN_BOX, PN_FAR_CRATE, PN_FORK_NEAR, PN_FORK_OFF, PN_COUNT
 };
 
 #ifdef RUNNER_PROFILE
@@ -22,6 +32,9 @@ enum {
 
 extern uint32_t prof_ticks[PF_COUNT];
 extern uint32_t prof_projections;
+extern uint32_t prof_samples;
+extern uint32_t prof_n[PN_COUNT];
+#define PROF_N(i) (prof_n[i]++)
 
 /* Root counter 2 at the system clock / 8 wraps after 524288 cycles, so it
  * times the parts. Root counter 1 counts scanlines, 2152 cycles each, and
@@ -42,6 +55,7 @@ static inline uint32_t prof_lines(void) { return TIMER_VALUE(1); }
 
 extern uint32_t prof_lines_used[PF_COUNT];
 #define PROF_COUNT_PROJECTION() (prof_projections++)
+#define PROF_COUNT_SAMPLE() (prof_samples++, prof_n[PN_SAMPLE]++)
 
 void prof_start(void);
 /* Returns 1 when the current level has run long enough and was reported. */
@@ -50,4 +64,6 @@ int prof_frame(const char *level, size_t bytes);
 #define PROF(id, stmt) stmt
 #define PROF_LONG(id, stmt) stmt
 #define PROF_COUNT_PROJECTION() ((void)0)
+#define PROF_COUNT_SAMPLE() ((void)0)
+#define PROF_N(i) ((void)0)
 #endif

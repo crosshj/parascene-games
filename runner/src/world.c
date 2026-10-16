@@ -142,12 +142,24 @@ int edge_ok(XY a, XY b) {
     return (dx > dy ? dx : dy) <= 480;
 }
 
+/* xy_ok and edge_ok for a quad in one pass, without branches per corner. */
+static inline unsigned coord_bad(int v) { return (unsigned)(v + 1000) > 2000u; }
+static inline unsigned span_bad(int a, int b) { return (unsigned)(a - b + 480) > 960u; }
+
+static int quad_ok(const XY *p0, const XY *p1, const XY *p2, const XY *p3) {
+    int x0 = p0->x, y0 = p0->y, x1 = p1->x, y1 = p1->y;
+    int x2 = p2->x, y2 = p2->y, x3 = p3->x, y3 = p3->y;
+    unsigned bad = coord_bad(x0) | coord_bad(y0) | coord_bad(x1) | coord_bad(y1) |
+                   coord_bad(x2) | coord_bad(y2) | coord_bad(x3) | coord_bad(y3);
+    bad |= span_bad(x0, x1) | span_bad(y0, y1) | span_bad(x2, x3) | span_bad(y2, y3) |
+           span_bad(x0, x2) | span_bad(y0, y2) | span_bad(x1, x3) | span_bad(y1, y3);
+    return !bad;
+}
+
 void poly_f4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
              int bucket, int r, int g, int b, int blend) {
     POLY_F4 *poly;
-    if (!xy_ok(p0) || !xy_ok(p1) || !xy_ok(p2) || !xy_ok(p3))
-        return;
-    if (!edge_ok(*p0, *p1) || !edge_ok(*p2, *p3) || !edge_ok(*p0, *p2) || !edge_ok(*p1, *p3))
+    if (!quad_ok(p0, p1, p2, p3))
         return;
     if (blend != BLEND_NONE &&
         world_bytes_used() + sizeof(POLY_F4) + sizeof(DR_TPAGE) > BUFFER_LENGTH)
@@ -216,9 +228,7 @@ void poly_g4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
              int r0, int g0, int b0, int r1, int g1, int b1,
              int r2, int g2, int b2, int r3, int g3, int b3, int blend) {
     POLY_G4 *poly;
-    if (!xy_ok(p0) || !xy_ok(p1) || !xy_ok(p2) || !xy_ok(p3))
-        return;
-    if (!edge_ok(*p0, *p1) || !edge_ok(*p2, *p3) || !edge_ok(*p0, *p2) || !edge_ok(*p1, *p3))
+    if (!quad_ok(p0, p1, p2, p3))
         return;
     if (blend != BLEND_NONE &&
         world_bytes_used() + sizeof(POLY_G4) + sizeof(DR_TPAGE) > BUFFER_LENGTH)

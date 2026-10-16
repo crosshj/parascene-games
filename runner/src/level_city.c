@@ -134,7 +134,7 @@ static void city_draw(const LevelFrame *f) {
             int s = band * STEP + STEP / 2;
             int oz = s - scroll;
             if (oz >= CLIP && oz < FAR)
-                obstacle_box(s, obstacle_lane(band), &k_obstacle);
+                obstacle_box(s, obstacle_u(band), &k_obstacle);
         }
     }
 }

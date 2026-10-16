@@ -13,6 +13,7 @@
 #include "world.h"
 #include "course.h"
 #include "path.h"
+#include "road.h"
 #include "level.h"
 #include "profile.h"
 #include "sprite_sheet.h"
@@ -50,7 +51,8 @@ static int tick;
 static int leaving;
 static int pick;
 static int scroll;
-static int lane;
+/* The u of the lane the runner is heading for, on the road under it. */
+static int lane_u;
 static int character;
 static int level_index;
 static int anim_tick;
@@ -248,7 +250,7 @@ static int posed_frame(void) {
     }
     if (land_hold > 0)
         return play_frame(SPR_ANIM_JUMP, anim_count(SPR_ANIM_JUMP) - 1);
-    dist = lane * LANE - player_x;
+    dist = lane_u - player_x;
     if (dist > 8) {
         n = anim_count(SPR_ANIM_RIGHT);
         return play_frame(SPR_ANIM_RIGHT, (LANE - dist) * n / LANE);
@@ -463,7 +465,7 @@ static void collide(void) {
         oz = b * STEP + STEP / 2;
         if (iabs(oz - pz) > OBST_D / 2)
             continue;
-        x = obstacle_lane(b) * LANE;
+        x = obstacle_u(b);
         if (iabs(player_x - x) < 80 && player_y < OBST_H - 4) {
             state = ST_HIT;
             tick = 0;
@@ -489,8 +491,12 @@ static void go(int next) {
 
 static void start_run(void) {
     go(ST_RUN);
+    if (!path_open(levels[level_index]->track))
+        path_open("straight.run");
+    path_reset();
     scroll = 0;
-    lane = 0;
+    lane_u = 0;
+    path_follow(CHAR_Z, 0);
     player_x = 0;
     player_y = 0;
     player_vy = 0;
@@ -597,6 +603,34 @@ static int update_screens(void) {
     }
 }
 
+/* Lanes closer than this are one lane, merging or opening. */
+#define LANE_SAME 40
+
+/* To the next lane over on the road under the runner, if there is one. */
+static void step_lane(int dir) {
+    int u[PATH_LANES];
+    int n = path_lanes(scroll + CHAR_Z, u);
+    int i, best = lane_u;
+    for (i = 0; i < n; i++) {
+        int d = (u[i] - lane_u) * dir;
+        if (d > LANE_SAME && (best == lane_u || d < (best - lane_u) * dir))
+            best = u[i];
+    }
+    lane_u = best;
+}
+
+/* Keep the runner on its lane as the road under it moves: across a
+ * centerline jump at a fork or join, and as lanes slide, open, or merge. */
+static void follow_road(void) {
+    int s = scroll + CHAR_Z;
+    int u[PATH_LANES];
+    int jump = path_follow(s, lane_u);
+    player_x -= jump;
+    lane_u -= jump;
+    path_lanes(s, u);
+    lane_u = u[path_lane_near(s, lane_u)];
+}
+
 static void update(void) {
     int speed = 0;
     int target;
@@ -617,10 +651,10 @@ static void update(void) {
             prev = held;
             return;
         }
-        if (edge(PAD_LEFT) && !edge(PAD_RIGHT) && lane > -1)
-            lane--;
-        if (edge(PAD_RIGHT) && !edge(PAD_LEFT) && lane < 1)
-            lane++;
+        if (edge(PAD_LEFT) && !edge(PAD_RIGHT))
+            step_lane(-1);
+        if (edge(PAD_RIGHT) && !edge(PAD_LEFT))
+            step_lane(1);
         if (edge(PAD_CROSS) && player_y == 0 && jump_wind == 0) {
             jump_wind = 8;
             land_hold = 0;
@@ -642,7 +676,7 @@ static void update(void) {
             land_hold = 0;
         }
     }
-    target = lane * LANE;
+    target = lane_u;
     dx = target - player_x;
     if (dx > 12) player_x += 12;
     else if (dx < -12) player_x -= 12;
@@ -663,6 +697,8 @@ static void update(void) {
     }
     anim_tick++;
     scroll += speed;
+    if (speed)
+        follow_road();
     prev = held;
 }
 
@@ -930,11 +966,45 @@ int main(int argc, const char **argv) {
     InitPAD(pad_buff[0], 34, pad_buff[1], 34);
     StartPAD();
     ChangeClearPAD(0);
+#ifdef RUNNER_PROFILE
+    /* No music: CD interrupts land in the timed parts at random and make
+     * runs disagree. */
+    cd_on = 0;
+#else
     cd_on = CdInit();
     if (cd_on)
         cd_on = music_setup();
+#endif
 #ifdef RUNNER_PROFILE
     prof_start();
+    {
+        int i, x, y, z, a, b, c, d, e, f2, acc = 0;
+        XY xy;
+        uint32_t t;
+        level_index = level_count - 1;
+        start_run();
+        path_begin(1000);
+#define BENCH(name, stmt) do { t = prof_now(); for (i = 0; i < 200; i++) { stmt; } \
+            printf("PROF bench %-14s %5u cycles\n", name, (unsigned)((((prof_now() - t) & 0xFFFF) * 8) / 200)); } while (0)
+        BENCH("empty", acc += i);
+        BENCH("path_at", acc += path_at(2000 + i * 7)->lanes);
+        BENCH("has_obstacle", acc += has_obstacle(i & 127));
+        BENCH("path_edges", (path_edges(2000 + i * 7, &a, &b), acc += a));
+        BENCH("path_cam", (path_cam(2000 + i * 7, 50, 0, &x, &y, &z), acc += z));
+        BENCH("path_cam_lr", (path_cam_lr(2000 + i * 7, -50, 50, 0, &x, &y, &z, &a, &b, &c), acc += z));
+        BENCH("project", acc += project(100, 0, 2000 + i, &xy));
+        BENCH("path_project", acc += path_project(2000 + i * 7, 0, 0, &xy));
+        (void)d; (void)e; (void)f2;
+        { extern void path_bench(void); path_bench(); }
+        { extern void road_bench(const RoadStyle *); extern const RoadStyle *maxip_style;
+          road_bench(maxip_style); }
+        printf("PROF bench acc %d\n", acc);
+#ifdef PROF_LEVEL
+        level_index = PROF_LEVEL;
+#else
+        level_index = 0;
+#endif
+    }
     start_run();
     printf("PROF start\n");
 #endif

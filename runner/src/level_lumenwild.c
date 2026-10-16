@@ -1039,7 +1039,7 @@ static void obstacles(void) {
         oz = s - lw_scroll;
         if (oz < CLIP || oz >= FAR)
             continue;
-        obstacle_box(s, obstacle_lane(band), &k_obstacle);
+        obstacle_box(s, obstacle_u(band), &k_obstacle);
     }
     lw_rigid = 0;
 }

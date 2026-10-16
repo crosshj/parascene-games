@@ -345,13 +345,17 @@ typedef struct {
     Counts n;
 } Cost;
 
-static Cost frame(const Level *lv, const LevelFrame *f, int marker, const char *png) {
+/* alt runs the frame on the first fork's other road. */
+static Cost frame(const Level *lv, const LevelFrame *f, int marker, int alt, const char *png) {
     Cost c;
     int r, g, b;
     projections = 0;
     px_fill = px_blend = 0;
     if (!path_open(lv->track))
         path_open("straight.run");
+    alt = alt && path_branches() > 0;
+    if (alt)
+        path_swap(0);
     path_begin(f->scroll);
     lv->clear_color(f, &r, &g, &b);
     lv->draw(f);
@@ -365,6 +369,8 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, const char *
     if (png)
         write_png(png);
     world_flip();
+    if (alt)
+        path_swap(0);
     return c;
 }
 
@@ -375,11 +381,13 @@ static void slug(char *out, const char *name) {
 }
 
 int main(int argc, char **argv) {
-    static const struct { const char *tag; int scroll, speed; } shots[] = {
-        {"run_a", 2600, 20}, {"run_b", 15000, 20}, {"run_c", 31337, 20},
-        {"run_d", 47210, 20}, {"paused", 15000, 0}, {"select", 6000, 8},
-        {"crest", 10600, 20}, {"brink", 12100, 20}, {"top", 37000, 20},
-        {"lap", 63600, 20}, {"flip", 16900, 20}, {"sweep", 30000, 20},
+    static const struct { const char *tag; int scroll, speed, alt; } shots[] = {
+        {"run_a", 2600, 20, 0}, {"run_b", 15000, 20, 0}, {"run_c", 31337, 20, 0},
+        {"run_d", 47210, 20, 0}, {"paused", 15000, 0, 0}, {"select", 6000, 8, 0},
+        {"crest", 10600, 20, 0}, {"brink", 12100, 20, 0}, {"top", 37000, 20, 0},
+        {"lap", 63600, 20, 0}, {"flip", 16900, 20, 0}, {"sweep", 30000, 20, 0},
+        {"fork", 1200, 20, 0}, {"apart", 9000, 20, 0}, {"other", 9000, 20, 1},
+        {"merge", 17400, 20, 0}, {"narrow", 5200, 20, 0}, {"single", 14200, 20, 0},
     };
     const char *dir = argc > 1 ? argv[1] : ".";
     int i, j;
@@ -395,14 +403,14 @@ int main(int argc, char **argv) {
             LevelFrame f = {shots[j].scroll, shots[j].speed, shots[j].scroll / 20 + 37};
             Cost c;
             snprintf(path, sizeof path, "%s/%s_%s.png", dir, name, shots[j].tag);
-            c = frame(lv, &f, 1, path);
+            c = frame(lv, &f, 1, shots[j].alt, path);
             printf("%-10s %-7s bytes %5zu  F4 %4d (blend %3d)  G4 %d  proj %5ld  fill %6ld (blend %5ld)\n",
                    lv->name, shots[j].tag, c.bytes, c.n.f4, c.n.blended, c.n.g4, c.proj, c.fill, c.blend);
         }
         /* A minute of running, for averages and the worst frame. */
         for (s = 0; s < 3600; s++) {
             LevelFrame f = {s * 20, 20, s};
-            Cost c = frame(lv, &f, 0, 0);
+            Cost c = frame(lv, &f, 0, 0, 0);
             if (c.bytes > worst.bytes) worst.bytes = c.bytes;
             if (c.proj > worst.proj) worst.proj = c.proj;
             if (c.fill > worst.fill) worst.fill = c.fill;

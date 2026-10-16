@@ -5,6 +5,8 @@ if (!window.THREE) {
 const THREE = window.THREE;
 
 const PALETTE = [0xd7c4a3, 0x8fb7d6, 0x8fbf9a, 0xe0b0c8, 0xe2c56e, 0xaeb6c4, 0xc4a48a];
+const PICKED = 0xff2f6e;
+const DIM = 0.45;
 
 const view = document.getElementById("view");
 const list = document.getElementById("list");
@@ -30,6 +32,9 @@ scene.add(root);
 
 let catalog = null;
 let current = 0;
+/* The deck mesh and, per quad, its piece and base color, so a picked piece
+ * can be recolored without rebuilding the track. */
+let deck = null;
 
 function add(a, b) {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -131,13 +136,16 @@ function show(index) {
 
   const pos = [];
   const col = [];
+  const quads = [];
   const gapPts = [];
   track.segments.forEach((seg) => {
     if (!seg.deck) {
       gapPts.push(v3(seg.p), v3(seg.p1));
       return;
     }
-    deckQuad(pos, col, seg, colors[seg.piece] || 0xcccccc, 0);
+    const base = colors[seg.piece] || 0xcccccc;
+    quads.push({ piece: seg.piece, base });
+    deckQuad(pos, col, seg, base, 0);
     const us = seg.markU != null ? seg.markU : laneCenters(Math.max(seg.lanes - 1, 0));
     const us1 = seg.markU1 != null ? seg.markU1 : us;
     const lanePos = [];
@@ -175,7 +183,12 @@ function show(index) {
       root.add(box);
     }
   });
-  if (pos.length) root.add(meshFrom(pos, col, 1));
+  deck = null;
+  if (pos.length) {
+    const mesh = meshFrom(pos, col, 1);
+    root.add(mesh);
+    deck = { mesh, quads };
+  }
 
   if (track.ghost) {
     const gpos = [];
@@ -299,10 +312,27 @@ function makeOrbit(cam, dom) {
   return { target, sync, update() {} };
 }
 
+/* The picked piece goes saturated; the rest dim, so the pick reads at once. */
+function paintDeck(picked) {
+  if (!deck) return;
+  const attr = deck.mesh.geometry.getAttribute("color");
+  deck.quads.forEach((q, i) => {
+    const c = q.piece === picked ? PICKED : q.base;
+    const k = picked && q.piece !== picked ? DIM : 1;
+    const r = ((c >> 16) & 255) / 255 * k;
+    const g = ((c >> 8) & 255) / 255 * k;
+    const b = (c & 255) / 255 * k;
+    for (let v = i * 6; v < i * 6 + 6; v++) attr.setXYZ(v, r, g, b);
+  });
+  attr.needsUpdate = true;
+}
+
 function focusPiece(id) {
   const track = catalog.tracks[current];
   const segs = track.segments.filter((s) => s.piece === id);
   if (!segs.length) return;
+  paintDeck(id);
+  history.replaceState(null, "", "#" + track.id + "/" + id);
   const box = new THREE.Box3();
   segs.forEach((s) => {
     box.expandByPoint(v3(s.p));
@@ -356,7 +386,9 @@ function useCatalog(data) {
   catalog = data;
   setStatus("");
   renderList();
-  show(Math.max(0, catalog.tracks.findIndex((t) => t.id === location.hash.slice(1))));
+  const [trackId, pieceId] = decodeURIComponent(location.hash.slice(1)).split("/");
+  show(Math.max(0, catalog.tracks.findIndex((t) => t.id === trackId)));
+  if (pieceId) focusPiece(pieceId);
 }
 
 async function openJsonFile(file) {

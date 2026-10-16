@@ -144,20 +144,61 @@ def nearest_lane(options, value):
     return min(options, key=lambda item: (abs(item - value), abs(item)))
 
 
-def lane_pairs(n0, n1):
-    """Lines across a lane-count change. A new lane starts on the lane it
-    leaves, so one lane splitting into two begins as a single line. A merge
-    of two lanes brings both lines onto the one that remains."""
+MIN_LANES, MAX_LANES = 1, 3
+# Where two roads meet on a seam, each deck runs this far past it.
+SEAM_LAP = 6
+ANCHORS = ("left", "right", "center")
+
+
+def anchor_drift(n0, n1, anchor):
+    """How far the centerline slides across a lane change, in lanes. A left
+    anchor holds the left edge, so lanes come and go on the right."""
+    if anchor == "left":
+        return (n1 - n0) / 2.0
+    if anchor == "right":
+        return (n0 - n1) / 2.0
+    return 0.0
+
+
+def lane_pairs(n0, n1, anchor="center"):
+    """Lines across a lane-count change, each lane as (start, end) about
+    the centerline at either end. A new lane starts on the lane it leaves,
+    so one lane splitting into two begins as a single line. An edge anchor
+    keeps the lanes on that side in place and adds or drops on the other.
+    A removal is the same add, same anchor, run backwards."""
     start, end = lane_offsets(n0), lane_offsets(n1)
     if n0 == n1:
         return list(zip(start, end))
-    if n1 > n0:
-        return [(nearest_lane(start, dest), dest) for dest in end]
-    if n1 == 1:
-        return [(src, end[0]) for src in start]
-    step = (n0 - 1) / float(n1 - 1)
-    idxs = [int(round(i * step)) for i in range(n1)]
-    return [(start[i], end[k]) for k, i in enumerate(idxs)]
+    if n1 < n0:
+        return [(src, dest) for dest, src in lane_pairs(n1, n0, anchor)]
+    if anchor == "left":
+        return [(start[min(j, n0 - 1)], dest) for j, dest in enumerate(end)]
+    if anchor == "right":
+        extra = n1 - n0
+        return [(start[max(j - extra, 0)], dest) for j, dest in enumerate(end)]
+    return [(nearest_lane(start, dest), dest) for dest in end]
+
+
+def mark_pairs(n0, n1, anchor="center"):
+    """Divider lines across a lane change. Edge anchors keep each divider
+    halfway between the two lanes it separates."""
+    if anchor == "center":
+        return divider_pairs(n0, n1)
+    lanes = sorted(lane_pairs(n0, n1, anchor), key=lambda pair: (pair[1], pair[0]))
+    return [((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0) for a, b in zip(lanes, lanes[1:])]
+
+
+def check_lane_mirror():
+    """Every removal must retrace the matching add, lanes and dividers."""
+    for anchor in ANCHORS:
+        for n0 in range(MIN_LANES, MAX_LANES + 1):
+            for n1 in range(n0 + 1, MAX_LANES + 1):
+                for pairs in (lane_pairs, mark_pairs):
+                    add = pairs(n0, n1, anchor)
+                    remove = pairs(n1, n0, anchor)
+                    if sorted(remove) != sorted((b, a) for a, b in add):
+                        die("%s %s %s->%s is not %s->%s reversed: %s vs %s" % (
+                            anchor, pairs.__name__, n1, n0, n0, n1, remove, add))
 
 
 def road_width(n, lane, full):
@@ -183,27 +224,6 @@ def divider_pairs(n0, n1):
     if len(end) >= len(start):
         return [(nearest_lane(start, dest), dest) for dest in end]
     return [(src, nearest_lane(end, src)) for src in start]
-
-
-def gore_edges(shift, n, parent_lanes, half, lane):
-    """Pavement edges, in branch-local units, that meet the road being left.
-    The outer edge stays on the parent edge. The inner edge meets the
-    divider beside the lanes this branch takes."""
-    centers = [shift + c for c in lane_offsets(n)]
-    left, right = min(centers), max(centers)
-    parent = lane_offsets(parent_lanes)
-    half_l = half / float(lane)
-
-    def boundary(side, at):
-        neighbor = at + side
-        if any(abs(p - neighbor) < 1e-6 for p in parent):
-            return (at + neighbor) / 2.0
-        return -half_l if side < 0 else half_l
-
-    return (
-        (boundary(-1, left) - shift) * lane,
-        (boundary(1, right) - shift) * lane,
-    )
 
 
 def detect_caps(pieces, repeat_from):
@@ -279,20 +299,25 @@ def bake_track(track, cat):
         drs = spread(to_units(p.get("bank", 0), pid), n)
         lanes = p.get("lanes", 3)
         lanes_to = p.get("lanesTo", lanes)
-        if lanes not in (1, 2, 3) or lanes_to not in (1, 2, 3):
-            die("%s piece %s lane count must be 1, 2, or 3" % (track["id"], pid))
+        if not (MIN_LANES <= lanes <= MAX_LANES and MIN_LANES <= lanes_to <= MAX_LANES):
+            die("%s piece %s lane count must be %s to %s" % (track["id"], pid, MIN_LANES, MAX_LANES))
+        if lanes != lanes_to and p.get("yaw", 0):
+            die("%s piece %s changes lanes in a bend; lane changes run straight" % (track["id"], pid))
+        anchor = p.get("anchor")
+        if lanes != lanes_to and anchor not in ANCHORS:
+            die("%s piece %s changes lanes and needs an anchor: %s" % (track["id"], pid, ", ".join(ANCHORS)))
+        if lanes == lanes_to and anchor is not None:
+            die("%s piece %s has an anchor but keeps its lanes" % (track["id"], pid))
+        drift = anchor_drift(lanes, lanes_to, anchor) * lane_w
         if "lanes" in p or "lanesTo" in p:
             w0 = road_width(lanes, lane_w, width)
             w1 = road_width(lanes_to, lane_w, width)
         else:
             w0 = w1 = p.get("width", width)
-        pairs = lane_pairs(lanes, lanes_to)
-        marks = divider_pairs(lanes, lanes_to)
+        pairs = lane_pairs(lanes, lanes_to, anchor)
+        marks = mark_pairs(lanes, lanes_to, anchor)
         shift = p.get("shift", 0)
-        if shift and lanes < 3 and lanes == lanes_to and "lanes" in p:
-            edge0 = gore_edges(shift, lanes, 3, width / 2.0, lane_w)
-        else:
-            edge0 = (-w0 / 2.0, w0 / 2.0)
+        edge0 = (-w0 / 2.0, w0 / 2.0)
         edge1 = (-w1 / 2.0, w1 / 2.0)
         obstacles = {}
         for o in p.get("obstacles", []):
@@ -334,6 +359,8 @@ def bake_track(track, cat):
             e0, e1 = at_edge(t0), at_edge(t1)
             lift0 = bank_lift(cur, e0)
             lift1 = bank_lift(end, e1)
+            lift0 = [lift0[k] + right[k] * drift * t0 for k in range(3)]
+            lift1 = [lift1[k] + r1[k] * drift * t1 for k in range(3)]
             segs.append({
                 "s": cur.s,
                 "piece": pid,
@@ -370,6 +397,11 @@ def bake_track(track, cat):
                 "over": max(abs(dys[i]), abs(dps[i]), abs(drs[i])) > max_step,
             })
             cur = end
+        if drift:
+            right = basis(cur.yaw, cur.pitch, cur.roll)[0]
+            cur.x += right[0] * drift
+            cur.y += right[1] * drift
+            cur.z += right[2] * drift
         for i in range(n - 1):
             segs[first + i]["next"] = first + i + 1
         baked[pid] = first
@@ -402,9 +434,22 @@ def bake_track(track, cat):
         return (aligned and abs(along) < step / 8.0 and abs(vertical) < step / 8.0
                 and abs(lateral) <= seg["width"] / 2.0 + 1)
 
+    def lane_miss(src, dest):
+        """Worst distance from a lane arriving at a join to the nearest
+        lane of the road it joins."""
+        def lanes(seg, end):
+            p, r = (seg["p1"], seg["right1"]) if end else (seg["p"], seg["right"])
+            return [[p[k] + r[k] * u for k in range(3)] for u in seg["laneU1" if end else "laneU"]]
+        targets = lanes(dest, False)
+        return max(min(math.dist(a, b) for b in targets) for a in lanes(src, True))
+
     def bake_chain(pid, frame, chain, inbound):
         while pid:
             if pid in baked:
+                if (pid != repeat_from and inbound is not None and beside(frame, segs[baked[pid]])
+                        and lane_miss(segs[inbound], segs[baked[pid]]) > step / 32.0):
+                    die("%s lanes into %s miss by %.1f" % (
+                        track["id"], pid, lane_miss(segs[inbound], segs[baked[pid]])))
                 if pid == repeat_from or beside(frame, segs[baked[pid]]):
                     if inbound is not None:
                         segs[inbound]["next"] = baked[pid]
@@ -426,6 +471,52 @@ def bake_track(track, cat):
             return
 
     bake_chain(track["start"], Frame(), "main", None)
+
+    # Two roads at the same s overlap where a fork opens and a join closes.
+    # There each inner edge stops a hair past the seam halfway between them,
+    # so the decks meet without a crack and neither draws an inner curb on
+    # the other. Once the roads part, the edges and curbs are their own.
+    def lateral(seg, end, axis_seg):
+        p = seg["p1" if end else "p"]
+        o = axis_seg["p1" if end else "p"]
+        r = axis_seg["right1" if end else "right"]
+        return sum((p[k] - o[k]) * r[k] for k in range(3))
+
+    def seam(a, b):
+        """a and b are segments of two roads at the same s. Lateral offsets
+        are taken along a's right, from a's centerline."""
+        b_right = lateral(b, False, a) > 0
+        left, right = (a, b) if b_right else (b, a)
+        overlaps = []
+        for end in (False, True):
+            ek = "edge1" if end else "edge"
+            lx = lateral(left, end, a) if left is b else 0.0
+            rx = lateral(right, end, a) if right is b else 0.0
+            inner_l = lx + left[ek][1]
+            inner_r = rx + right[ek][0]
+            overlaps.append(inner_l > inner_r)
+            if inner_l > inner_r:
+                m = (inner_l + inner_r) / 2.0
+                left[ek] = [left[ek][0], round(min(m + SEAM_LAP, inner_l) - lx, 3)]
+                right[ek] = [round(max(m - SEAM_LAP, inner_r) - rx, 3), right[ek][1]]
+        if all(overlaps):
+            left["curb"][1] = False
+            right["curb"][0] = False
+        for seg in (a, b):
+            seg["width"] = round(seg["edge"][1] - seg["edge"][0], 3)
+            seg["width1"] = round(seg["edge1"][1] - seg["edge1"][0], 3)
+
+    for s in segs:
+        s["curb"] = [True, True]
+    for i, s in enumerate(segs):
+        if s["fork"] < 0:
+            continue
+        j, a = s["next"], s["fork"]
+        while j >= 0 and a >= 0 and j != a and segs[j]["s"] == segs[a]["s"]:
+            if segs[j]["roll"] or segs[a]["roll"]:
+                die("%s fork %s overlaps on a bank" % (track["id"], segs[a]["piece"]))
+            seam(segs[j], segs[a])
+            j, a = segs[j]["next"], segs[a]["next"]
 
     main = [s for s in segs if s["chain"] == "main"]
     if not main:
@@ -553,6 +644,7 @@ def bake_track(track, cat):
             "markU": s.get("markU", []),
             "markU1": s.get("markU1", []),
             "deck": s["deck"],
+            "curb": s.get("curb", [True, True]),
             "next": s["next"],
             "fork": s["fork"],
             "obstacle": s["obstacle"],
@@ -616,6 +708,46 @@ def check_straight(baked):
     print("straight.run obstacles match the band formula for 8000 bands")
 
 
+MAX_BRANCHES = 4
+
+
+def runtime_branches(t, step):
+    """Fork chains as the game runs them: each leaves the main chain at a
+    band and rejoins it as many bands later, so both roads share s. Returns
+    (band0, band1, alt segment indices) per fork, in bake order."""
+    segs = t["segments"]
+    main_count = sum(1 for s in segs if s["chain"] == "main")
+    out = []
+    for i in range(main_count):
+        start = segs[i]["fork"]
+        if start < 0:
+            continue
+        chain = []
+        j = start
+        while j >= main_count:
+            if segs[j]["fork"] >= 0:
+                die("%s fork inside a fork is not runnable" % t["id"])
+            chain.append(j)
+            j = segs[j]["next"]
+        band0 = i + 1
+        band1 = band0 + len(chain)
+        if j != band1 or band1 > main_count:
+            die("%s fork at %s rejoins at %s; a runnable fork rejoins as long as it left (%s)"
+                % (t["id"], segs[i]["piece"], segs[j]["piece"] if j >= 0 else j, band1))
+        for k, idx in enumerate(chain):
+            if segs[idx]["s"] != segs[band0 + k]["s"]:
+                die("%s fork %s is out of step with the main chain" % (t["id"], segs[idx]["piece"]))
+        out.append((band0, band1, chain))
+    if len(out) > MAX_BRANCHES:
+        die("%s has more than %s forks" % (t["id"], MAX_BRANCHES))
+    return out
+
+
+def padded(values, n):
+    vals = [int(round(v)) for v in values][:n]
+    return vals + [0] * (n - len(vals))
+
+
 def write_header(path, baked_tracks, step):
     runnable = [t for t in baked_tracks if t["status"] == "runnable"]
     runnable.sort(key=lambda t: 0 if t["id"] == "straight.run" else 1)
@@ -625,7 +757,12 @@ def write_header(path, baked_tracks, step):
         "/* Generated by tools/bake_tracks.py from tracks/catalog.json.",
         " * Each span is one period. Past the lead, path_at repeats the cycle.",
         " * rep_x, rep_y, rep_z shift the next period. A lap that closes",
-        " * shifts by zero. */",
+        " * shifts by zero. A branch is a second road over bands band0 to",
+        " * band1, its segments from seg[alt]. */",
+        "",
+        "typedef struct {",
+        "    int band0, band1, alt;",
+        "} TrackBranch;",
         "",
         "typedef struct {",
         "    const char *id;",
@@ -634,6 +771,8 @@ def write_header(path, baked_tracks, step):
         "    int cycle;",
         "    int count;",
         "    int rep_x, rep_y, rep_z;",
+        "    const TrackBranch *branch;",
+        "    int branches;",
         "} TrackDef;",
         "",
     ]
@@ -645,6 +784,13 @@ def write_header(path, baked_tracks, step):
         cycle = (t["span"]["s1"] - t["span"]["repeatFrom"]) // step
         if lead + cycle != len(main):
             die("%s span is not a single chain" % t["id"])
+        branches = runtime_branches(t, step)
+        order = list(range(len(main)))
+        alt_at = []
+        for band0, band1, chain in branches:
+            alt_at.append(len(order))
+            order.extend(chain)
+        remap = {old: new for new, old in enumerate(order)}
         if t["span"]["repeat"] == "closes":
             rep = (0, 0, 0)
         else:
@@ -657,27 +803,48 @@ def write_header(path, baked_tracks, step):
             )
         name = "span_" + t["id"].replace(".", "_")
         lines.append("static const PathSeg %s[] = {" % name)
-        for s in main:
-            obstacle = OBSTACLE_NONE if s["obstacle"] is None else s["obstacle"]
-            lines.append(
-                "    {%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d},%s"
-                % (
-                    int(round(s["p"][0])), int(round(s["p"][1])), int(round(s["p"][2])),
-                    int(round(s["p1"][0])), int(round(s["p1"][1])), int(round(s["p1"][2])),
-                    s["yaw"], s["pitch"], s["roll"],
-                    int(s["lanes"]), int(round(s["width"])), s["next"], s["fork"],
-                    1 if s["deck"] else 0, obstacle,
-                    " /* %s */" % s["piece"],
-                )
-            )
+        for old in order:
+            s = t["segments"][old]
+            if s["obstacle"] is None:
+                obstacle = OBSTACLE_NONE
+            else:
+                obstacle = int(round(s["obstacle"] * 2))
+            lanes = s["laneU"]
+            marks = s["markU"]
+            if len(lanes) > 3 or len(marks) > 2:
+                die("%s %s has more lanes than PathSeg holds" % (t["id"], s["piece"]))
+            def group(vals):
+                return "{%s}" % ", ".join(str(v) for v in vals)
+            row = [
+                int(round(s["p"][0])), int(round(s["p"][1])), int(round(s["p"][2])),
+                int(round(s["p1"][0])), int(round(s["p1"][1])), int(round(s["p1"][2])),
+                s["yaw"], s["pitch"], s["roll"],
+            ]
+            row += padded(s["edge"] + s["edge1"], 4)
+            row += [group(padded(lanes, 3)), group(padded(s["laneU1"], 3)),
+                    group(padded(marks, 2)), group(padded(s["markU1"], 2))]
+            row += [
+                remap.get(s["next"], -1), remap.get(s["fork"], -1),
+                len(lanes), len(marks), 1 if s["deck"] else 0, obstacle,
+                (1 if s["curb"][0] else 0) | (2 if s["curb"][1] else 0),
+            ]
+            lines.append("    {%s},%s" % (", ".join(str(v) for v in row), " /* %s */" % s["piece"]))
         lines.append("};")
         lines.append("")
-        rows.append((t["id"], name, lead, cycle, lead + cycle, rep))
-        total += lead + cycle
+        bname = "0"
+        if branches:
+            bname = "branch_" + t["id"].replace(".", "_")
+            lines.append("static const TrackBranch %s[] = {" % bname)
+            for (band0, band1, chain), alt in zip(branches, alt_at):
+                lines.append("    {%d, %d, %d}," % (band0, band1, alt))
+            lines.append("};")
+            lines.append("")
+        rows.append((t["id"], name, lead, cycle, lead + cycle, rep, bname, len(branches)))
+        total += len(order)
     lines.append("static const TrackDef track_table[] = {")
-    for tid, name, lead, cycle, count, rep in rows:
-        lines.append('    {"%s", %s, %d, %d, %d, %d, %d, %d},' % (
-            tid, name, lead, cycle, count, rep[0], rep[1], rep[2]))
+    for tid, name, lead, cycle, count, rep, bname, nb in rows:
+        lines.append('    {"%s", %s, %d, %d, %d, %d, %d, %d, %s, %d},' % (
+            tid, name, lead, cycle, count, rep[0], rep[1], rep[2], bname, nb))
     lines.append("};")
     lines.append("")
     lines.append("#define TRACK_TABLE_COUNT %d" % len(rows))
@@ -696,6 +863,7 @@ def main():
     args = ap.parse_args()
     with open(args.catalog) as f:
         cat = json.load(f)
+    check_lane_mirror()
     tracks = []
     straight = None
     for t in cat["tracks"]:

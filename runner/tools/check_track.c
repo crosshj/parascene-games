@@ -29,6 +29,12 @@ void dim(int *r, int *g, int *b, int z) {
     (void)r; (void)g; (void)b; (void)z;
 }
 
+void poly_f4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
+             int bucket, int r, int g, int b, int blend) {
+    (void)p0; (void)p1; (void)p2; (void)p3;
+    (void)bucket; (void)r; (void)g; (void)b; (void)blend;
+}
+
 static int formula_has(int band) {
     return band >= 8 && (band % 8) == 5;
 }
@@ -42,6 +48,54 @@ static int near(int got, int want, int slop) {
     if (d < 0)
         d = -d;
     return d <= slop;
+}
+
+/* The runner's lane logic from main.c: from u0 at the start, run to s_end
+ * holding the lane. Returns the lane u at the end; *mid is the lane count
+ * at s_mid. */
+static int run_lane(int u0, int s_mid, int s_end, int *mid) {
+    int u[PATH_LANES];
+    int s, lane_u = u0;
+    path_reset();
+    path_follow(CHAR_Z, lane_u);
+    for (s = CHAR_Z + 20; s < s_end; s += 20) {
+        lane_u -= path_follow(s, lane_u);
+        path_lanes(s, u);
+        lane_u = u[path_lane_near(s, lane_u)];
+        if (s / 20 == s_mid / 20)
+            *mid = path_lanes(s, u);
+    }
+    return lane_u;
+}
+
+/* path_first_cut against path_cut band by band, on the route and with
+ * each fork swapped. */
+static int first_cut_ok(const char *id) {
+    int k, b0, len, b, want;
+    path_open(id);
+    for (k = -1; k < path_branches(); k++) {
+        if (k >= 0)
+            path_swap(k);
+        for (b0 = 0; b0 < 900; b0++) {
+            for (len = 0; len < 40; len += 7) {
+                want = -1;
+                for (b = b0; b <= b0 + len; b++) {
+                    if (path_cut(b)) {
+                        want = b;
+                        break;
+                    }
+                }
+                if (path_first_cut(b0, b0 + len) != want) {
+                    fprintf(stderr, "%s fork %d: first cut %d..%d is %d, want %d\n", id, k,
+                            b0, b0 + len, path_first_cut(b0, b0 + len), want);
+                    return 0;
+                }
+            }
+        }
+        if (k >= 0)
+            path_swap(k);
+    }
+    return 1;
 }
 
 int main(void) {
@@ -64,8 +118,8 @@ int main(void) {
             fprintf(stderr, "band %d has %d\n", band, has);
             return 1;
         }
-        if (has && obstacle_lane(band) != formula_lane(band)) {
-            fprintf(stderr, "band %d lane %d\n", band, obstacle_lane(band));
+        if (has && obstacle_u(band) != formula_lane(band) * LANE) {
+            fprintf(stderr, "band %d u %d\n", band, obstacle_u(band));
             return 1;
         }
     }
@@ -175,7 +229,7 @@ int main(void) {
     }
     {
         int lx, ly, lz, rx, ry, rz;
-        path_cam_lr(6144 + CHAR_Z, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        path_cam_lr(6144 + CHAR_Z, -280, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
         if (!near(ly - ry, 311, 12) || !near(ly + ry, 0, 12)) {
             fprintf(stderr, "bank turn edges %d %d\n", ly, ry);
             return 1;
@@ -186,13 +240,13 @@ int main(void) {
     {
         int lx, ly, lz, rx, ry, rz;
         path_begin(15000);
-        path_cam_lr(15000 + CHAR_Z, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        path_cam_lr(15000 + CHAR_Z, -280, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
         if (ly >= ry) {
             fprintf(stderr, "bank carve-left edges %d %d\n", ly, ry);
             return 1;
         }
         path_begin(19000);
-        path_cam_lr(19000 + CHAR_Z, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        path_cam_lr(19000 + CHAR_Z, -280, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
         if (ly <= ry) {
             fprintf(stderr, "bank carve-right edges %d %d\n", ly, ry);
             return 1;
@@ -216,9 +270,71 @@ int main(void) {
         fprintf(stderr, "bank lap %d %d %d\n", x, y, z);
         return 1;
     }
+    if (!path_open("lanes.count")) {
+        fprintf(stderr, "lanes.count did not open\n");
+        return 1;
+    }
+    /* three-to-two holds its left edge: on the straight it stays at -280
+     * from the camera while the right edge comes in from 280 to 130. */
+    {
+        int ul, ur, lx, ly, lz, rx, ry, rz;
+        path_begin(4096);
+        path_edges(4096 + CHAR_Z, &ul, &ur);
+        path_cam_lr(4096 + CHAR_Z, ul, ur, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        if (!near(lx, -280, 2) || !near(rx, 280 - 150 * CHAR_Z / 4096, 2)) {
+            fprintf(stderr, "lanes three edges %d %d\n", lx, rx);
+            return 1;
+        }
+        path_edges(8190, &ul, &ur);
+        path_cam_lr(8190, ul, ur, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        if (!near(lx, -280, 3) || !near(rx, 130, 3)) {
+            fprintf(stderr, "lanes three-to-two edges %d %d\n", lx, rx);
+            return 1;
+        }
+    }
+    /* The right lane holds through 3->2 (left anchor drops nothing on the
+     * left, so the right lane closes onto the middle one). */
+    {
+        int mid = 0;
+        int u = run_lane(150, 10000, 12000, &mid);
+        if (mid != 2 || !near(u, 75, 2)) {
+            fprintf(stderr, "lanes right lane %d lanes %d\n", u, mid);
+            return 1;
+        }
+    }
+    if (!path_open("fork.lane")) {
+        fprintf(stderr, "fork.lane did not open\n");
+        return 1;
+    }
+    /* The left lane takes the one-lane road, which opens on its right; the
+     * runner keeps its line and meets the joined road on the left lane. The
+     * middle and right lanes take the two-lane road, which drops its left
+     * lane; both end on the right lane. */
+    {
+        static const struct { int u0, mid, end; } want[] = {
+            {-150, 1, -150}, {0, 2, 150}, {150, 2, 150},
+        };
+        int i;
+        for (i = 0; i < 3; i++) {
+            int mid = 0;
+            int u = run_lane(want[i].u0, 6000, 19200, &mid);
+            if (mid != want[i].mid || !near(u, want[i].end, 2)) {
+                fprintf(stderr, "fork from %d: %d lanes mid, ends at %d\n", want[i].u0, mid, u);
+                return 1;
+            }
+        }
+    }
     if (!path_open("straight.run")) {
         fprintf(stderr, "straight.run did not reopen\n");
         return 1;
+    }
+    {
+        static const char *const ids[] = {
+            "straight.run", "bend.flat", "hill.loop", "bank.bend", "lanes.count", "fork.lane"
+        };
+        for (i = 0; i < 6; i++)
+            if (!first_cut_ok(ids[i]))
+                return 1;
     }
     printf("track span ok\n");
     return 0;

@@ -2,6 +2,7 @@
 #include "course.h"
 #include "path.h"
 #include "road.h"
+#include "profile.h"
 
 /* Must reach FAR even with fine near steps, or crates appear past the deck. */
 #define RING_MAX 48
@@ -12,6 +13,8 @@
 #define EDGE_W 16
 /* Dividers past this are a pixel or two; they cost more than they read. */
 #define DASH_END 2800
+/* Strips this short sit on a jump: deck only, no curb across the road. */
+#define SLIVER 4
 /* Far tier: deck and crate faces only, out to VIEW_Z. It walks up to
  * VIEW_S of track (short of a lap on a closed track) so a turn and the
  * road coming back stay in view. Spacing grows with depth and shrinks
@@ -21,15 +24,23 @@
 #define VIEW_S 44000
 #define FAR_MAX 48
 #define FAR_DS_MIN STEP
-#define FAR_DS_MAX (STEP * 3)
+#define FAR_DS_MAX (STEP * 6)
 #define FAR_DS_SKIP (STEP * 4)
 #define FAR_YAW 192
+#define FAR_YAW_Z 8000
+/* A crate past this is under 2 px wide: not worth drawing. */
+#define CRATE_Z 10240
 #define FAR_PITCH 48
 
 typedef struct {
     XY l, r;
     int lz, rz;
     int s;
+    int ul, w;        /* left edge and deck width in u */
+    int gap;          /* 1 when off-screen road was skipped since the sample before */
+    int lx, ly, rx, ry; /* the edges in camera space, with lz and rz */
+    int kl, kr;       /* each curb's width, 0..4096 of EDGE_W */
+    const PathSeg *seg;
 } RoadSample;
 
 static const RoadStyle *style;
@@ -108,7 +119,12 @@ static void through_air(const Light *light, const uint8_t *c, int amount, uint8_
         out[i] = (uint8_t)(c[i] + (light->haze[i] - c[i]) * amount / 256);
 }
 
+static void backdrop(const RoadStyle *st);
 void road_backdrop(const RoadStyle *st) {
+    PROF(PF_R_BACKDROP, backdrop(st));
+}
+
+static void backdrop(const RoadStyle *st) {
     const Light *light = st->light;
     int yaw = path_yaw();
     int base = path_horizon() + 8;
@@ -145,19 +161,30 @@ static int edge_len(XY a, XY b) {
 }
 
 /* poly_f4v drops quads wider than 280px; near road is often 500–700px.
- * Split laterally until each piece fits, using poly_f4's 480px edge limit. */
+ * Split laterally until each piece fits, using poly_f4's 480px edge limit.
+ * An edge is split only by its own length, so the strip on its other side
+ * splits it at the same rounded midpoint; otherwise the seam cracks open. */
 static void emit_piece(XY al, XY ar, XY bl, XY br, int bucket, int r, int g, int bcol, int depth) {
-    int near = edge_len(al, ar);
-    int far = edge_len(bl, br);
-    int span = near > far ? near : far;
-    if (span > 400 && depth < 3) {
+    int near = depth < 3 && edge_len(al, ar) > 400;
+    int far = depth < 3 && edge_len(bl, br) > 400;
+    if (near && far) {
         XY am = lerp_xy(al, ar, 1, 2);
         XY bm = lerp_xy(bl, br, 1, 2);
         emit_piece(al, am, bl, bm, bucket, r, g, bcol, depth + 1);
         emit_piece(am, ar, bm, br, bucket, r, g, bcol, depth + 1);
-        return;
+    } else if (near) {
+        XY am = lerp_xy(al, ar, 1, 2);
+        emit_piece(al, am, bl, bl, bucket, r, g, bcol, depth + 1);
+        emit_piece(am, am, bl, br, bucket, r, g, bcol, depth + 1);
+        emit_piece(am, ar, br, br, bucket, r, g, bcol, depth + 1);
+    } else if (far) {
+        XY bm = lerp_xy(bl, br, 1, 2);
+        emit_piece(al, al, bl, bm, bucket, r, g, bcol, depth + 1);
+        emit_piece(al, ar, bm, bm, bucket, r, g, bcol, depth + 1);
+        emit_piece(ar, ar, bm, br, bucket, r, g, bcol, depth + 1);
+    } else {
+        poly_f4(&al, &ar, &bl, &br, bucket, r, g, bcol, BLEND_NONE);
     }
-    poly_f4(&al, &ar, &bl, &br, bucket, r, g, bcol, BLEND_NONE);
 }
 
 /* dim() pulls toward black; that fights aerial perspective here. */
@@ -219,10 +246,73 @@ static void haze_far(int *r, int *g, int *b, int z) {
     *b = *b + (haze[2] - *b) * k / 256;
 }
 
+/* haze_far for the far deck and its edge lines, by depth past FAR in
+ * steps of 1 << HAZE_SHIFT. The style fixes them, so they are built once
+ * a style. */
+#define HAZE_SHIFT 9
+#define HAZE_N (((VIEW_Z - FAR) >> HAZE_SHIFT) + 2)
+static const RoadStyle *haze_style;
+static uint8_t haze_deck[HAZE_N][3], haze_line[HAZE_N][3], haze_crate[HAZE_N][3];
+
+static void haze_tables(void) {
+    int i;
+    if (haze_style == style)
+        return;
+    haze_style = style;
+    for (i = 0; i < HAZE_N; i++) {
+        int z = FAR + (i << HAZE_SHIFT);
+        int r = style->road[0], g = style->road[1], b = style->road[2];
+        haze_far(&r, &g, &b, z);
+        haze_deck[i][0] = (uint8_t)clamp(r, 0, 255);
+        haze_deck[i][1] = (uint8_t)clamp(g, 0, 255);
+        haze_deck[i][2] = (uint8_t)clamp(b, 0, 255);
+        r = (style->edge[0] + road_far[0] * 3) / 4;
+        g = (style->edge[1] + road_far[1] * 3) / 4;
+        b = (style->edge[2] + road_far[2] * 3) / 4;
+        haze_far(&r, &g, &b, z);
+        haze_line[i][0] = (uint8_t)clamp(r, 0, 255);
+        haze_line[i][1] = (uint8_t)clamp(g, 0, 255);
+        haze_line[i][2] = (uint8_t)clamp(b, 0, 255);
+        if (style->obstacle) {
+            r = style->obstacle->front[0];
+            g = style->obstacle->front[1];
+            b = style->obstacle->front[2];
+            haze_far(&r, &g, &b, z);
+            haze_crate[i][0] = (uint8_t)clamp(r, 0, 255);
+            haze_crate[i][1] = (uint8_t)clamp(g, 0, 255);
+            haze_crate[i][2] = (uint8_t)clamp(b, 0, 255);
+        }
+    }
+}
+
+static const uint8_t *haze_at(uint8_t table[][3], int z) {
+    return table[clamp((z - FAR) >> HAZE_SHIFT, 0, HAZE_N - 1)];
+}
+
+/* 1 when the quad between two samples is wholly off one side of the screen. */
+static int off_screen(const RoadSample *a, const RoadSample *b) {
+    int x0 = a->l.x, x1 = a->l.x, y0 = a->l.y, y1 = a->l.y;
+    const XY *p[3];
+    int i;
+    p[0] = &a->r;
+    p[1] = &b->l;
+    p[2] = &b->r;
+    for (i = 0; i < 3; i++) {
+        if (p[i]->x < x0) x0 = p[i]->x;
+        if (p[i]->x > x1) x1 = p[i]->x;
+        if (p[i]->y < y0) y0 = p[i]->y;
+        if (p[i]->y > y1) y1 = p[i]->y;
+    }
+    return x1 < -EDGE_W || x0 > SCREEN_W + EDGE_W || y1 < 0 || y0 > SCREEN_H;
+}
+
 static void strip(const RoadSample *a, const RoadSample *b) {
     int sort, bucket;
     int r = style->road[0], g = style->road[1], bcol = style->road[2];
+    PROF_N(PN_STRIP);
     if (a->lz < 8 || a->rz < 8 || b->lz < 8 || b->rz < 8)
+        return;
+    if (off_screen(a, b))
         return;
     sort = (b->lz + b->rz) / 2;
     if (sort < CLIP)
@@ -237,12 +327,13 @@ static void strip(const RoadSample *a, const RoadSample *b) {
     emit_piece(a->l, a->r, b->l, b->r, bucket, r, g, bcol, 0);
 }
 
-/* Outset EDGE_W past a road edge in screen space (u is linear across the deck). */
-static XY curb_out(XY edge, XY other, int half) {
+/* Outset k / 4096 of EDGE_W past a road edge in screen space (u is linear
+ * across the deck). */
+static XY curb_out(XY edge, XY other, int half, int k) {
     XY o;
     int span = half * 2;
-    o.x = (int16_t)(edge.x + (edge.x - other.x) * EDGE_W / span);
-    o.y = (int16_t)(edge.y + (edge.y - other.y) * EDGE_W / span);
+    o.x = (int16_t)(edge.x + (edge.x - other.x) * EDGE_W * (k >> 4) / (span << 8));
+    o.y = (int16_t)(edge.y + (edge.y - other.y) * EDGE_W * (k >> 4) / (span << 8));
     return o;
 }
 
@@ -256,12 +347,15 @@ static void curb_color(int s, int z, int *r, int *g, int *b) {
     haze_air(r, g, b, z);
 }
 
-static void strip_edges(const RoadSample *a, const RoadSample *b, int half) {
-    int er, eg, eb, sort, bucket;
+static void strip_edges(const RoadSample *a, const RoadSample *b) {
+    int er, eg, eb, sort, bucket, half = a->w / 2, half_b = b->w / 2;
     XY alo, aro, blo, bro;
-    if (half < EDGE_W * 2)
+    PROF_N(PN_EDGES);
+    if (half < EDGE_W * 2 || half_b < EDGE_W * 2 || b->s - a->s < SLIVER)
         return;
     if (a->lz < 8 || a->rz < 8 || b->lz < 8 || b->rz < 8)
+        return;
+    if (off_screen(a, b))
         return;
     sort = (b->lz + b->rz) / 2;
     if (sort < CLIP)
@@ -270,24 +364,55 @@ static void strip_edges(const RoadSample *a, const RoadSample *b, int half) {
         return;
     curb_color(a->s, sort, &er, &eg, &eb);
     bucket = sort >> OT_SHIFT;
-    alo = curb_out(a->l, a->r, half);
-    blo = curb_out(b->l, b->r, half);
-    aro = curb_out(a->r, a->l, half);
-    bro = curb_out(b->r, b->l, half);
-    poly_f4(&alo, &a->l, &blo, &b->l, bucket, er, eg, eb, BLEND_NONE);
-    poly_f4(&a->r, &aro, &b->r, &bro, bucket, er, eg, eb, BLEND_NONE);
+    /* A curb tapering to nothing at one end is drawn as a triangle. */
+    if (a->kl || b->kl) {
+        alo = curb_out(a->l, a->r, half, a->kl);
+        blo = curb_out(b->l, b->r, half_b, b->kl);
+        poly_f4(&alo, &a->l, &blo, &b->l, bucket, er, eg, eb, BLEND_NONE);
+    }
+    if (a->kr || b->kr) {
+        aro = curb_out(a->r, a->l, half, a->kr);
+        bro = curb_out(b->r, b->l, half_b, b->kr);
+        poly_f4(&a->r, &aro, &b->r, &bro, bucket, er, eg, eb, BLEND_NONE);
+    }
+}
+
+/* s + ds, unless that crosses a band edge where the road does not run on:
+ * a centerline jump at a fork or join, or edges that do not meet. Then the
+ * edge, with *end set: sample it once as the end of the road before
+ * (path_end_side) and again as the start of the road after, so no strip
+ * stretches one road into the other. */
+static int next_s(int s, int ds, int *end) {
+    int b = path_first_cut(s / STEP + 1, (s + ds) / STEP);
+    *end = b >= 0;
+    return b >= 0 ? b * STEP : s + ds;
+}
+
+static int sample_at(RoadSample *out, int s);
+
+static int sample_side(RoadSample *out, int s, int end) {
+    int cz;
+    path_end_side(end);
+    cz = sample_at(out, s);
+    path_end_side(0);
+    return cz;
 }
 
 static int sample_at(RoadSample *out, int s) {
-    const PathSeg *seg = path_at(s);
-    int half = seg->width / 2;
-    int lx, ly, lz, rx, ry, rz;
-    path_cam_lr(s, half, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+    int ul, ur, lx, ly, lz, rx, ry, rz;
+    out->seg = path_deck_lr(s, &ul, &ur, &lx, &ly, &lz, &rx, &ry, &rz, &out->kl, &out->kr);
+    out->ul = ul;
+    out->w = ur - ul;
     project(lx, ly, lz, &out->l);
     project(rx, ry, rz, &out->r);
+    out->lx = lx;
+    out->ly = ly;
     out->lz = lz;
+    out->rx = rx;
+    out->ry = ry;
     out->rz = rz;
     out->s = s;
+    out->gap = 0;
     return (lz + rz) / 2;
 }
 
@@ -304,10 +429,8 @@ static void deck_under(int s) {
 
 void road_panel(int s, int u0, int u1, int v0, int v1, int r, int g, int b) {
     int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, sortz;
-    path_cam(s, u0, v1, &x0, &y0, &z0);
-    path_cam(s, u1, v1, &x1, &y1, &z1);
-    path_cam(s, u0, v0, &x2, &y2, &z2);
-    path_cam(s, u1, v0, &x3, &y3, &z3);
+    path_cam_lr(s, u0, u1, v1, &x0, &y0, &z0, &x1, &y1, &z1);
+    path_cam_lr(s, u0, u1, v0, &x2, &y2, &z2, &x3, &y3, &z3);
     if (z0 < 8 || z1 < 8 || z2 < 8 || z3 < 8)
         return;
     sortz = (z0 + z1) / 2;
@@ -323,6 +446,9 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
     int s;
     if (!lap)
         return;
+#ifdef RUNNER_PROFILE
+    uint32_t prof_t0_ = prof_now();
+#endif
     s = (scroll / lap) * lap;
     if (s < scroll + CLIP)
         s += lap;
@@ -331,17 +457,60 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
     road_panel(s, -edge - 36, -edge, 0, 230, post[0], post[1], post[2]);
     road_panel(s, edge, edge + 36, 0, 230, post[0], post[1], post[2]);
     road_panel(s, -edge, edge, 200, 228, beam[0], beam[1], beam[2]);
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_R_GANTRY] += (prof_now() - prof_t0_) & 0xFFFF;
+#endif
 }
 
+/* The deck at u across a sample, in camera space: path_cam_lr is linear
+ * in u, so this is exact. */
+static void across(const RoadSample *a, int u, int *x, int *y, int *z) {
+    int f = a->w ? (u - a->ul) * 4096 / a->w : 2048;
+    *x = a->lx + (a->rx - a->lx) * f / 4096;
+    *y = a->ly + (a->ry - a->ly) * f / 4096;
+    *z = a->lz + (a->rz - a->lz) * f / 4096;
+}
+
+/* The deck at u, t/4096 of the way from sample a to sample b: on the strip
+ * between them, so a dash never floats off the chord the deck draws. */
+static void deck_point(const RoadSample *a, const RoadSample *b, int t, int u,
+                       int *x, int *y, int *z) {
+    int ax, ay, az, bx, by, bz;
+    across(a, u, &ax, &ay, &az);
+    across(b, u, &bx, &by, &bz);
+    *x = ax + (bx - ax) * t / 4096;
+    *y = ay + (by - ay) * t / 4096;
+    *z = az + (bz - az) * t / 4096;
+}
+
+/* Past this a dash is under two pixels wide, and draws as a line. */
+#define DASH_LINE_Z 1400
+
 /* Path-space dashes so lanes stay correct through bends and over crests. */
-static void dash(int s0, int s1, int u) {
+static void dash(const RoadSample *a, const RoadSample *b, int t0, int t1, int u0, int u1) {
     int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
     int sort, rr, gg, bb;
     XY p0, p1, p2, p3;
-    path_cam(s0, u - 6, 3, &x0, &y0, &z0);
-    path_cam(s0, u + 6, 3, &x1, &y1, &z1);
-    path_cam(s1, u + 6, 3, &x2, &y2, &z2);
-    path_cam(s1, u - 6, 3, &x3, &y3, &z3);
+    deck_point(a, b, t0, u0, &x0, &y0, &z0);
+    if (z0 >= DASH_LINE_Z) {
+        if (z0 >= FAR)
+            return;
+        deck_point(a, b, t1, u1, &x1, &y1, &z1);
+        if (z1 < 8)
+            return;
+        rr = style->dash[0];
+        gg = style->dash[1];
+        bb = style->dash[2];
+        haze_paint(&rr, &gg, &bb, z0);
+        project(x0, y0, z0, &p0);
+        project(x1, y1, z1, &p1);
+        line_f2(p0, p1, z0 >> OT_SHIFT, rr, gg, bb);
+        return;
+    }
+    deck_point(a, b, t0, u0 - 6, &x0, &y0, &z0);
+    deck_point(a, b, t0, u0 + 6, &x1, &y1, &z1);
+    deck_point(a, b, t1, u1 + 6, &x2, &y2, &z2);
+    deck_point(a, b, t1, u1 - 6, &x3, &y3, &z3);
     if (z0 < 40 || z1 < 40 || z2 < 8 || z3 < 8)
         return;
     sort = (z0 + z1) / 2;
@@ -358,13 +527,26 @@ static void dash(int s0, int s1, int u) {
     poly_f4(&p0, &p1, &p2, &p3, sort >> OT_SHIFT, rr, gg, bb, BLEND_NONE);
 }
 
-/* Dividers sit between lane centers, LANE apart and centered on u = 0. */
-static void dashes(const RoadSample *a, int s1) {
-    const PathSeg *seg = path_at(a->s);
-    int s0 = a->s;
-    int n = seg->lanes;
-    int gap, i;
-    if (n < 2 || !seg->deck || ((s0 / 96) & 1) == 0)
+static int marks_join(const PathSeg *a, const PathSeg *b) {
+    int i;
+    if (b->marks != a->marks || b->x != a->x1 || b->y != a->y1 || b->z != a->z1)
+        return 0;
+    for (i = 0; i < a->marks; i++)
+        if (b->mu[i] != a->mu1[i])
+            return 0;
+    return 1;
+}
+
+/* Dividers from the baked marks, so they follow a lane change. Where the
+ * next segment has other dividers (a lane added or dropped, or a jump), a
+ * dash stops at the segment's end instead of running to one of them. */
+static void dashes(const RoadSample *a, const RoadSample *b) {
+    const PathSeg *seg = a->seg;
+    const PathSeg *far;
+    int s0 = a->s, s1 = b->s;
+    int u0[2], u1[2];
+    int n0, n1, gap, t0, t1, i, edge;
+    if (!seg->deck || b->gap || ((s0 / 96) & 1) == 0)
         return;
     if ((a->lz + a->rz) / 2 > DASH_END)
         return;
@@ -373,19 +555,43 @@ static void dashes(const RoadSample *a, int s1) {
         gap = 4;
     if (s1 - s0 <= gap * 2)
         return;
-    for (i = 0; i < n - 1; i++)
-        dash(s0 + gap, s1 - gap, i * LANE - (n - 2) * LANE / 2);
+    n0 = path_marks(s0 + gap, u0);
+    t0 = gap * 4096 / (s1 - s0);
+    t1 = 4096 - t0;
+    far = seg;
+    for (edge = (s0 / STEP + 1) * STEP; edge <= s1 - gap; edge += STEP) {
+        const PathSeg *next = path_at(edge);
+        if (!marks_join(far, next))
+            break;
+        far = next;
+    }
+    if (edge <= s1 - gap) {
+        if (edge - s0 <= gap)
+            return;
+        t1 = (edge - s0) * 4096 / (s1 - s0);
+        n1 = path_marks(edge - 1, u1);
+    } else {
+        n1 = path_marks(s1 - gap, u1);
+    }
+    for (i = 0; i < n0; i++)
+        dash(a, b, t0, t1, u0[i], u1[i < n1 ? i : n1 - 1]);
 }
 
 /* Past edge_end the curb becomes a one-pixel line on each edge. It starts as
  * the near curb and eases to a hint of curb color over the asphalt by FAR.
  * Link before the deck so it draws over the deck in the same bucket. */
 static void edge_lines(const RoadSample *a, const RoadSample *b, int sort) {
-    int r = (style->edge[0] + road_far[0] * 3) / 4;
-    int g = (style->edge[1] + road_far[1] * 3) / 4;
-    int bl = (style->edge[2] + road_far[2] * 3) / 4;
-    int k = clamp((FAR - sort) * 256 / (FAR - style->edge_end), 0, 256);
-    haze_far(&r, &g, &bl, sort);
+    const uint8_t *c = haze_at(haze_line, sort);
+    int r = c[0], g = c[1], bl = c[2];
+    int k = sort < FAR ? clamp((FAR - sort) * 256 / (FAR - style->edge_end), 0, 256) : 0;
+    if (b->s - a->s < SLIVER)
+        return;
+    if (k) {
+        r = (style->edge[0] + road_far[0] * 3) / 4;
+        g = (style->edge[1] + road_far[1] * 3) / 4;
+        bl = (style->edge[2] + road_far[2] * 3) / 4;
+        haze_far(&r, &g, &bl, sort);
+    }
     if (k) {
         int cr, cg, cb;
         curb_color(a->s, sort, &cr, &cg, &cb);
@@ -393,15 +599,21 @@ static void edge_lines(const RoadSample *a, const RoadSample *b, int sort) {
         g += (cg - g) * k / 256;
         bl += (cb - bl) * k / 256;
     }
-    line_f2(a->l, b->l, view_bucket(sort), r, g, bl);
-    line_f2(a->r, b->r, view_bucket(sort), r, g, bl);
+    if (a->kl || b->kl)
+        line_f2(a->l, b->l, view_bucket(sort), r, g, bl);
+    if (a->kr || b->kr)
+        line_f2(a->r, b->r, view_bucket(sort), r, g, bl);
 }
 
 /* Shaded from its near edge to its far edge, so long far pieces read as
  * receding road instead of flat blocks. */
 static void far_strip(const RoadSample *a, const RoadSample *b) {
-    int za, zb, sort, r0, g0, b0, r1, g1, b1;
+    int za, zb, sort;
+    const uint8_t *c0, *c1;
+    PROF_N(PN_FAR_STRIP);
     if (a->lz < 8 || a->rz < 8 || b->lz < 8 || b->rz < 8)
+        return;
+    if (off_screen(a, b))
         return;
     za = (a->lz + a->rz) / 2;
     zb = (b->lz + b->rz) / 2;
@@ -414,13 +626,11 @@ static void far_strip(const RoadSample *a, const RoadSample *b) {
     if (za >= VIEW_Z && zb >= VIEW_Z)
         return;
     edge_lines(a, b, sort);
-    r0 = r1 = style->road[0];
-    g0 = g1 = style->road[1];
-    b0 = b1 = style->road[2];
-    haze_far(&r0, &g0, &b0, za);
-    haze_far(&r1, &g1, &b1, zb);
+    c0 = haze_at(haze_deck, za);
+    c1 = haze_at(haze_deck, zb);
     poly_g4(&a->l, &a->r, &b->l, &b->r, view_bucket(sort),
-            r0, g0, b0, r0, g0, b0, r1, g1, b1, r1, g1, b1, BLEND_NONE);
+            c0[0], c0[1], c0[2], c0[0], c0[1], c0[2],
+            c1[0], c1[1], c1[2], c1[0], c1[1], c1[2], BLEND_NONE);
 }
 
 static int on_screen(const RoadSample *p, int cz) {
@@ -440,54 +650,82 @@ static int ang_abs(int d) {
 /* A chord may turn more than it may pitch or roll: a far bend reads as a
  * curve at coarse steps, but a crest or a bank change needs fine ones to
  * keep its outline. */
-static int too_bent(int s0, int s1) {
-    const PathSeg *a = path_at(s0);
+/* A turn's chord strays from the arc by the same distance at any depth,
+ * which shrinks on screen with depth, so the allowed turn grows with it.
+ * Grade keeps a fixed limit: a crest must still hide the road beyond. */
+static int too_bent(const PathSeg *a, int s1, int z) {
     const PathSeg *b = path_at(s1);
-    return ang_abs(b->yaw - a->yaw) > FAR_YAW ||
+    return ang_abs(b->yaw - a->yaw) > (z > FAR_YAW_Z ? FAR_YAW * (z / 64) / (FAR_YAW_Z / 64) : FAR_YAW) ||
            ang_abs(b->pitch - a->pitch) > FAR_PITCH ||
            ang_abs(b->roll - a->roll) > FAR_PITCH;
 }
 
-/* Next far sample: by depth while in view, halved through bends and
+/* Next far sample: depth / per while in view, halved through bends and
  * grade changes, and a long stride while out of view. */
-static int far_step(int s, const RoadSample *p, int cz) {
+static int far_step(int s, const RoadSample *p, int cz, int per) {
     int ds;
     if (!on_screen(p, cz))
         return FAR_DS_SKIP;
-    ds = clamp(cz / 8, FAR_DS_MIN, FAR_DS_MAX);
-    while (ds > FAR_DS_MIN && too_bent(s, s + ds))
+    ds = clamp(cz / per, FAR_DS_MIN, FAR_DS_MAX);
+    while (ds > FAR_DS_MIN && too_bent(p->seg, s + ds, cz))
         ds /= 2;
     return ds;
 }
 
-/* A far crate is its front face: a few pixels, one quad. */
-static void far_crate(int s, int lane_i) {
-    const uint8_t *c = style->obstacle->front;
-    int u = lane_i * LANE, w = 64, s0 = s - OBST_D / 2;
-    int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b;
+/* Past the widest deck and its curb, with room to spare. */
+#define OFF_MARGIN 400
+
+/* Longest hop over road out of view, so next_s walks few bands. */
+#define SKIP_MAX (STEP * 32)
+
+/* From s, out of view: hop on while the road stays out of view, and return
+ * where it may come into view, or a jump. A hop within the road's
+ * clearance cannot be seen; a shorter one is taken only when both ends are
+ * out of view. *gap is 1 when road was skipped; nothing draws across it. */
+static int skip_off(int s, int ds, int s_end, int *end, int *gap) {
+    int t = next_s(s, ds, end), c;
+    *gap = 0;
+    while (!*end && t < s_end && (c = path_view_clear(t, OFF_MARGIN, VIEW_Z)) > 0) {
+        int e2, t2 = next_s(t, clamp(c, ds, SKIP_MAX), &e2);
+        if (t2 >= s_end)
+            break;
+        if (c < ds && (e2 || !path_view_clear(t2, OFF_MARGIN, VIEW_Z)))
+            break;
+        t = t2;
+        *end = e2;
+        *gap = 1;
+    }
+    return t;
+}
+
+/* A far crate is its front face: a few pixels, one quad, raised straight
+ * up the screen from its base, which sits on the strip from a to b. */
+static void far_crate(int s, int u, const RoadSample *a, const RoadSample *b) {
+    int w = 64, s0 = s - OBST_D / 2, t;
+    int x0, y0, z0, x1, y1, z1, h;
+    const uint8_t *c;
     XY p0, p1, p2, p3;
-    path_cam(s, u, 0, &x0, &y0, &z0);
-    if (z0 < FAR) {
-        obstacle_box_shade(s, lane_i, style->obstacle, haze_road);
+    PROF_N(PN_FAR_CRATE);
+    t = b->s > a->s ? clamp((s0 - a->s) * 4096 / (b->s - a->s), -2048, 4096) : 0;
+    deck_point(a, b, t, u - w, &x0, &y0, &z0);
+    if (z0 + OBST_D / 2 < FAR) {
+        obstacle_box_shade(s, u, style->obstacle, haze_road);
         return;
     }
-    if (z0 >= VIEW_Z)
+    if (z0 >= CRATE_Z)
         return;
-    path_cam(s0, u - w, OBST_H, &x0, &y0, &z0);
-    path_cam(s0, u + w, OBST_H, &x1, &y1, &z1);
-    path_cam(s0, u - w, 0, &x2, &y2, &z2);
-    path_cam(s0, u + w, 0, &x3, &y3, &z3);
-    if (z0 < 8 || z1 < 8 || z2 < 8 || z3 < 8)
+    deck_point(a, b, t, u + w, &x1, &y1, &z1);
+    if (z1 < 8)
         return;
-    project(x0, y0, z0, &p0);
-    project(x1, y1, z1, &p1);
-    project(x2, y2, z2, &p2);
-    project(x3, y3, z3, &p3);
-    r = c[0];
-    g = c[1];
-    b = c[2];
-    haze_far(&r, &g, &b, z2);
-    poly_f4(&p0, &p1, &p2, &p3, view_bucket(z2) - 1, r, g, b, BLEND_NONE);
+    project(x0, y0, z0, &p2);
+    project(x1, y1, z1, &p3);
+    h = OBST_H * (SCREEN_W / 2) / z0;
+    p0 = p2;
+    p1 = p3;
+    p0.y = (int16_t)(p0.y - h);
+    p1.y = (int16_t)(p1.y - h);
+    c = haze_at(haze_crate, z0);
+    poly_f4(&p0, &p1, &p2, &p3, view_bucket(z0) - 1, c[0], c[1], c[2], BLEND_NONE);
 }
 
 /* Beyond the near ring: coarse deck out to VIEW_Z, and its crates. */
@@ -496,54 +734,239 @@ static void far_tier(const RoadSample *seam, int scroll) {
     int lap = path_lap();
     int s_end = scroll + VIEW_S;
     int s = seam->s;
-    int n = 1, i, band, band0, band1;
+    int n = 1, end = 0, i, band, band0, band1;
+#ifdef RUNNER_PROFILE
+    uint32_t prof_t0_ = prof_now();
+#endif
     if (lap && s_end > scroll + lap - STEP)
         s_end = scroll + lap - STEP;
     ring[0] = *seam;
     while (n <= FAR_MAX && s < s_end) {
         const RoadSample *p = &ring[n - 1];
-        s += far_step(p->s, p, (p->lz + p->rz) / 2);
-        if (s > s_end)
-            s = s_end;
-        sample_at(&ring[n], s);
+        int gap = 0;
+        if (end) {
+            end = 0;
+        } else {
+            int cz = (p->lz + p->rz) / 2;
+            if (on_screen(p, cz))
+                s = next_s(s, far_step(p->s, p, cz, 5), &end);
+            else
+                s = skip_off(s, FAR_DS_SKIP, s_end, &end, &gap);
+            if (s >= s_end) {
+                s = s_end;
+                end = 0;
+            }
+        }
+        sample_side(&ring[n], s, end);
+        PROF_N(PN_FAR);
+        ring[n].gap = gap;
         n++;
     }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_F_SAMPLE] += (prof_now() - prof_t0_) & 0xFFFF;
+    prof_t0_ = prof_now();
+#endif
     for (i = n - 2; i >= 0; i--) {
-        if (path_at(ring[i].s)->deck)
+        if (ring[i].seg->deck && !ring[i + 1].gap)
             far_strip(&ring[i], &ring[i + 1]);
     }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_F_STRIPS] += (prof_now() - prof_t0_) & 0xFFFF;
+    prof_t0_ = prof_now();
+#endif
     if (!style->obstacle)
         return;
     band0 = (seam->s + STEP / 2) / STEP;
     band1 = ring[n - 1].s / STEP;
+    i = 0;
     for (band = band0; band <= band1; band++) {
         int os = band * STEP + STEP / 2;
-        if (os <= seam->s || os > ring[n - 1].s || !has_obstacle(band))
+        const RoadSample *a, *b;
+        if (os <= seam->s || os > ring[n - 1].s || !path_may_crate(band))
             continue;
-        far_crate(os, obstacle_lane(band));
+        while (i < n - 2 && ring[i + 1].s < os)
+            i++;
+        a = &ring[i];
+        b = &ring[i + 1];
+        /* A crate on road out of view, too far to see, or on road skipped as
+         * out of view. */
+        if (b->gap || (a->lz + a->rz) / 2 >= CRATE_Z ||
+            (!on_screen(a, (a->lz + a->rz) / 2) && !on_screen(b, (b->lz + b->rz) / 2)))
+            continue;
+        if (has_obstacle(band))
+            far_crate(os, obstacle_u(band), a, b);
+    }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_F_CRATES] += (prof_now() - prof_t0_) & 0xFFFF;
+#endif
+}
+
+#define BRANCH_MAX 64
+/* The road off the route is a glance away: dividers stop nearer. */
+#define BRANCH_DASH_END (DASH_END / 2)
+
+/* The road of a fork the route is not on, from s0 to s1: near deck with
+ * curbs and dividers, the far deck past FAR, and its crates. Call with the
+ * fork swapped onto that road. */
+static void branch_draw(int s0, int s1) {
+    RoadSample ring[BRANCH_MAX];
+    int s = s0, n = 0, end = 0, i, band;
+#ifdef RUNNER_PROFILE
+    uint32_t prof_t0_ = prof_now();
+#endif
+    int gap = 0;
+    while (n < BRANCH_MAX) {
+        int cz = sample_side(&ring[n], s, end || s >= s1);
+        int ds;
+        PROF_N(PN_FORK);
+        ring[n].gap = gap;
+        gap = 0;
+        n++;
+        if (s >= s1)
+            break;
+        if (end) {
+            end = 0;
+            continue;
+        }
+        if (cz < -OFF_MARGIN)
+            ds = 0;
+        else if (cz < CLIP)
+            ds = 96;
+        else if (!on_screen(&ring[n - 1], cz))
+            ds = 0;
+        else if (cz < BRANCH_DASH_END)
+            ds = clamp(cz / 3, 64, STEP);
+        else
+            ds = far_step(s, &ring[n - 1], cz, 3);
+#ifdef RUNNER_PROFILE
+        if (cz < FAR && ds)
+            PROF_N(PN_FORK_NEAR);
+        if (!ds)
+            PROF_N(PN_FORK_OFF);
+#endif
+        if (ds)
+            s = next_s(s, ds, &end);
+        else
+            s = skip_off(s, cz < FAR && cz > 0 ? clamp(cz / 3, 64, STEP) : FAR_DS_SKIP,
+                         s1, &end, &gap);
+        if (s >= s1) {
+            s = s1;
+            end = 0;
+        }
+    }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_B_SAMPLE] += (prof_now() - prof_t0_) & 0xFFFF;
+    prof_t0_ = prof_now();
+#endif
+    for (i = n - 2; i >= 0; i--) {
+        int za = (ring[i].lz + ring[i].rz) / 2;
+        int zb = (ring[i + 1].lz + ring[i + 1].rz) / 2;
+        if (!ring[i].seg->deck || ring[i + 1].gap)
+            continue;
+        if (zb < style->edge_end && za < FAR) {
+            strip(&ring[i], &ring[i + 1]);
+            strip_edges(&ring[i], &ring[i + 1]);
+        } else {
+            far_strip(&ring[i], &ring[i + 1]);
+        }
+    }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_B_STRIPS] += (prof_now() - prof_t0_) & 0xFFFF;
+#endif
+    PROF(PF_B_DASHES, for (i = 0; i < n - 1; i++)
+                          if ((ring[i].lz + ring[i].rz) / 2 < BRANCH_DASH_END)
+                              dashes(&ring[i], &ring[i + 1]));
+    if (!style->obstacle)
+        return;
+#ifdef RUNNER_PROFILE
+    prof_t0_ = prof_now();
+#endif
+    i = 0;
+    for (band = s0 / STEP; band * STEP < s1; band++) {
+        int os = band * STEP + STEP / 2, za, zb;
+        const RoadSample *a, *b;
+        if (os < ring[0].s || os > ring[n - 1].s || n < 2 || !path_may_crate(band))
+            continue;
+        while (i < n - 2 && ring[i + 1].s < os)
+            i++;
+        a = &ring[i];
+        b = &ring[i + 1];
+        za = (a->lz + a->rz) / 2;
+        zb = (b->lz + b->rz) / 2;
+        if (b->gap || (za >= CRATE_Z && zb >= CRATE_Z) || (za < CLIP && zb < CLIP) ||
+            (!on_screen(a, za) && !on_screen(b, zb)))
+            continue;
+        if (!has_obstacle(band))
+            continue;
+        if (za < FAR && b->s - a->s > STEP)
+            deck_under(os);
+        far_crate(os, obstacle_u(band), a, b);
+    }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_B_CRATES] += (prof_now() - prof_t0_) & 0xFFFF;
+#endif
+}
+
+/* Each fork's other road, where it is in view. */
+static void branches_draw(int scroll) {
+    int lap = path_lap();
+    int view = scroll + (lap && lap - STEP < VIEW_S ? lap - STEP : VIEW_S);
+    int k;
+    for (k = 0; k < path_branches(); k++) {
+        int s0, s1;
+        if (!path_branch(k, scroll, &s0, &s1))
+            continue;
+        if (s0 < scroll + 32)
+            s0 = scroll + 32;
+        if (s1 > view)
+            s1 = view;
+        if (s0 >= s1)
+            continue;
+        path_swap(k);
+        branch_draw(s0, s1);
+        path_swap(k);
     }
 }
 
+static void route_draw(const RoadStyle *st, const LevelFrame *f);
+
 void road_draw(const RoadStyle *st, const LevelFrame *f) {
+    style = st;
+    road_time = f->time;
+    through_air(st->light, st->road_far, st->light->density, road_far);
+    haze_tables();
+    route_draw(st, f);
+    PROF(PF_R_BRANCH, branches_draw(f->scroll));
+}
+
+static void route_draw(const RoadStyle *st, const LevelFrame *f) {
     RoadSample ring[RING_MAX];
     int scroll = f->scroll;
     int s_end = scroll + FAR;
     int s = scroll + 32;
-    int n = 0;
+    int n = 0, end = 0;
     int i, band, band0, band1, road_s0, road_s1;
-
-    style = st;
-    road_time = f->time;
-    through_air(st->light, st->road_far, st->light->density, road_far);
+#ifdef RUNNER_PROFILE
+    uint32_t prof_t0_ = prof_now();
+#endif
 
     while (n < RING_MAX && s < s_end) {
-        int cz = sample_at(&ring[n], s);
+        int cz = sample_side(&ring[n], s, end);
+        PROF_N(PN_NEAR);
         int remain_n, remain_s, ds;
         if (cz < 8 || cz >= FAR) {
+            if (end) {
+                end = 0;
+                continue;
+            }
             s += 32;
             continue;
         }
         n++;
+        if (end) {
+            end = 0;
+            continue;
+        }
         remain_n = RING_MAX - n;
         remain_s = s_end - s;
         if (remain_n <= 0)
@@ -553,11 +976,15 @@ void road_draw(const RoadStyle *st, const LevelFrame *f) {
         ds = cz / 8;
         if (ds * remain_n < remain_s)
             ds = (remain_s + remain_n - 1) / remain_n;
-        s += clamp(ds, 28, STEP);
+        s = next_s(s, clamp(ds, 28, STEP), &end);
     }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_R_SAMPLE] += (prof_now() - prof_t0_) & 0xFFFF;
+    prof_t0_ = prof_now();
+#endif
 
     for (i = n - 2; i >= 0; i--) {
-        const PathSeg *seg = path_at(ring[i].s);
+        const PathSeg *seg = ring[i].seg;
         int zb = (ring[i + 1].lz + ring[i + 1].rz) / 2;
         if (!seg->deck)
             continue;
@@ -566,16 +993,21 @@ void road_draw(const RoadStyle *st, const LevelFrame *f) {
             strip(&ring[i], &ring[i + 1]);
         } else {
             strip(&ring[i], &ring[i + 1]);
-            strip_edges(&ring[i], &ring[i + 1], seg->width / 2);
+            strip_edges(&ring[i], &ring[i + 1]);
         }
     }
 
-    for (i = 0; i < n - 1; i++)
-        dashes(&ring[i], ring[i + 1].s);
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_R_STRIPS] += (prof_now() - prof_t0_) & 0xFFFF;
+#endif
+    PROF(PF_R_DASHES, for (i = 0; i < n - 1; i++) dashes(&ring[i], &ring[i + 1]));
 
     if (n < 2)
         return;
-    far_tier(&ring[n - 1], scroll);
+    PROF(PF_R_FAR, far_tier(&ring[n - 1], scroll));
+#ifdef RUNNER_PROFILE
+    prof_t0_ = prof_now();
+#endif
 
     /* Only crates that sit on the drawn deck; each gets a local pad too. */
     if (!st->obstacle)
@@ -592,6 +1024,42 @@ void road_draw(const RoadStyle *st, const LevelFrame *f) {
         if (os < road_s0 || os > road_s1)
             continue;
         deck_under(os);
-        obstacle_box_shade(os, obstacle_lane(band), st->obstacle, haze_road);
+        obstacle_box_shade(os, obstacle_u(band), st->obstacle, haze_road);
     }
+#ifdef RUNNER_PROFILE
+    prof_ticks[PF_R_CRATES] += (prof_now() - prof_t0_) & 0xFFFF;
+#endif
 }
+
+#ifdef RUNNER_PROFILE
+#include <stdio.h>
+void road_bench(const RoadStyle *st) {
+    int i, r, g, b, acc = 0;
+    uint32_t t;
+    XY p0 = {100, 150}, p1 = {200, 150}, p2 = {110, 140}, p3 = {190, 140};
+    RoadSample a, c;
+    style = st;
+    through_air(st->light, st->road_far, st->light->density, road_far);
+    haze_tables();
+    sample_at(&a, 2000);
+    sample_at(&c, 2100);
+#define RB(name, stmt) do { t = prof_now(); for (i = 0; i < 100; i++) { stmt; } \
+        printf("PROF bench %-14s %5u cycles\n", name, (unsigned)((((prof_now() - t) & 0xFFFF) * 8) / 100)); } while (0)
+    RB("poly_f4", poly_f4(&p0, &p1, &p2, &p3, 100, 10, 20, 30, BLEND_NONE));
+    RB("poly_g4", poly_g4(&p0, &p1, &p2, &p3, 100, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, BLEND_NONE));
+    RB("line_f2", line_f2(p0, p1, 100, 1, 2, 3));
+    RB("haze_road", (r = 100, g = 100, b = 100, haze_road(&r, &g, &b, 1000 + i), acc += r));
+    RB("haze_far", (r = 100, g = 100, b = 100, haze_far(&r, &g, &b, 5000 + i), acc += r));
+    RB("curb_color", (curb_color(i * 256, 1000, &r, &g, &b), acc += r));
+    RB("view_bucket", acc += view_bucket(5000 + i * 10));
+    RB("sample_at", acc += sample_at(&a, 2000 + i * 13));
+    sample_at(&a, 2000);
+    RB("strip", strip(&a, &c));
+    RB("strip_edges", strip_edges(&a, &c));
+    RB("far_strip", far_strip(&a, &c));
+    RB("on_screen", acc += on_screen(&a, 1000));
+    RB("next_s", { int e; acc += next_s(2000 + i, 700, &e); });
+    RB("view_clear", acc += path_view_clear(2000 + i * 50, 400, VIEW_Z));
+    printf("PROF bench acc %d\n", acc);
+}
+#endif

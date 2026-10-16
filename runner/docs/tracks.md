@@ -22,11 +22,11 @@ finite period with a start and an end:
 The pose at the seam decides the strategy:
 
 - **closes.** The period returns to the seam. The next lap occupies the same
-  place. The marker says **start · closes**. `bend.flat`, `hill.loop`, and
-  `bank.bend` do this.
+  place. The marker says **start · closes**. `bend.flat`, `hill.loop`,
+  `bank.bend`, `lanes.count`, and `fork.lane` do this.
 - **continues.** Heading, pitch, and bank match the seam, and the road is
   further along. The next period repeats ahead. One ghost step shows it
-  starting. `straight.run`, the lane changes, the fork, and the gap do this.
+  starting. `straight.run` and the gap do this.
 - **turns.** Pitch and bank match, and the heading has changed. The next
   period repeats on that new heading. The ghost step follows it.
 
@@ -71,15 +71,15 @@ rides the bank without knowing about it.
 | `bend.flat` | runnable | `north`, `east-bend`, `south`, `west-bend` | Closes. One lap returns to its start. The FLAT OVAL world runs it. |
 | `hill.loop` | runnable | `start`, one big hill, `turn-back`, two smaller hills, `turn-home`, `home` | Closes. The HILL world runs it. Turns like the oval, with grades on both straights. Both sides lose the same ground to slope: four 4096 ramps out, eight 2048 ramps back, all at 22.5°, with 8192 of flat on each side. |
 | `bank.bend` | runnable | `start`, `turn-in`, `turn`, `turn-out`, `link`, `lean-left`, `carve-left`, `flip`, `carve-right`, `lean-right`, `settle`, `home-in`, `home-turn`, `home-out`, `home` | Closes. The BANK world runs it. Both turn-arounds bank right at 33.75°. On the way back, an S banks left at 22.5°, rolls through level into a 22.5° right bank in `flip`, and settles. The S moves the road outward, so the home turn-around is wider (12288) to meet the start. |
-| `lanes.count` | view | `one`, `one-to-two`, `two`, `two-to-three`, `three`, `three-to-two`, `two-hold`, `two-to-one`, `one-end` | Continues. The lane changes repeat from one lane. |
-| `fork.lane` | view | `three`, `two-off`, `two-to-one`, `two-back`, `one-off`, `one-to-two`, `one-back`, `joined` | Continues. Three lanes split into two and one, those counts swap, and they merge as three. |
+| `lanes.count` | runnable | 23 pieces, `three` around to `bend-home` | Closes. The ZIPPER world runs it. A test lap for every lane change. Four 90° bends hold 1, 3, 2, and 3 lanes; no lane change happens inside a bend. Straights: 3→2 left-anchored, 2→1 right-anchored north; 1→2 left, 2→3 right back to back east; 3→1, 1→3 right-anchored, 3→2 centered south; 2→3 centered west. Edge anchors come in pairs on one straight so their slides cancel. A crate on every hold and bend, in a lane valid for its count. |
+| `fork.lane` | runnable | fork A (`three` … `joined`), `turn`, fork B (`three-b` … `joined-b`), `home-turn` | Closes. The MAXI-P world runs it. Two forks and two three-lane turn-arounds. At each fork three lanes split into two and one, each branch bends out, runs straight, and bends back, and they merge as three. Fork A, heading out, swaps counts on the straights: the two drops its left lane (`anchor: right`) and the one adds a lane on its right (`anchor: left`), so the swapped lanes meet a centered road. Fork B, heading home, is a plain fork with no lane change. Both forks use the same mirrored 45° bends. Turn-arounds are 12288 so the inner branches stay clear of each other. |
 | `gap.drop` | view | `approach`, `gap`, `landing` | Continues. The gap repeats. |
 
 The game loads a track only when its status is `runnable` and every
 capability it uses is in the implemented set. Today that set is `repeat`,
-`yaw`, `grade`, and `bank`. `path_open` accepts `straight.run`,
-`bend.flat`, `hill.loop`, and `bank.bend`. The viewer draws the rest and
-lists the capability still missing.
+`yaw`, `grade`, `bank`, `lanes`, `fork`, and `join`. `path_open` accepts
+every track but `gap.drop`. The viewer draws it and lists the capability
+still missing.
 
 ## Order
 
@@ -91,8 +91,8 @@ lists the capability still missing.
    it. The camera takes 3/4 of the grade under it, and the backdrop sits
    on `path_horizon`.
 4. **`bank.bend`.** Roll on a closed lap: banked turn-arounds, and an S that rolls from a left bank straight into a right bank. The BANK world runs it. The camera takes none of the roll, so the deck tilts on a level horizon and the backdrop still sits on `path_horizon`. The runner leans square to the deck.
-5. **`lanes.count`.** The road widens or narrows. One lane splits into two, two become three, and each of those merges back. One chain.
-6. **`fork.lane`.** Three lanes split into a two-lane road and a one-lane road. While they are apart, the two becomes one and the one becomes two. They meet again as three.
+5. **`lanes.count`.** The road widens or narrows. A closed lap that runs all six lane changes on straights, with bends at every lane count. The ZIPPER world runs it. The runner's lanes are the baked lane centers under it: left and right step to the next lane over, a lane that closes slides the runner onto its neighbor, and an edge anchor holds the runner still while the road moves beside it. One chain.
+6. **`fork.lane`.** Three lanes split into a two-lane road and a one-lane road, and meet again as three. A closed lap: heading out, the two becomes one and the one becomes two before they merge; heading home, a plain fork and merge. A turn-around follows each. The MAXI-P world runs it. The runner's lane at the fork picks the road; the other road draws beside it.
 7. **`gap.drop`.** No deck. The jump leaves `v` with nothing to land on
    until the next deck.
 
@@ -123,7 +123,14 @@ void path_begin(int scroll);                   /* once a frame, before draw */
 int path_horizon(void);                        /* screen y of the level horizon */
 void path_cam(int s, int u, int v, int *x, int *y, int *z);
 int path_project(int s, int u, int v, XY *out);
-const PathSeg *path_at(int s);                 /* segment containing s */
+const PathSeg *path_at(int s);                 /* segment containing s, on the route */
+void path_edges(int s, int *ul, int *ur);      /* deck edges at s */
+int path_lanes(int s, int *u);                 /* lane centers at s */
+int path_marks(int s, int *u);                 /* divider lines at s */
+int path_lane_near(int s, int u);              /* the lane u belongs to */
+int path_follow(int s, int u);                 /* runner: pick forks, report jumps */
+int path_branch(int k, int s, int *s0, int *s1); /* next run of fork k */
+void path_swap(int k);                         /* draw fork k's other road */
 ```
 
 `path_begin` is called by `main` and by the preview before a level draws.
@@ -135,14 +142,58 @@ pitch and none of the roll.
 `path_at` walks the linked span. Past the lead, `s` maps into the cycle,
 so an endless run still hits the same obstacles. A lane change is a piece
 with `lanes` and `lanesTo` on one chain: one line opens into two, or two
-lines close into one. A fork is a second chain. On `fork.lane` three lanes
-split into a two-lane road and a one-lane road. The two-lane road then
-becomes one lane, and the one-lane road becomes two. Both chains meet again
-at `joined`, which is three lanes.
-`path_at` stays on the main chain until a fork is runnable.
+lines close into one. Any path runs 1 to 3 lanes. Lane changes run
+straight: a bend may hold any count, but the bake refuses a piece that
+turns and changes lanes at once. Every lane change must name an `anchor`,
+and a piece that keeps its lanes must not:
+
+| `anchor` | Held in place | Lanes come and go | Centerline |
+| --- | --- | --- | --- |
+| `left` | left edge and the lanes beside it | on the right | half a lane per lane: away from the anchor when adding, toward it when dropping |
+| `right` | right edge and the lanes beside it | on the left | half a lane per lane: away from the anchor when adding, toward it when dropping |
+| `center` | the middle | equally on both sides | stays put |
+
+The slide runs along the piece, so the next piece starts on the moved
+centerline. A removal is the matching add, same anchor, run backwards. The
+bake refuses to run if any pair breaks that mirror. A fork is a second
+chain. On `fork.lane` three lanes split into a two-lane road and a one-lane
+road. The two drops its left lane (`right`) and the one adds a lane on its
+right (`left`), so both slide half a lane right and the swapped lanes meet a
+centered three-lane road at `joined`. Where a chain joins a piece already
+baked, every arriving lane must land on a lane of that piece, or the bake
+stops. Where two roads at the same distance overlap, the bake puts a seam
+halfway between them: each inner edge stops a few units past the seam,
+never wider than its normal edge, and a segment that overlaps at both
+ends drops its inner curb. The decks meet edge to edge, and the inner
+curbs close in a point at a fork or a join: where a curb starts or stops
+and the road runs on, the drawer narrows it to nothing across that
+segment, so it ends as a triangle instead of a square block. The bake
+stops on an overlap that is banked.
+
+The road drawer never runs a strip across a band edge where the road jumps
+sideways or changes width. It samples that edge twice, once as the end of
+the old segment and once as the start of the new one, so no strip wedges
+across the jump.
+
+In the game a fork is a branch: a second run of segments over the same
+bands as the main chain, so both roads share `s`. A runnable fork must
+rejoin the main chain exactly as many bands after it left, and may not
+fork again inside; the bake stops otherwise. The route is which road each
+fork follows, and `path_at` and every sample follow it. `path_follow`
+picks the road when the runner enters a fork, by the road with a lane
+nearest the runner's lane. Where a road starts beside another (a fork's
+`shift`, a join) the centerline jumps sideways; `path_follow` returns the
+jump so the runner stays put, and the camera eases across it. `road_draw`
+draws the route, then swaps each fork in view onto its other road and
+draws that too, crates included.
+
+Each segment carries its deck edges, lane centers, and divider lines at
+both ends, so the deck, dividers, and runner lanes follow a lane change
+and a seam exactly as baked. Obstacles are stored in half lanes, so a
+two-lane road can hold a crate at ±75.
 
 Obstacles and the runner go through this API. City and Lumenwild still
-draw their straight ground with `flat()`. FLAT OVAL, HILL, and BANK draw their
+draw their straight ground with `flat()`. FLAT OVAL, HILL, BANK, ZIPPER, and MAXI-P draw their
 road with `road.c`: cross-sections from `path_cam`, with width, lane
 dividers, and deck read from each segment. A world gives `road_draw` a
 `RoadStyle` of materials and adds its own scenery, so a new runnable track
@@ -214,8 +265,8 @@ not the model.
 | `bend.flat` | `yaw` | `path_cam` aims by yaw | Closes. Yaw step ≤ 64 |
 | `hill.loop` | `pitch`, centerline `y` | `path_cam` aims by pitch | Closes. Net pitch returns to 0. Pitch step ≤ 64 |
 | `bank.bend` | `roll` | `path_cam` banks the right vector | Closes. Bank goes right in each turn-around, and left then right through the S, returning to 0 each time. Roll step ≤ 64 |
-| `lanes.count` | `lanes`, `lanesTo` | road width and lane lines along the chain | Continues from one lane. 1→2, 2→3, 3→2, and 2→1 |
-| `fork.lane` | `fork`, `shift`, `lanes`, `lanesTo` | a second chain, then the join where the chains meet | Continues. 3 splits into 2 and 1, those counts swap, then they merge as 3 |
+| `lanes.count` | `lanes`, `lanesTo`, `anchor` | road width and lane lines along the chain | Closes. All six changes (1↔2, 2↔3, 1↔3) on straights, one pair back to back, under all three anchors. Bends at 1, 2, and 3 lanes, constant width through each. Edges continuous at every seam |
+| `fork.lane` | `fork`, `shift`, `lanes`, `lanesTo`, `anchor` | a second chain, then the join where the chains meet | Closes. Twice per lap, 3 splits into 2 and 1 and merges as 3. The outbound fork swaps 2→1 and 1→2 on straights; the return fork changes nothing. Every arriving lane lands on a lane of the joined road |
 | `gap.drop` | `deck = 0` | landing looks for a deck under `v` | Continues. The gap has a deck on both sides |
 
 A full turn is 4096. The per-segment cap is 64, about 5.6°. A steeper
@@ -238,7 +289,10 @@ the warning on the span.
 - `tools/check_track.c` — host checks for the runnable spans.
 
 Bake, then open `tools/trackview/index.html`. A hash such as
-`index.html#hill.loop` opens that track:
+`index.html#hill.loop` opens that track. Clicking a piece in the sidebar
+frames it, paints it a saturated pink, and dims the rest of the deck; the
+hash becomes `#track/piece`, so `index.html#bank.bend/flip` opens with that
+piece picked:
 
 ```
 python3 runner/tools/bake_tracks.py
