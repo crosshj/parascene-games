@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>runner</title>
+<title>Sprite viewer</title>
 <style>
   :root {
     color-scheme: dark;
@@ -169,6 +169,7 @@
   </section>
 </main>
 <script>
+const SPRITE_DIR = "../../sprites/";
 const KNOWN_SHEETS = ["runner.png", "blazer.runner.png"];
 const SHEET_SIZE = 1024;
 
@@ -784,13 +785,13 @@ async function clearBrowserStorage() {
   document.querySelector("#fps").value = "15";
   let note = "Browser storage cleared.";
   try {
-    await loadMapUrl("runner.txt");
+    await loadMapUrl(SPRITE_DIR + "runner.txt");
   } catch (error) {
     note = error.message;
   }
   for (const name of KNOWN_SHEETS) {
     try {
-      await loadSheetUrl(name);
+      await loadSheetUrl(SPRITE_DIR + name);
     } catch (error) {
       /* A character sheet is optional. */
     }
@@ -925,7 +926,7 @@ requestAnimationFrame(tick);
   if (place && place.tops) Object.assign(topDeltas, place.tops);
   let mapFromDisk = false;
   try {
-    await loadMapUrl("runner.txt");
+    await loadMapUrl(SPRITE_DIR + "runner.txt");
     mapFromDisk = true;
   } catch (error) {
     try {
@@ -938,7 +939,7 @@ requestAnimationFrame(tick);
   }
   for (const name of KNOWN_SHEETS) {
     try {
-      await loadSheetUrl(name);
+      await loadSheetUrl(SPRITE_DIR + name);
     } catch (error) {
       /* A character sheet is optional. The file picker still opens one. */
     }
@@ -968,7 +969,7 @@ requestAnimationFrame(tick);
     applyPlace(place);
     render();
   } else if (!sheets.length) {
-    setStatus("Open a character PNG. runner.png and name.runner.png sit beside this page.");
+    setStatus("Open a character PNG from sprites/. runner.png and name.runner.png live there.");
   } else if (!map && !mapFromDisk) {
     setStatus("Open runner.txt with the Map picker.");
   }

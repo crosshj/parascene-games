@@ -11,6 +11,7 @@
 #include <psxspu.h>
 #include "world.h"
 #include "course.h"
+#include "path.h"
 #include "level.h"
 #include "profile.h"
 #include "sprite_sheet.h"
@@ -172,10 +173,10 @@ static void draw_shadow(void) {
         depth = 12;
     z0 = CHAR_Z - depth / 2;
     z1 = z0 + depth;
-    project(player_x - w, 2, z1, &far_l);
-    project(player_x + w, 2, z1, &far_r);
-    project(player_x - w, 2, z0, &near_l);
-    project(player_x + w, 2, z0, &near_r);
+    path_project(scroll + z1, player_x - w, 2, &far_l);
+    path_project(scroll + z1, player_x + w, 2, &far_r);
+    path_project(scroll + z0, player_x - w, 2, &near_l);
+    path_project(scroll + z0, player_x + w, 2, &near_r);
     if (!xy_ok(&far_l) || !xy_ok(&far_r) || !xy_ok(&near_l) || !xy_ok(&near_r))
         return;
     if (!edge_ok(far_l, far_r) || !edge_ok(near_l, near_r) ||
@@ -257,7 +258,7 @@ static void draw_runner(void) {
     XY feet;
     int sz, h, w, frame, bucket;
     POLY_FT4 *spr;
-    sz = project(player_x, player_y, CHAR_Z, &feet);
+    sz = path_project(scroll + CHAR_Z, player_x, player_y, &feet);
     if (sz < 8)
         return;
     h = (78 * (SCREEN_W / 2)) / sz;
@@ -938,6 +939,7 @@ int main(int argc, const char **argv) {
             draw_title();
         } else {
             const Level *lv = levels[level_index];
+            path_begin(frame.scroll);
             lv->clear_color(&frame, &sr, &sg, &sb);
             PROF_LONG(PF_LEVEL, lv->draw(&frame));
             if (state == ST_SELECT) {

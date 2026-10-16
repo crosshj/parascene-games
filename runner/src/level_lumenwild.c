@@ -1032,13 +1032,14 @@ static void obstacles(void) {
     int band;
     lw_rigid = 1;
     for (band = band0; band <= band1; band++) {
-        int oz;
+        int s, oz;
         if (band < 0 || !has_obstacle(band))
             continue;
-        oz = band * STEP + STEP / 2 - lw_scroll;
+        s = band * STEP + STEP / 2;
+        oz = s - lw_scroll;
         if (oz < CLIP || oz >= FAR)
             continue;
-        obstacle_box(oz, obstacle_lane(band), &k_obstacle);
+        obstacle_box(s, obstacle_lane(band), &k_obstacle);
     }
     lw_rigid = 0;
 }

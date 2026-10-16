@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "step": 256,
+  "lane": 150,
+  "width": 560,
+  "fullTurn": 4096,
+  "maxStep": 64,
+  "implemented": ["repeat"],
+  "tracks": [
+    {
+      "id": "straight.run",
+      "name": "Straight run",
+      "status": "runnable",
+      "summary": "The current endless road, framed from the start of a run through one obstacle cycle.",
+      "capabilities": ["repeat"],
+      "start": "start",
+      "repeatFrom": "cycle",
+      "pieces": [
+        {
+          "id": "start",
+          "length": 2048,
+          "next": "cycle"
+        },
+        {
+          "id": "cycle",
+          "length": 6144,
+          "next": "cycle",
+          "obstacles": [
+            {"at": 1408, "lane": 0},
+            {"at": 3456, "lane": 1},
+            {"at": 5504, "lane": -1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bend.flat",
+      "name": "Flat oval",
+      "status": "view",
+      "summary": "A horizontal oval. One lap closes, and the game would repeat it.",
+      "capabilities": ["yaw", "repeat"],
+      "start": "north",
+      "repeatFrom": "north",
+      "pieces": [
+        {"id": "north", "length": 4096, "next": "east-bend"},
+        {"id": "east-bend", "length": 8192, "yaw": 180, "next": "south"},
+        {"id": "south", "length": 4096, "next": "west-bend"},
+        {"id": "west-bend", "length": 8192, "yaw": 180, "next": "north"}
+      ]
+    },
+    {
+      "id": "grade.straight",
+      "name": "Hill",
+      "status": "view",
+      "summary": "A climb onto a flat crest, then back down. The hill repeats on the same heading.",
+      "capabilities": ["grade", "repeat"],
+      "start": "flat",
+      "repeatFrom": "flat",
+      "pieces": [
+        {"id": "flat", "length": 2048, "next": "climb"},
+        {"id": "climb", "length": 4096, "grade": 22.5, "next": "ease"},
+        {"id": "ease", "length": 4096, "grade": -22.5, "next": "crest"},
+        {"id": "crest", "length": 2048, "next": "drop"},
+        {"id": "drop", "length": 4096, "grade": -22.5, "next": "settle"},
+        {"id": "settle", "length": 4096, "grade": 22.5, "next": "runout"},
+        {"id": "runout", "length": 2048, "next": "flat"}
+      ]
+    },
+    {
+      "id": "bank.bend",
+      "name": "Banked bends",
+      "status": "view",
+      "summary": "A right bend that banks right, then a left bend that banks left. The heading returns, so the repeat continues the way it started.",
+      "capabilities": ["yaw", "bank", "repeat"],
+      "start": "enter",
+      "repeatFrom": "enter",
+      "pieces": [
+        {"id": "enter", "length": 2048, "next": "in-right"},
+        {"id": "in-right", "length": 2048, "yaw": 22.5, "bank": 22.5, "next": "right"},
+        {"id": "right", "length": 4096, "yaw": 45, "next": "out-right"},
+        {"id": "out-right", "length": 2048, "yaw": 22.5, "bank": -22.5, "next": "in-left"},
+        {"id": "in-left", "length": 2048, "yaw": -22.5, "bank": -22.5, "next": "left"},
+        {"id": "left", "length": 4096, "yaw": -45, "next": "out-left"},
+        {"id": "out-left", "length": 2048, "yaw": -22.5, "bank": 22.5, "next": "leave"},
+        {"id": "leave", "length": 2048, "next": "enter"}
+      ]
+    },
+    {
+      "id": "lanes.count",
+      "name": "Lane count",
+      "status": "view",
+      "summary": "One road. One lane splits into two, two become three, then each merge runs back. It repeats from one lane.",
+      "capabilities": ["lanes", "repeat"],
+      "start": "one",
+      "repeatFrom": "one",
+      "pieces": [
+        {"id": "one", "length": 2048, "lanes": 1, "next": "one-to-two"},
+        {"id": "one-to-two", "length": 4096, "lanes": 1, "lanesTo": 2, "next": "two"},
+        {"id": "two", "length": 2048, "lanes": 2, "next": "two-to-three"},
+        {"id": "two-to-three", "length": 4096, "lanes": 2, "lanesTo": 3, "next": "three"},
+        {"id": "three", "length": 2048, "lanes": 3, "next": "three-to-two"},
+        {"id": "three-to-two", "length": 4096, "lanes": 3, "lanesTo": 2, "next": "two-hold"},
+        {"id": "two-hold", "length": 2048, "lanes": 2, "next": "two-to-one"},
+        {"id": "two-to-one", "length": 4096, "lanes": 2, "lanesTo": 1, "next": "one-end"},
+        {"id": "one-end", "length": 2048, "lanes": 1, "next": "one"}
+      ]
+    },
+    {
+      "id": "fork.lane",
+      "name": "Lane fork",
+      "status": "view",
+      "summary": "Three lanes split into two and one. The two becomes one and the one becomes two, then they merge back into three. The fork repeats.",
+      "capabilities": ["yaw", "lanes", "fork", "join", "repeat"],
+      "start": "three",
+      "repeatFrom": "three",
+      "pieces": [
+        {"id": "three", "length": 2048, "lanes": 3, "next": "two-off", "fork": "one-off"},
+        {"id": "two-off", "length": 4096, "shift": 0.5, "lanes": 2, "yaw": 45, "next": "two-to-one"},
+        {"id": "two-to-one", "length": 8192, "lanes": 2, "lanesTo": 1, "yaw": -90, "next": "two-back"},
+        {"id": "two-back", "length": 4096, "lanes": 1, "yaw": 45, "next": "joined"},
+        {"id": "one-off", "length": 4096, "shift": -1, "lanes": 1, "yaw": -45, "next": "one-to-two"},
+        {"id": "one-to-two", "length": 8192, "lanes": 1, "lanesTo": 2, "yaw": 90, "next": "one-back"},
+        {"id": "one-back", "length": 4096, "lanes": 2, "yaw": -45, "next": "joined"},
+        {"id": "joined", "length": 2048, "shift": -1, "lanes": 3, "next": "three"}
+      ]
+    },
+    {
+      "id": "gap.drop",
+      "name": "Gap",
+      "status": "view",
+      "summary": "The deck stops, then starts again. The gap repeats on the same heading.",
+      "capabilities": ["gap", "repeat"],
+      "start": "approach",
+      "repeatFrom": "approach",
+      "pieces": [
+        {"id": "approach", "length": 4096, "next": "gap"},
+        {"id": "gap", "length": 2048, "deck": false, "next": "landing"},
+        {"id": "landing", "length": 4096, "next": "approach"}
+      ]
+    }
+  ]
+}

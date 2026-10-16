@@ -131,9 +131,10 @@ static void city_draw(const LevelFrame *f) {
                 gantry(z + 48);
         }
         if (has_obstacle(band)) {
-            int oz = band * STEP + STEP / 2 - scroll;
+            int s = band * STEP + STEP / 2;
+            int oz = s - scroll;
             if (oz >= CLIP && oz < FAR)
-                obstacle_box(oz, obstacle_lane(band), &k_obstacle);
+                obstacle_box(s, obstacle_lane(band), &k_obstacle);
         }
     }
 }

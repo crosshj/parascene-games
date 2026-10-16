@@ -132,6 +132,17 @@ foreach(_mp3 ${AUDIO_MP3S})
 	math(EXPR _music_i "${_music_i} + 1")
 endforeach()
 
+set(TRACK_H "${CMAKE_CURRENT_SOURCE_DIR}/src/track_data.h")
+set(TRACK_JSON "${CMAKE_CURRENT_SOURCE_DIR}/tools/trackview/baked.json")
+add_custom_command(
+	OUTPUT "${TRACK_H}" "${TRACK_JSON}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_tracks.py"
+		--header "${TRACK_H}" --json "${TRACK_JSON}"
+	DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_tracks.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/tracks/catalog.json"
+	VERBATIM
+)
+
 file(GLOB RUNNER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
 psn00bsdk_add_executable(runner NOGPREL ${RUNNER_SOURCES})
 target_include_directories(runner PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -150,6 +161,8 @@ set_source_files_properties(src/main.c PROPERTIES
 	OBJECT_DEPENDS "${SPRITE_H};${SCREEN_H};${SOUND_H};${CMAKE_CURRENT_BINARY_DIR}/music_tracks.h")
 set_source_files_properties(src/level_lumenwild.c PROPERTIES
 	OBJECT_DEPENDS "${LUMEN_SKY_H}")
+set_source_files_properties(src/path.c PROPERTIES
+	OBJECT_DEPENDS "${TRACK_H}")
 add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}" "${LUMEN_SKY_H}")
 add_dependencies(runner sprite_sheet)
 

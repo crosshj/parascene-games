@@ -9,8 +9,8 @@ the title screen with the game logo and PRESS START. The music starts on
 the title screen. Next comes the runner select screen, then the run.
 
 screens/parascene.png and screens/title.png are the copies the game
-shows. They are cropped and scaled from sprites/parascene_logo.png and
-sprites/game logo.png, at most 256 pixels wide, and the build turns each
+shows. They are cropped and scaled from bak/parascene_logo.png and
+bak/game logo.png, at most 256 pixels wide, and the build turns each
 into a 256-color texture. Pixels with alpha below 128 are empty. Resize
 a new copy before building; the build does not resize them.
 
@@ -38,6 +38,14 @@ character name. Feet stay on the bottom edge of the cell. The tuck is
 the frame whose feet pull up. Bright magenta inside a character is
 treated as empty.
 
+Look at a sheet with the sprite viewer. Serve the runner folder so the
+page can read sprites/:
+
+  python3 -m http.server 8766 -d runner
+
+Then open http://127.0.0.1:8766/tools/spriteview/ . It loads
+sprites/runner.txt, sprites/runner.png, and sprites/blazer.runner.png.
+
 The road, shoulders, buildings, gantries, and obstacles are flat
 polygons.
 
@@ -57,10 +65,28 @@ under WORLD.
 The source is split the same way:
 
   src/world.c        ordering tables, GTE projection, polygon helpers
+  src/path.c         where a point on the road sits
   src/course.c       lanes, obstacle layout, the obstacle box
   src/levels.c       the list of levels, in select-screen order
   src/level_*.c      one file per level
   src/main.c         screens, input, the runner, audio
+
+TRACKS
+------
+The road is a named track. straight.run is the one the game runs: a
+lead, then an obstacle cycle that repeats. The run has a start and no
+finish. docs/tracks.md is the catalog and the path API.
+
+The other tracks (bends, hills, banks, lane changes, a fork, and a gap)
+are viewable and not runnable yet. Bake, then open
+tools/trackview/index.html. The page includes the contents of baked.json.
+Load opens another bake file.
+
+  python3 runner/tools/bake_tracks.py
+
+The viewer shows one period of each track. Every track repeats: the lap
+closes, the road continues on the same heading, or the next pass follows
+the turn it finished on.
 
 To add a level, copy level_city.c to level_<name>.c, rename the Level
 it defines, and add it to levels.c. CMake picks up the new file. The

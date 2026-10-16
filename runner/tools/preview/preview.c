@@ -13,6 +13,7 @@
 #include <psxgte.h>
 #include "world.h"
 #include "course.h"
+#include "path.h"
 #include "level.h"
 
 /* The GPU and GTE */
@@ -334,6 +335,7 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, const char *
     int r, g, b;
     projections = 0;
     px_fill = px_blend = 0;
+    path_begin(f->scroll);
     lv->clear_color(f, &r, &g, &b);
     lv->draw(f);
     if (marker)
