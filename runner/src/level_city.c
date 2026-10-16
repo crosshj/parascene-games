@@ -141,6 +141,7 @@ static void city_draw(const LevelFrame *f) {
 
 const Level level_city = {
     "CITY RUN",
+    "straight.run",
     city_clear,
     city_draw,
 };

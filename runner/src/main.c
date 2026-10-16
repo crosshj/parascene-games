@@ -939,6 +939,8 @@ int main(int argc, const char **argv) {
             draw_title();
         } else {
             const Level *lv = levels[level_index];
+            if (!path_open(lv->track))
+                path_open("straight.run");
             path_begin(frame.scroll);
             lv->clear_color(&frame, &sr, &sg, &sb);
             PROF_LONG(PF_LEVEL, lv->draw(&frame));

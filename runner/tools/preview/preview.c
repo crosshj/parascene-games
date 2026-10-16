@@ -311,9 +311,9 @@ static void write_png(const char *path) {
 /* Frames */
 
 /* A stand-in for the runner sprite, at its real depth. */
-static void runner_marker(void) {
+static void runner_marker(int scroll) {
     XY feet;
-    int sz = project(0, 0, CHAR_Z, &feet);
+    int sz = path_project(scroll + CHAR_Z, 0, 0, &feet);
     int h = (78 * (SCREEN_W / 2)) / sz, w = h * 2 / 5;
     TILE *t = alloc_prim((CHAR_Z >> OT_SHIFT) - 1, sizeof(TILE));
     if (!t)
@@ -335,11 +335,13 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, const char *
     int r, g, b;
     projections = 0;
     px_fill = px_blend = 0;
+    if (!path_open(lv->track))
+        path_open("straight.run");
     path_begin(f->scroll);
     lv->clear_color(f, &r, &g, &b);
     lv->draw(f);
     if (marker)
-        runner_marker();
+        runner_marker(f->scroll);
     c.bytes = world_bytes_used();
     c.proj = projections;
     c.n = render(r, g, b);

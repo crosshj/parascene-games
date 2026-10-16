@@ -65,7 +65,7 @@ drops the right edge.
 | Track | Status | Pieces | What it asks of the game |
 |---|---|---|---|
 | `straight.run` | runnable | `start`, `cycle` | Continues. The obstacle cycle repeats. |
-| `bend.flat` | view | `north`, `east-bend`, `south`, `west-bend` | Closes. One lap returns to its start. |
+| `bend.flat` | runnable | `north`, `east-bend`, `south`, `west-bend` | Closes. One lap returns to its start. The FLAT OVAL world runs it. |
 | `grade.straight` | view | `flat`, `climb`, `ease`, `crest`, `drop`, `settle`, `runout` | Continues. The hill repeats on the same heading. |
 | `bank.bend` | view | `enter`, `in-right`, `right`, `out-right`, `in-left`, `left`, `out-left`, `leave` | Continues. Banks right through one bend, then left through the other. Heading returns. |
 | `lanes.count` | view | `one`, `one-to-two`, `two`, `two-to-three`, `three`, `three-to-two`, `two-hold`, `two-to-one`, `one-end` | Continues. The lane changes repeat from one lane. |
@@ -73,16 +73,16 @@ drops the right edge.
 | `gap.drop` | view | `approach`, `gap`, `landing` | Continues. The gap repeats. |
 
 The game loads a track only when its status is `runnable` and every
-capability it uses is in the implemented set. Today that set is `repeat`.
-`path_open` refuses the other names. The viewer draws them and lists the
-capability still missing.
+capability it uses is in the implemented set. Today that set is `repeat`
+and `yaw`. `path_open` accepts `straight.run` and `bend.flat`. The viewer
+draws the rest and lists the capability still missing.
 
 ## Order
 
 1. **Now.** The path API, `straight.run` as data, the viewer framing every
-   name. Both levels still look like the current road.
-2. **`bend.flat`.** `path_cam` starts using yaw. The camera follows the
-   segment. This is the first track that exercises the frame.
+   name. City and Lumenwild still run the straight road.
+2. **`bend.flat`.** The FLAT OVAL world runs this lap and draws only the
+   road. `path_cam` follows yaw, so the camera takes the turns.
 3. **`grade.straight`.** Pitch and height.
 4. **`bank.bend`.** Roll one way, then the other. The heading returns, so the repeat continues the way it started. The sprite stays upright on screen.
 5. **`lanes.count`.** The road widens or narrows. One lane splits into two, two become three, and each of those merges back. One chain.
@@ -117,9 +117,10 @@ const PathSeg *path_at(int s);                 /* segment containing s */
 ```
 
 `path_begin` is called by `main` and by the preview before a level draws.
-`path_cam` today returns `(u, v, s - scroll)`. That is the straight road.
-Yaw, pitch, and roll are already on `PathSeg` and are zero on
-`straight.run`. They start to matter when `bend.flat` becomes runnable.
+Each world names its track, and `path_open` selects that span first.
+`path_cam` follows yaw. On `straight.run` the yaw is zero, so the frame is
+still `(u, v, s - scroll)`. Pitch and roll stay level on the tracks the
+game runs.
 
 `path_at` walks the linked span. Past the lead, `s` maps into the cycle,
 so an endless run still hits the same obstacles. A lane change is a piece
@@ -130,8 +131,9 @@ becomes one lane, and the one-lane road becomes two. Both chains meet again
 at `joined`, which is three lanes.
 `path_at` stays on the main chain until a fork is runnable.
 
-Obstacles and the runner go through this API. The ground still uses
-`flat()` until a track with yaw needs cross-sections from `path_cam`.
+Obstacles and the runner go through this API. City and Lumenwild still
+draw their straight ground with `flat()`. FLAT OVAL draws the lap as
+cross-sections from `path_cam`, and the world around that road stays empty.
 
 A segment record, as baked:
 
@@ -174,7 +176,7 @@ the warning on the span.
 
 - `tracks/catalog.json` — the pieces. This is the source.
 - `tools/bake_tracks.py` — writes `tools/trackview/baked.json`, copies
-  that file's contents into the viewer page, and writes a C span for the
+  that file's contents into the viewer page, and writes a C span for each
   runnable track.
 - `tools/trackview/` — the viewer. Opening `index.html` draws the included
   bake. Load, or a dropped `.json`, opens another bake file.

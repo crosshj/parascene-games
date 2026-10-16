@@ -73,12 +73,14 @@ The source is split the same way:
 
 TRACKS
 ------
-The road is a named track. straight.run is the one the game runs: a
+The road is a named track. straight.run is the city and Lumenwild road: a
 lead, then an obstacle cycle that repeats. The run has a start and no
 finish. docs/tracks.md is the catalog and the path API.
 
-The other tracks (bends, hills, banks, lane changes, a fork, and a gap)
-are viewable and not runnable yet. Bake, then open
+FLAT OVAL is the other world. It runs bend.flat, the closed lap from the
+viewer, and draws only that road so the turns are the thing on screen.
+The camera follows the road's yaw. Hills, banks, lane changes, the fork,
+and the gap are viewable and not runnable yet. Bake, then open
 tools/trackview/index.html. The page includes the contents of baked.json.
 Load opens another bake file.
 

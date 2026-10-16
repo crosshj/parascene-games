@@ -27,10 +27,18 @@ static int formula_lane(int band) {
     return ((band / 8) % 3) - 1;
 }
 
+static int near(int got, int want, int slop) {
+    int d = got - want;
+    if (d < 0)
+        d = -d;
+    return d <= slop;
+}
+
 int main(void) {
     int band;
     int x, y, z;
-    if (!path_open("straight.run") || path_open("bend.flat")) {
+    int i, turned;
+    if (!path_open("straight.run") || path_open("nope")) {
         fprintf(stderr, "path_open gate failed\n");
         return 1;
     }
@@ -50,6 +58,57 @@ int main(void) {
             fprintf(stderr, "band %d lane %d\n", band, obstacle_lane(band));
             return 1;
         }
+    }
+    /* A later lap of the straight cycle still runs forward. */
+    path_begin(10000);
+    path_cam(10200, 0, 0, &x, &y, &z);
+    if (!near(x, 0, 1) || !near(y, 0, 1) || !near(z, 200, 1)) {
+        fprintf(stderr, "straight lap %d %d %d\n", x, y, z);
+        return 1;
+    }
+    if (!path_open("bend.flat")) {
+        fprintf(stderr, "bend.flat did not open\n");
+        return 1;
+    }
+    path_begin(0);
+    path_cam(200, 150, 40, &x, &y, &z);
+    if (!near(x, 150, 1) || !near(y, 40, 1) || !near(z, 200, 1)) {
+        fprintf(stderr, "oval start %d %d %d\n", x, y, z);
+        return 1;
+    }
+    /* One lap later the road is back in the same place. */
+    path_begin(24576);
+    path_cam(24576 + 200, 0, 0, &x, &y, &z);
+    if (!near(x, 0, 1) || !near(y, 0, 1) || !near(z, 200, 1)) {
+        fprintf(stderr, "oval lap %d %d %d\n", x, y, z);
+        return 1;
+    }
+    turned = 0;
+    for (i = 0; i < path_len(); i++) {
+        const PathSeg *seg = path_at(i * 256);
+        if (!seg || seg->yaw < 1000 || seg->yaw > 1100)
+            continue;
+        path_begin(i * 256);
+        path_cam(i * 256, 150, 0, &x, &y, &z);
+        if (!near(x, 150, 8) || !near(z, 0, 8)) {
+            fprintf(stderr, "oval right %d %d %d yaw %d\n", x, y, z, seg->yaw);
+            return 1;
+        }
+        path_cam(i * 256 + 256, 0, 0, &x, &y, &z);
+        if (z < 200 || !near(x, 0, 40)) {
+            fprintf(stderr, "oval ahead %d %d %d\n", x, y, z);
+            return 1;
+        }
+        turned = 1;
+        break;
+    }
+    if (!turned) {
+        fprintf(stderr, "oval has no quarter turn\n");
+        return 1;
+    }
+    if (!path_open("straight.run")) {
+        fprintf(stderr, "straight.run did not reopen\n");
+        return 1;
     }
     printf("track span ok\n");
     return 0;

@@ -5,7 +5,7 @@
   "width": 560,
   "fullTurn": 4096,
   "maxStep": 64,
-  "implemented": ["repeat"],
+  "implemented": ["repeat", "yaw"],
   "tracks": [
     {
       "id": "straight.run",
@@ -36,7 +36,7 @@
     {
       "id": "bend.flat",
       "name": "Flat oval",
-      "status": "view",
+      "status": "runnable",
       "summary": "A horizontal oval. One lap closes, and the game would repeat it.",
       "capabilities": ["yaw", "repeat"],
       "start": "north",

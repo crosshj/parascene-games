@@ -1,10 +1,10 @@
 /* Path space for every track. s is distance along the road, u is lateral
- * offset from the centerline, v is height above the deck. The runnable
- * span is one period; past the lead, s repeats the cycle.
+ * offset from the centerline, v is height above the deck. The open span is
+ * one period; past the lead, s repeats the cycle.
  *
- * path_cam is the identity frame: (u, v, s - scroll). Segment yaw, pitch,
- * and roll are baked and stay unused until a track that needs them is
- * runnable. */
+ * path_cam follows the segment yaw. On straight.run that yaw is zero, so
+ * the frame stays (u, v, s - scroll). Pitch and roll stay level until a
+ * track that needs them is runnable. */
 
 #pragma once
 
@@ -15,6 +15,7 @@
 
 typedef struct {
     int32_t x, y, z;
+    int32_t x1, y1, z1;
     int16_t yaw, pitch, roll;
     int16_t lanes;
     int16_t width;
@@ -32,3 +33,5 @@ void path_cam(int s, int u, int v, int *x, int *y, int *z);
 int path_project(int s, int u, int v, XY *out);
 /* Segment containing s, or 0 when s is negative. */
 const PathSeg *path_at(int s);
+/* Segments in the open period, lead plus one cycle. */
+int path_len(void);

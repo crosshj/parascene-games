@@ -11,6 +11,8 @@ typedef struct {
 
 typedef struct {
     const char *name;
+    /* Track path_open runs for this world. */
+    const char *track;
     /* Fills the screen before anything else draws. */
     void (*clear_color)(const LevelFrame *f, int *r, int *g, int *b);
     /* Draws the ground, the scenery, and the obstacles from course.h. */

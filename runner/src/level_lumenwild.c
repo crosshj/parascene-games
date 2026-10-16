@@ -1144,6 +1144,7 @@ static void lumen_draw(const LevelFrame *f) {
 
 const Level level_lumenwild = {
     "LUMENWILD",
+    "straight.run",
     lumen_clear,
     lumen_draw,
 };
