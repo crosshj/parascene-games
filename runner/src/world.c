@@ -17,6 +17,10 @@ typedef struct {
     int active;
 } RenderContext;
 
+/* Gouraud and texture-blended prims dither down to 15-bit color. Each
+ * DR_TPAGE rewrites the whole draw mode, so they set it too. */
+#define DITHER 1
+
 static RenderContext ctx;
 
 void world_init(void) {
@@ -27,7 +31,7 @@ void world_init(void) {
         SetDefDispEnv(&ctx.buffers[i].disp, 0, i * SCREEN_H, SCREEN_W, SCREEN_H);
         setRGB0(&ctx.buffers[i].draw, 48, 88, 148);
         ctx.buffers[i].draw.isbg = 1;
-        ctx.buffers[i].draw.dtd = 0;
+        ctx.buffers[i].draw.dtd = DITHER;
     }
     ctx.active = 0;
     ctx.next = ctx.buffers[0].buffer;
@@ -173,7 +177,7 @@ void poly_f4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
     if (blend != BLEND_NONE) {
         /* Linked after the quad, so it draws just before it in the same bucket. */
         DR_TPAGE *mode = alloc_prim(bucket, sizeof(DR_TPAGE));
-        setDrawTPage(mode, 0, 0, getTPage(0, blend, 0, 0));
+        setDrawTPage(mode, 0, DITHER, getTPage(0, blend, 0, 0));
         setSemiTrans(poly, 1);
     }
 }
@@ -218,7 +222,7 @@ void poly_f4v(const XY *p, int bucket, int r, int g, int b, int blend) {
     setXY4(poly, p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y);
     if (blend != BLEND_NONE) {
         DR_TPAGE *mode = alloc_prim(bucket, sizeof(DR_TPAGE));
-        setDrawTPage(mode, 0, 0, getTPage(0, blend, 0, 0));
+        setDrawTPage(mode, 0, DITHER, getTPage(0, blend, 0, 0));
         setSemiTrans(poly, 1);
     }
 }
@@ -244,9 +248,15 @@ void poly_g4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
     setXY4(poly, p0->x, p0->y, p1->x, p1->y, p2->x, p2->y, p3->x, p3->y);
     if (blend != BLEND_NONE) {
         DR_TPAGE *mode = alloc_prim(bucket, sizeof(DR_TPAGE));
-        setDrawTPage(mode, 0, 0, getTPage(0, blend, 0, 0));
+        setDrawTPage(mode, 0, DITHER, getTPage(0, blend, 0, 0));
         setSemiTrans(poly, 1);
     }
+}
+
+void dither_mode(int bucket, int on) {
+    DR_TPAGE *mode = alloc_prim(bucket, sizeof(DR_TPAGE));
+    if (mode)
+        setDrawTPage(mode, 0, on && DITHER, getTPage(0, 0, 0, 0));
 }
 
 void gradient(int x, int y, int w, int h, int bucket,

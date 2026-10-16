@@ -81,6 +81,9 @@ void poly_g4(const XY *p0, const XY *p1, const XY *p2, const XY *p3,
              int r2, int g2, int b2, int r3, int g3, int b3, int blend);
 void gradient(int x, int y, int w, int h, int bucket,
               int r0, int g0, int b0, int r1, int g1, int b1);
+/* Dithering on or off for what draws after this in the bucket. Prims
+ * allocated later in the same bucket draw before it. */
+void dither_mode(int bucket, int on);
 
 void quad(int x0, int y0, int z0, int x1, int y1, int z1,
           int x2, int y2, int z2, int x3, int y3, int z3,

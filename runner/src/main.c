@@ -277,9 +277,13 @@ static void draw_runner(void) {
     bucket = (CHAR_Z >> OT_SHIFT) - 1;
     if (bucket < 1)
         bucket = 1;
+    /* Tinted texels would dither; the runner stays crisp. In a bucket the
+     * last allocated draws first: off, the runner, then on again. */
+    dither_mode(bucket, 1);
     spr = alloc_prim(bucket, sizeof(POLY_FT4));
     if (!spr)
         return;
+    dither_mode(bucket, 0);
     setPolyFT4(spr);
     /* The GPU multiplies each texel by tint / 128: the world's light. */
     {
@@ -339,6 +343,8 @@ static void draw_art(int id, int x, int y, int bright) {
     if (!p)
         return;
     setPolyFT4(p);
+    /* Raw texels once fully lit; a fade is tinted, and dithers. */
+    setShadeTex(p, bright == 128);
     setRGB0(p, bright, bright, bright);
     setXYWH(p, x, y, w, h);
     setUVWH(p, 0, 0, w - 1, h - 1);
@@ -357,6 +363,8 @@ static void draw_preview(int cx, int feet_y, int scale) {
     if (!p)
         return;
     setPolyFT4(p);
+    /* Raw texels: a tinted texture would be dithered. */
+    setShadeTex(p, 1);
     setRGB0(p, 128, 128, 128);
     setXYWH(p, cx - w / 2, feet_y - h, w, h);
     setUVWH(p, spr_cell_u[cell], spr_cell_v[cell], fw - 1, fh - 1);

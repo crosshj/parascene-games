@@ -801,6 +801,8 @@ static void sky_panel(int x0, int x1, int hy, int u0, int u1, uint16_t tpage) {
     if (!p)
         return;
     setPolyFT4(p);
+    /* Raw texels: a tinted texture would be dithered. */
+    setShadeTex(p, 1);
     setRGB0(p, 128, 128, 128);
     setXY4(p, x0, 0, x1, 0, x0, hy, x1, hy);
     setUV4(p, u0, v0, u1, v0, u0, v1, u1, v1);

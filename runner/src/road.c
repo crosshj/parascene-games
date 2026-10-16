@@ -163,27 +163,32 @@ static int edge_len(XY a, XY b) {
 /* poly_f4v drops quads wider than 280px; near road is often 500–700px.
  * Split laterally until each piece fits, using poly_f4's 480px edge limit.
  * An edge is split only by its own length, so the strip on its other side
- * splits it at the same rounded midpoint; otherwise the seam cracks open. */
-static void emit_piece(XY al, XY ar, XY bl, XY br, int bucket, int r, int g, int bcol, int depth) {
+ * splits it at the same rounded midpoint; otherwise the seam cracks open.
+ * Every piece keeps al, ar on the near edge and bl, br on the far edge, so
+ * cn shades the near edge and cf the far. */
+static void emit_piece(XY al, XY ar, XY bl, XY br, int bucket, const int *cn, const int *cf,
+                       int depth) {
     int near = depth < 3 && edge_len(al, ar) > 400;
     int far = depth < 3 && edge_len(bl, br) > 400;
     if (near && far) {
         XY am = lerp_xy(al, ar, 1, 2);
         XY bm = lerp_xy(bl, br, 1, 2);
-        emit_piece(al, am, bl, bm, bucket, r, g, bcol, depth + 1);
-        emit_piece(am, ar, bm, br, bucket, r, g, bcol, depth + 1);
+        emit_piece(al, am, bl, bm, bucket, cn, cf, depth + 1);
+        emit_piece(am, ar, bm, br, bucket, cn, cf, depth + 1);
     } else if (near) {
         XY am = lerp_xy(al, ar, 1, 2);
-        emit_piece(al, am, bl, bl, bucket, r, g, bcol, depth + 1);
-        emit_piece(am, am, bl, br, bucket, r, g, bcol, depth + 1);
-        emit_piece(am, ar, br, br, bucket, r, g, bcol, depth + 1);
+        emit_piece(al, am, bl, bl, bucket, cn, cf, depth + 1);
+        emit_piece(am, am, bl, br, bucket, cn, cf, depth + 1);
+        emit_piece(am, ar, br, br, bucket, cn, cf, depth + 1);
     } else if (far) {
         XY bm = lerp_xy(bl, br, 1, 2);
-        emit_piece(al, al, bl, bm, bucket, r, g, bcol, depth + 1);
-        emit_piece(al, ar, bm, bm, bucket, r, g, bcol, depth + 1);
-        emit_piece(ar, ar, bm, br, bucket, r, g, bcol, depth + 1);
+        emit_piece(al, al, bl, bm, bucket, cn, cf, depth + 1);
+        emit_piece(al, ar, bm, bm, bucket, cn, cf, depth + 1);
+        emit_piece(ar, ar, bm, br, bucket, cn, cf, depth + 1);
     } else {
-        poly_f4(&al, &ar, &bl, &br, bucket, r, g, bcol, BLEND_NONE);
+        poly_g4(&al, &ar, &bl, &br, bucket,
+                cn[0], cn[1], cn[2], cn[0], cn[1], cn[2],
+                cf[0], cf[1], cf[2], cf[0], cf[1], cf[2], BLEND_NONE);
     }
 }
 
@@ -306,9 +311,11 @@ static int off_screen(const RoadSample *a, const RoadSample *b) {
     return x1 < -EDGE_W || x0 > SCREEN_W + EDGE_W || y1 < 0 || y0 > SCREEN_H;
 }
 
+/* The deck shaded from its near edge to its far edge, so the haze ramps
+ * across the strip instead of stepping at each seam. */
 static void strip(const RoadSample *a, const RoadSample *b) {
     int sort, bucket;
-    int r = style->road[0], g = style->road[1], bcol = style->road[2];
+    int cn[3], cf[3];
     PROF_N(PN_STRIP);
     if (a->lz < 8 || a->rz < 8 || b->lz < 8 || b->rz < 8)
         return;
@@ -319,12 +326,16 @@ static void strip(const RoadSample *a, const RoadSample *b) {
         sort = CLIP;
     if (sort >= FAR)
         return;
+    cn[0] = cf[0] = style->road[0];
+    cn[1] = cf[1] = style->road[1];
+    cn[2] = cf[2] = style->road[2];
+    haze_road(&cn[0], &cn[1], &cn[2], (a->lz + a->rz) / 2);
+    haze_road(&cf[0], &cf[1], &cf[2], sort);
     /* Nudge near deck back a hair so crate sides win at the screen bottom. */
     if (sort < 500)
         sort += 48;
-    haze_road(&r, &g, &bcol, sort);
     bucket = sort >> OT_SHIFT;
-    emit_piece(a->l, a->r, b->l, b->r, bucket, r, g, bcol, 0);
+    emit_piece(a->l, a->r, b->l, b->r, bucket, cn, cf, 0);
 }
 
 /* Outset k / 4096 of EDGE_W past a road edge in screen space (u is linear

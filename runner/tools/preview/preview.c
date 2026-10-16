@@ -113,9 +113,22 @@ static long px_fill, px_blend;
 
 static int sat(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
+/* PSX15=1 shows what the GPU shows: 15-bit color, with Gouraud prims
+ * dithered while the draw mode's dither bit is set. */
+static int psx15, dither_on, prim_dither;
+static const int dither4[4][4] = {
+    {-4, 0, -3, 1}, {2, -2, 3, -1}, {-3, 1, -4, 0}, {3, -1, 2, -2},
+};
+
 static void plot(int x, int y, int r, int g, int b, int semi) {
     uint8_t *d = fb[y][x];
     px_fill++;
+    if (psx15) {
+        int k = prim_dither ? dither4[y & 3][x & 3] : 0;
+        r = sat(r + k) & ~7;
+        g = sat(g + k) & ~7;
+        b = sat(b + k) & ~7;
+    }
     if (!semi) {
         d[0] = (uint8_t)r; d[1] = (uint8_t)g; d[2] = (uint8_t)b;
         return;
@@ -126,6 +139,11 @@ static void plot(int x, int y, int r, int g, int b, int semi) {
     case 1: d[0] = (uint8_t)sat(d[0] + r); d[1] = (uint8_t)sat(d[1] + g); d[2] = (uint8_t)sat(d[2] + b); break;
     case 2: d[0] = (uint8_t)sat(d[0] - r); d[1] = (uint8_t)sat(d[1] - g); d[2] = (uint8_t)sat(d[2] - b); break;
     default: d[0] = (uint8_t)sat(d[0] + r / 4); d[1] = (uint8_t)sat(d[1] + g / 4); d[2] = (uint8_t)sat(d[2] + b / 4); break;
+    }
+    if (psx15) {
+        d[0] &= ~7;
+        d[1] &= ~7;
+        d[2] &= ~7;
     }
 }
 
@@ -184,12 +202,20 @@ static Counts render(int cr, int cg, int cb) {
             fb[y][x][0] = (uint8_t)cr; fb[y][x][1] = (uint8_t)cg; fb[y][x][2] = (uint8_t)cb;
         }
     abr = 0;
+    psx15 = getenv("PSX15") != 0;
+    dither_on = 1;
+    if (psx15)
+        for (y = 0; y < SCREEN_H; y++)
+            for (x = 0; x < SCREEN_W; x++)
+                for (i = 0; i < 3; i++)
+                    fb[y][x][i] &= ~7;
     qsort(links, (size_t)link_count, sizeof links[0], cmp_link);
     for (i = 0; i < link_count; i++) {
         uint8_t code = ((P_TAG *)links[i].prim)->code;
         int semi = (code & 2) != 0;
         if (code == 0xE1) {
             abr = (int)((((uint32_t *)links[i].prim)[1] >> 5) & 3);
+            dither_on = (int)((((uint32_t *)links[i].prim)[1] >> 9) & 1);
             n.tpage++;
         } else if ((code & 0xFC) == 0x28) {
             POLY_F4 *p = links[i].prim;
@@ -207,8 +233,10 @@ static Counts render(int cr, int cg, int cb) {
             Vtx v1 = {p->x1, p->y1, p->r1, p->g1, p->b1};
             Vtx v2 = {p->x2, p->y2, p->r2, p->g2, p->b2};
             Vtx v3 = {p->x3, p->y3, p->r3, p->g3, p->b3};
+            prim_dither = dither_on;
             tri(v0, v1, v2, semi);
             tri(v1, v2, v3, semi);
+            prim_dither = 0;
             n.g4++;
         } else if ((code & 0xFC) == 0x40) {
             LINE_F2 *p = links[i].prim;
