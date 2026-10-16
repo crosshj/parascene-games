@@ -3,11 +3,11 @@
 #include "course.h"
 #include "path.h"
 
+/* Pinhole like world.c's GTE setup: focal SCREEN_W/2, eye CAM_H up. */
 int project(int x, int y, int z, XY *out) {
-    (void)x;
-    (void)y;
-    out->x = 0;
-    out->y = 0;
+    int d = z < 8 ? 8 : z;
+    out->x = (int16_t)(SCREEN_W / 2 + x * (SCREEN_W / 2) / d);
+    out->y = (int16_t)(HORIZON_Y + (CAM_H - y) * (SCREEN_W / 2) / d);
     return z;
 }
 
@@ -116,6 +116,17 @@ int main(void) {
         fprintf(stderr, "oval has no quarter turn\n");
         return 1;
     }
+    /* A flat turn never tilts the runner. */
+    {
+        XY feet;
+        int ax, ay;
+        path_begin(4096 + 4096);
+        path_stand(4096 + 4096 + CHAR_Z, 0, 0, &feet, &ax, &ay);
+        if (!near(ay, 0, 120)) {
+            fprintf(stderr, "oval stand lean %d %d\n", ax, ay);
+            return 1;
+        }
+    }
     if (!path_open("hill.loop")) {
         fprintf(stderr, "hill.loop did not open\n");
         return 1;
@@ -149,6 +160,60 @@ int main(void) {
     path_cam(65536 + 400, 0, 0, &x, &y, &z);
     if (!near(x, 0, 2) || !near(y, 0, 2) || !near(z, 200, 4)) {
         fprintf(stderr, "hill lap %d %d %d\n", x, y, z);
+        return 1;
+    }
+    if (!path_open("bank.bend")) {
+        fprintf(stderr, "bank.bend did not open\n");
+        return 1;
+    }
+    /* Mid turn the deck banks right on a level horizon: the left edge rides
+     * high, the right edge stays at grade, the center sits halfway. */
+    path_begin(6144);
+    if (path_horizon() != HORIZON_Y) {
+        fprintf(stderr, "bank horizon %d\n", path_horizon());
+        return 1;
+    }
+    {
+        int lx, ly, lz, rx, ry, rz;
+        path_cam_lr(6144 + CHAR_Z, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        if (!near(ly - ry, 311, 12) || !near(ly + ry, 0, 12)) {
+            fprintf(stderr, "bank turn edges %d %d\n", ly, ry);
+            return 1;
+        }
+    }
+    /* In the S the bank flips: left low through carve-left, right low
+     * through carve-right. */
+    {
+        int lx, ly, lz, rx, ry, rz;
+        path_begin(15000);
+        path_cam_lr(15000 + CHAR_Z, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        if (ly >= ry) {
+            fprintf(stderr, "bank carve-left edges %d %d\n", ly, ry);
+            return 1;
+        }
+        path_begin(19000);
+        path_cam_lr(19000 + CHAR_Z, 280, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        if (ly <= ry) {
+            fprintf(stderr, "bank carve-right edges %d %d\n", ly, ry);
+            return 1;
+        }
+    }
+    /* The runner stands square to the deck. On a right bank the deck runs
+     * down to the right on screen (ay > 0), about the bank angle. */
+    {
+        XY feet;
+        int ax, ay;
+        path_begin(6144);
+        path_stand(6144 + CHAR_Z, 0, 0, &feet, &ax, &ay);
+        if (ay < 1800 || ay > 2600) {
+            fprintf(stderr, "bank stand lean %d %d\n", ax, ay);
+            return 1;
+        }
+    }
+    path_begin(46080 + 200);
+    path_cam(46080 + 400, 0, 0, &x, &y, &z);
+    if (!near(x, 0, 2) || !near(y, 0, 2) || !near(z, 200, 4)) {
+        fprintf(stderr, "bank lap %d %d %d\n", x, y, z);
         return 1;
     }
     if (!path_open("straight.run")) {

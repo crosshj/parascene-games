@@ -437,13 +437,15 @@ static int ang_abs(int d) {
     return iabs(((d + 2048) & 4095) - 2048);
 }
 
-/* A chord may turn more than it may pitch: a far bend reads as a curve at
- * coarse steps, but a crest needs fine ones to keep its outline. */
+/* A chord may turn more than it may pitch or roll: a far bend reads as a
+ * curve at coarse steps, but a crest or a bank change needs fine ones to
+ * keep its outline. */
 static int too_bent(int s0, int s1) {
     const PathSeg *a = path_at(s0);
     const PathSeg *b = path_at(s1);
     return ang_abs(b->yaw - a->yaw) > FAR_YAW ||
-           ang_abs(b->pitch - a->pitch) > FAR_PITCH;
+           ang_abs(b->pitch - a->pitch) > FAR_PITCH ||
+           ang_abs(b->roll - a->roll) > FAR_PITCH;
 }
 
 /* Next far sample: by depth while in view, halved through bends and

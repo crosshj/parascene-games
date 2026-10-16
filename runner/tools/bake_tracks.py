@@ -88,6 +88,20 @@ def basis(yaw, pitch, roll):
     return norm(r2), norm(u2), norm((fx, fy, fz))
 
 
+def bank_lift(frame, edge):
+    """Rise that keeps the low edge of a banked deck at grade.
+
+    Bank pivots on the inside edge: positive roll drops the right edge, so
+    the deck lifts by that edge's offset times sin(roll), along the unrolled
+    up vector. Level road lifts nothing."""
+    if frame.roll % FULL == 0:
+        return (0.0, 0.0, 0.0)
+    sin_r = math.sin(frame.roll * math.tau / FULL)
+    rise = (edge[1] if sin_r > 0 else edge[0]) * sin_r
+    _, up, _ = basis(frame.yaw, frame.pitch, 0)
+    return (up[0] * rise, up[1] * rise, up[2] * rise)
+
+
 class Frame(object):
     def __init__(self):
         self.x = self.y = self.z = 0.0
@@ -318,13 +332,16 @@ def bake_track(track, cat):
             def at_edge(t):
                 return [round(edge0[k] + (edge1[k] - edge0[k]) * t, 3) for k in range(2)]
             e0, e1 = at_edge(t0), at_edge(t1)
+            lift0 = bank_lift(cur, e0)
+            lift1 = bank_lift(end, e1)
             segs.append({
                 "s": cur.s,
                 "piece": pid,
                 "local": i,
                 "chain": chain,
-                "p": [cur.x, cur.y, cur.z],
-                "p1": [end.x, end.y, end.z],
+                "p": [cur.x + lift0[0], cur.y + lift0[1], cur.z + lift0[2]],
+                "p1": [end.x + lift1[0], end.y + lift1[1], end.z + lift1[2]],
+                "lift": lift0,
                 "yaw": cur.yaw % FULL,
                 "pitch": cur.pitch % FULL,
                 "roll": cur.roll % FULL,
@@ -368,9 +385,9 @@ def bake_track(track, cat):
 
     def beside(frame, seg):
         """True when frame sits on the target piece's first cross-section."""
-        dx = frame.x - seg["p"][0]
-        dy = frame.y - seg["p"][1]
-        dz = frame.z - seg["p"][2]
+        dx = frame.x + seg["lift"][0] - seg["p"][0]
+        dy = frame.y + seg["lift"][1] - seg["p"][1]
+        dz = frame.z + seg["lift"][2] - seg["p"][2]
         lateral = dx * seg["right"][0] + dy * seg["right"][1] + dz * seg["right"][2]
         along = dx * seg["fwd"][0] + dy * seg["fwd"][1] + dz * seg["fwd"][2]
         vertical = dx * seg["up"][0] + dy * seg["up"][1] + dz * seg["up"][2]

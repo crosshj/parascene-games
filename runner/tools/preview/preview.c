@@ -323,18 +323,20 @@ static void write_png(const char *path) {
 
 /* A stand-in for the runner sprite, at its real depth, in the world's light. */
 static void runner_marker(int scroll, const Light *light) {
-    XY feet;
-    int sz = path_project(scroll + CHAR_Z, 0, 0, &feet);
+    XY feet, p0, p1, p2, p3;
+    int ax, ay;
+    int sz = path_stand(scroll + CHAR_Z, 0, 0, &feet, &ax, &ay);
     int h = (78 * (SCREEN_W / 2)) / sz, w = h * 2 / 5;
-    TILE *t = alloc_prim((CHAR_Z >> OT_SHIFT) - 1, sizeof(TILE));
-    if (!t)
-        return;
-    setTile(t);
-    setXY0(t, feet.x - w / 2, feet.y - h);
-    setWH(t, w, h);
-    setRGB0(t, clamp(230 * light->tint[0] / 128, 0, 255),
+    int bx = ax * w / 2 / 4096, by = ay * w / 2 / 4096;
+    int ux = ay * h / 4096, uy = -ax * h / 4096;
+    p0.x = (int16_t)(feet.x - bx + ux); p0.y = (int16_t)(feet.y - by + uy);
+    p1.x = (int16_t)(feet.x + bx + ux); p1.y = (int16_t)(feet.y + by + uy);
+    p2.x = (int16_t)(feet.x - bx); p2.y = (int16_t)(feet.y - by);
+    p3.x = (int16_t)(feet.x + bx); p3.y = (int16_t)(feet.y + by);
+    poly_f4(&p0, &p1, &p2, &p3, (CHAR_Z >> OT_SHIFT) - 1,
+            clamp(230 * light->tint[0] / 128, 0, 255),
             clamp(230 * light->tint[1] / 128, 0, 255),
-            clamp(236 * light->tint[2] / 128, 0, 255));
+            clamp(236 * light->tint[2] / 128, 0, 255), BLEND_NONE);
 }
 
 typedef struct {
@@ -377,7 +379,7 @@ int main(int argc, char **argv) {
         {"run_a", 2600, 20}, {"run_b", 15000, 20}, {"run_c", 31337, 20},
         {"run_d", 47210, 20}, {"paused", 15000, 0}, {"select", 6000, 8},
         {"crest", 10600, 20}, {"brink", 12100, 20}, {"top", 37000, 20},
-        {"lap", 63600, 20},
+        {"lap", 63600, 20}, {"flip", 16900, 20}, {"sweep", 30000, 20},
     };
     const char *dir = argc > 1 ? argv[1] : ".";
     int i, j;

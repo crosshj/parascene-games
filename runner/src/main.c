@@ -262,9 +262,9 @@ static int posed_frame(void) {
 
 static void draw_runner(void) {
     XY feet;
-    int sz, h, w, frame, bucket;
+    int sz, h, w, frame, bucket, ax, ay, bx, by, ux, uy;
     POLY_FT4 *spr;
-    sz = path_project(scroll + CHAR_Z, player_x, player_y, &feet);
+    sz = path_stand(scroll + CHAR_Z, player_x, player_y, &feet, &ax, &ay);
     if (sz < 8)
         return;
     h = (78 * (SCREEN_W / 2)) / sz;
@@ -284,11 +284,16 @@ static void draw_runner(void) {
         const uint8_t *tint = level_light(levels[level_index])->tint;
         setRGB0(spr, tint[0], tint[1], tint[2]);
     }
+    /* Square to the deck: on a bank the runner leans with the road. */
+    bx = ax * w / 2 / 4096;
+    by = ay * w / 2 / 4096;
+    ux = ay * h / 4096;
+    uy = -ax * h / 4096;
     setXY4(spr,
-        feet.x - w / 2, feet.y - h,
-        feet.x + w / 2, feet.y - h,
-        feet.x - w / 2, feet.y,
-        feet.x + w / 2, feet.y);
+        feet.x - bx + ux, feet.y - by + uy,
+        feet.x + bx + ux, feet.y + by + uy,
+        feet.x - bx, feet.y - by,
+        feet.x + bx, feet.y + by);
     setUVWH(spr,
         spr_frame_u[spr_base_uv_off[spr_char_base[character]] + frame],
         spr_char_v[character] + spr_frame_v[spr_base_uv_off[spr_char_base[character]] + frame],

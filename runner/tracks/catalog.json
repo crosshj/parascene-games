@@ -5,7 +5,7 @@
   "width": 560,
   "fullTurn": 4096,
   "maxStep": 64,
-  "implemented": ["repeat", "yaw", "grade"],
+  "implemented": ["repeat", "yaw", "grade", "bank"],
   "tracks": [
     {
       "id": "straight.run",
@@ -138,20 +138,44 @@
     {
       "id": "bank.bend",
       "name": "Banked bends",
-      "status": "view",
-      "summary": "A right bend that banks right, then a left bend that banks left. The heading returns, so the repeat continues the way it started.",
+      "status": "runnable",
+      "summary": "A closed lap. A banked turn-around, then an S that banks left and rolls straight over into a right bank, a wider banked turn-around, and the long straight home.",
       "capabilities": ["yaw", "bank", "repeat"],
-      "start": "enter",
-      "repeatFrom": "enter",
+      "start": "start",
+      "repeatFrom": "start",
       "pieces": [
-        {"id": "enter", "length": 2048, "next": "in-right"},
-        {"id": "in-right", "length": 2048, "yaw": 22.5, "bank": 22.5, "next": "right"},
-        {"id": "right", "length": 4096, "yaw": 45, "next": "out-right"},
-        {"id": "out-right", "length": 2048, "yaw": 22.5, "bank": -22.5, "next": "in-left"},
-        {"id": "in-left", "length": 2048, "yaw": -22.5, "bank": -22.5, "next": "left"},
-        {"id": "left", "length": 4096, "yaw": -45, "next": "out-left"},
-        {"id": "out-left", "length": 2048, "yaw": -22.5, "bank": 22.5, "next": "leave"},
-        {"id": "leave", "length": 2048, "next": "enter"}
+        {"id": "start", "length": 2048, "next": "turn-in"},
+        {"id": "turn-in", "length": 2048, "yaw": 45, "bank": 33.75, "next": "turn",
+         "obstacles": [{"at": 1152, "lane": 1}]},
+        {"id": "turn", "length": 4096, "yaw": 90, "next": "turn-out",
+         "obstacles": [{"at": 1152, "lane": -1}, {"at": 3200, "lane": 0}]},
+        {"id": "turn-out", "length": 2048, "yaw": 45, "bank": -33.75, "next": "link"},
+        {"id": "link", "length": 2048, "next": "lean-left",
+         "obstacles": [{"at": 1152, "lane": 1}]},
+        {"id": "lean-left", "length": 2048, "yaw": -14.0625, "bank": -22.5, "next": "carve-left"},
+        {"id": "carve-left", "length": 1792, "yaw": -14.0625, "next": "flip",
+         "obstacles": [{"at": 896, "lane": -1}]},
+        {"id": "flip", "length": 2048, "bank": 45, "next": "carve-right",
+         "obstacles": [{"at": 1152, "lane": 0}]},
+        {"id": "carve-right", "length": 1792, "yaw": 14.0625, "next": "lean-right",
+         "obstacles": [{"at": 896, "lane": 1}]},
+        {"id": "lean-right", "length": 2048, "yaw": 14.0625, "bank": -22.5, "next": "settle"},
+        {"id": "settle", "length": 2048, "next": "home-in",
+         "obstacles": [{"at": 1152, "lane": -1}]},
+        {"id": "home-in", "length": 2048, "yaw": 45, "bank": 33.75, "next": "home-turn"},
+        {"id": "home-turn", "length": 8192, "yaw": 112.5, "next": "home-out",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4224, "lane": 1},
+           {"at": 7296, "lane": -1}
+         ]},
+        {"id": "home-out", "length": 2048, "yaw": 22.5, "bank": -33.75, "next": "home"},
+        {"id": "home", "length": 9728, "next": "start",
+         "obstacles": [
+           {"at": 2176, "lane": 0},
+           {"at": 5248, "lane": -1},
+           {"at": 8320, "lane": 1}
+         ]}
       ]
     },
     {

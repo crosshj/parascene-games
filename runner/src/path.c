@@ -149,9 +149,10 @@ void path_begin(int scroll) {
     path_scroll = scroll;
     sample(path_scroll, &cam_x, &cam_y, &cam_z, &cyaw, &cpitch, &croll);
     cam_yaw = cyaw & 4095;
-    /* The camera takes most of the grade, so a hill ahead still reads as one. */
+    /* The camera takes most of the grade, so a hill ahead still reads as one.
+     * It never rolls: the horizon stays level and the bank shows in the deck. */
     cpitch = ang_delta(0, cpitch) * CAM_PITCH_NUM / CAM_PITCH_DEN;
-    basis(cyaw, cpitch, croll,
+    basis(cyaw, cpitch, 0,
           &cam_rx, &cam_ry, &cam_rz,
           &cam_ux, &cam_uy, &cam_uz,
           &cam_fx, &cam_fy, &cam_fz);
@@ -230,6 +231,43 @@ int path_project(int s, int u, int v, XY *out) {
     int x, y, z;
     path_cam(s, u, v, &x, &y, &z);
     return project(x, y, z, out);
+}
+
+static int isqrt(int n) {
+    int r = 0, bit = 1 << 30;
+    while (bit > n)
+        bit >>= 2;
+    while (bit) {
+        if (n >= r + bit) {
+            n -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    return r;
+}
+
+/* The deck's up vector on screen, not its lateral line: across a turn the
+ * lateral line foreshortens and would tilt the figure on flat road. */
+int path_stand(int s, int u, int v, XY *feet, int *ax, int *ay) {
+    XY head;
+    int sz = path_project(s, u, v, feet);
+    int dx, dy, len;
+    *ax = 4096;
+    *ay = 0;
+    if (sz < 8)
+        return sz;
+    path_project(s, u, v + 64, &head);
+    dx = head.x - feet->x;
+    dy = head.y - feet->y;
+    len = isqrt(dx * dx + dy * dy);
+    if (dy < 0 && len > 0) {
+        *ax = -dy * 4096 / len;
+        *ay = dx * 4096 / len;
+    }
+    return sz;
 }
 
 const PathSeg *path_at(int s) {

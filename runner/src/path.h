@@ -2,9 +2,10 @@
  * offset from the centerline, v is height above the deck. The open span is
  * one period; past the lead, s repeats the cycle.
  *
- * path_cam follows the segment yaw and pitch. On straight.run both are
- * zero, so the frame stays (u, v, s - scroll). The camera takes 3/4 of the
- * grade under it. Roll stays level until a banked track is runnable. */
+ * path_cam follows the segment yaw, pitch, and roll. On straight.run all
+ * are zero, so the frame stays (u, v, s - scroll). The camera takes 3/4 of
+ * the grade under it and none of the roll, so a banked deck tilts on a
+ * level horizon. The bake keeps a banked deck's low edge at grade. */
 
 #pragma once
 
@@ -39,6 +40,10 @@ void path_cam_lr(int s, int half, int v,
                  int *lx, int *ly, int *lz,
                  int *rx, int *ry, int *rz);
 int path_project(int s, int u, int v, XY *out);
+/* Feet at (s, u, v) and the deck's screen direction under them, a unit
+ * vector in 4096ths: (4096, 0) on a level deck. A figure stands square to
+ * the deck by building its quad along (ax, ay) and up along (ay, -ax). */
+int path_stand(int s, int u, int v, XY *feet, int *ax, int *ay);
 /* Segment containing s, or 0 when s is negative. */
 const PathSeg *path_at(int s);
 /* Segments in the open period, lead plus one cycle. */
