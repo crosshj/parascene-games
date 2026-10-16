@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "world.h"
 
 #define STEP 256
 #define CHAR_Z 200
@@ -18,10 +19,12 @@
 int has_obstacle(int band);
 int obstacle_lane(int band);
 
-/* Face colors for an obstacle box, with dim() distance falloff. */
+/* Face colors for an obstacle box. */
 typedef struct {
     uint8_t back[3], left[3], right[3], top[3], front[3];
 } ObstacleStyle;
 
-/* s is the obstacle center along the road. Draw after path_begin. */
+/* s is the obstacle center along the road. Draw after path_begin.
+ * obstacle_box uses dim(); pass shade for aerial perspective, etc. */
 void obstacle_box(int s, int lane_i, const ObstacleStyle *style);
+void obstacle_box_shade(int s, int lane_i, const ObstacleStyle *style, Shade shade);

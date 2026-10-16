@@ -42,10 +42,44 @@
       "start": "north",
       "repeatFrom": "north",
       "pieces": [
-        {"id": "north", "length": 4096, "next": "east-bend"},
-        {"id": "east-bend", "length": 8192, "yaw": 180, "next": "south"},
-        {"id": "south", "length": 4096, "next": "west-bend"},
-        {"id": "west-bend", "length": 8192, "yaw": 180, "next": "north"}
+        {
+          "id": "north",
+          "length": 4096,
+          "next": "east-bend",
+          "obstacles": [
+            {"at": 1408, "lane": -1},
+            {"at": 3456, "lane": 1}
+          ]
+        },
+        {
+          "id": "east-bend",
+          "length": 8192,
+          "yaw": 180,
+          "next": "south",
+          "obstacles": [
+            {"at": 2176, "lane": -1},
+            {"at": 5248, "lane": 0}
+          ]
+        },
+        {
+          "id": "south",
+          "length": 4096,
+          "next": "west-bend",
+          "obstacles": [
+            {"at": 896, "lane": 1},
+            {"at": 2688, "lane": -1}
+          ]
+        },
+        {
+          "id": "west-bend",
+          "length": 8192,
+          "yaw": 180,
+          "next": "north",
+          "obstacles": [
+            {"at": 3200, "lane": 0},
+            {"at": 6272, "lane": 1}
+          ]
+        }
       ]
     },
     {

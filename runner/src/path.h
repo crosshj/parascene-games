@@ -29,7 +29,13 @@ typedef struct {
 int path_open(const char *id);
 /* Call once a frame before any path_cam or path_project. */
 void path_begin(int scroll);
+/* Camera yaw at the current path_begin scroll (0..4095). */
+int path_yaw(void);
 void path_cam(int s, int u, int v, int *x, int *y, int *z);
+/* One sample: both road edges at ±half. Cheaper than two path_cam calls. */
+void path_cam_lr(int s, int half, int v,
+                 int *lx, int *ly, int *lz,
+                 int *rx, int *ry, int *rz);
 int path_project(int s, int u, int v, XY *out);
 /* Segment containing s, or 0 when s is negative. */
 const PathSeg *path_at(int s);

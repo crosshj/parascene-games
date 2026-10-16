@@ -2835,7 +2835,7 @@
           "deck": true,
           "next": 6,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": -1,
           "right": [
             1.0,
             0.0,
@@ -3411,7 +3411,7 @@
           "deck": true,
           "next": 14,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": 1,
           "right": [
             1.0,
             0.0,
@@ -4203,7 +4203,7 @@
           "deck": true,
           "next": 25,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": -1,
           "right": [
             0.70711,
             0.0,
@@ -5067,7 +5067,7 @@
           "deck": true,
           "next": 37,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": 0,
           "right": [
             -0.38268,
             0.0,
@@ -6147,7 +6147,7 @@
           "deck": true,
           "next": 52,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": 1,
           "right": [
             -1.0,
             0.0,
@@ -6651,7 +6651,7 @@
           "deck": true,
           "next": 59,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": -1,
           "right": [
             -1.0,
             0.0,
@@ -7947,7 +7947,7 @@
           "deck": true,
           "next": 77,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": 0,
           "right": [
             -0.38268,
             0.0,
@@ -8811,7 +8811,7 @@
           "deck": true,
           "next": 89,
           "fork": -1,
-          "obstacle": null,
+          "obstacle": 1,
           "right": [
             0.70711,
             0.0,

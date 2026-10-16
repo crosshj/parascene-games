@@ -6,6 +6,13 @@
 static int path_scroll;
 static const TrackDef *active = &track_table[0];
 
+/* Camera frame for this path_begin. path_cam reuses it every call. */
+static int cam_x, cam_y, cam_z;
+static int cam_yaw;
+static int cam_rx, cam_ry, cam_rz;
+static int cam_ux, cam_uy, cam_uz;
+static int cam_fx, cam_fy, cam_fz;
+
 typedef char path_step_ok[(STEP == 256) ? 1 : -1];
 
 /* Quarter-turn sine, 0..1024 in steps of 16. 4096 is one. */
@@ -135,28 +142,73 @@ int path_open(const char *id) {
 }
 
 void path_begin(int scroll) {
+    int cyaw, cpitch, croll;
     path_scroll = scroll;
+    sample(path_scroll, &cam_x, &cam_y, &cam_z, &cyaw, &cpitch, &croll);
+    cam_yaw = cyaw & 4095;
+    basis(cyaw, cpitch, croll,
+          &cam_rx, &cam_ry, &cam_rz,
+          &cam_ux, &cam_uy, &cam_uz,
+          &cam_fx, &cam_fy, &cam_fz);
+}
+
+int path_yaw(void) {
+    return cam_yaw;
+}
+
+/* Flat deck (pitch=roll=0): right = (cy,0,-sy), up = (0,1,0). */
+static void to_cam(int px, int py, int pz, int *x, int *y, int *z) {
+    int dx = px - cam_x;
+    int dy = py - cam_y;
+    int dz = pz - cam_z;
+    *x = dot_q(dx, dy, dz, cam_rx, cam_ry, cam_rz);
+    *y = dot_q(dx, dy, dz, cam_ux, cam_uy, cam_uz);
+    *z = dot_q(dx, dy, dz, cam_fx, cam_fy, cam_fz);
 }
 
 void path_cam(int s, int u, int v, int *x, int *y, int *z) {
     int px, py, pz, yaw, pitch, roll;
-    int cx, cy, cz, cyaw, cpitch, croll;
-    int rx, ry, rz, ux, uy, uz, fx, fy, fz;
-    int prx, pry, prz, pux, puy, puz, pfx, pfy, pfz;
-    int dx, dy, dz;
-    sample(path_scroll, &cx, &cy, &cz, &cyaw, &cpitch, &croll);
     sample(s, &px, &py, &pz, &yaw, &pitch, &roll);
-    basis(cyaw, cpitch, croll, &rx, &ry, &rz, &ux, &uy, &uz, &fx, &fy, &fz);
-    basis(yaw, pitch, roll, &prx, &pry, &prz, &pux, &puy, &puz, &pfx, &pfy, &pfz);
-    px += mul_q(prx, u) + mul_q(pux, v);
-    py += mul_q(pry, u) + mul_q(puy, v);
-    pz += mul_q(prz, u) + mul_q(puz, v);
-    dx = px - cx;
-    dy = py - cy;
-    dz = pz - cz;
-    *x = dot_q(dx, dy, dz, rx, ry, rz);
-    *y = dot_q(dx, dy, dz, ux, uy, uz);
-    *z = dot_q(dx, dy, dz, fx, fy, fz);
+    if (pitch == 0 && roll == 0) {
+        int sy = isin(yaw);
+        int cy = icos(yaw);
+        px += mul_q(cy, u);
+        py += v;
+        pz += mul_q(-sy, u);
+    } else {
+        int prx, pry, prz, pux, puy, puz, pfx, pfy, pfz;
+        basis(yaw, pitch, roll, &prx, &pry, &prz, &pux, &puy, &puz, &pfx, &pfy, &pfz);
+        px += mul_q(prx, u) + mul_q(pux, v);
+        py += mul_q(pry, u) + mul_q(puy, v);
+        pz += mul_q(prz, u) + mul_q(puz, v);
+    }
+    to_cam(px, py, pz, x, y, z);
+}
+
+void path_cam_lr(int s, int half, int v,
+                 int *lx, int *ly, int *lz,
+                 int *rx, int *ry, int *rz) {
+    int px, py, pz, yaw, pitch, roll;
+    sample(s, &px, &py, &pz, &yaw, &pitch, &roll);
+    if (pitch == 0 && roll == 0) {
+        int sy = isin(yaw);
+        int cy = icos(yaw);
+        int dx = mul_q(cy, half);
+        int dz = mul_q(-sy, half);
+        to_cam(px - dx, py + v, pz - dz, lx, ly, lz);
+        to_cam(px + dx, py + v, pz + dz, rx, ry, rz);
+    } else {
+        int prx, pry, prz, pux, puy, puz, pfx, pfy, pfz;
+        basis(yaw, pitch, roll, &prx, &pry, &prz, &pux, &puy, &puz, &pfx, &pfy, &pfz);
+        to_cam(px - mul_q(prx, half) + mul_q(pux, v),
+               py - mul_q(pry, half) + mul_q(puy, v),
+               pz - mul_q(prz, half) + mul_q(puz, v),
+               lx, ly, lz);
+        to_cam(px + mul_q(prx, half) + mul_q(pux, v),
+               py + mul_q(pry, half) + mul_q(puy, v),
+               pz + mul_q(prz, half) + mul_q(puz, v),
+               rx, ry, rz);
+    }
 }
 
 int path_project(int s, int u, int v, XY *out) {

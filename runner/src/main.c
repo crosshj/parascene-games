@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <psxgpu.h>
 #include <psxpad.h>
 #include <psxapi.h>
@@ -161,10 +162,16 @@ static void upload_shadow(void) {
     shadow_tpage = getTPage(2, 2, 768, 256);
 }
 
+/* Flat oval sits in cool haze — pull the sprite a bit toward that air. */
+static int oval_world(void) {
+    const char *track = levels[level_index]->track;
+    return track && strcmp(track, "bend.flat") == 0;
+}
+
 static void draw_shadow(void) {
     int w = 44 - player_y / 5;
     int depth = 34 - player_y / 8;
-    int z0, z1, tone, bucket;
+    int z0, z1, tone, bucket, sr, sg, sb;
     XY far_l, far_r, near_l, near_r;
     POLY_FT4 *spr;
     if (w < 14)
@@ -185,6 +192,12 @@ static void draw_shadow(void) {
     tone = 128 - player_y;
     if (tone < 40)
         tone = 40;
+    sr = sg = sb = tone;
+    if (oval_world()) {
+        sr = tone * 70 / 128;
+        sg = tone * 82 / 128;
+        sb = tone * 104 / 128;
+    }
     /* One slot in front of the road under the feet, so the near half is not covered. */
     bucket = (CHAR_Z >> OT_SHIFT) - 1;
     if (bucket < 1)
@@ -194,7 +207,7 @@ static void draw_shadow(void) {
         return;
     setPolyFT4(spr);
     setSemiTrans(spr, 1);
-    setRGB0(spr, tone, tone, tone);
+    setRGB0(spr, sr, sg, sb);
     setXY4(spr,
         far_l.x, far_l.y, far_r.x, far_r.y,
         near_l.x, near_l.y, near_r.x, near_r.y);
@@ -273,7 +286,11 @@ static void draw_runner(void) {
     if (!spr)
         return;
     setPolyFT4(spr);
-    setRGB0(spr, 128, 128, 128);
+    if (oval_world())
+        /* Desaturated + cool: GPU multiplies texel RGB by this / 128. */
+        setRGB0(spr, 104, 114, 132);
+    else
+        setRGB0(spr, 128, 128, 128);
     setXY4(spr,
         feet.x - w / 2, feet.y - h,
         feet.x + w / 2, feet.y - h,
