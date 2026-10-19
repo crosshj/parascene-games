@@ -127,9 +127,26 @@ From the repository root:
   cmake -S runner -B runner/build -G Ninja
   cmake --build runner/build
 
-The compile stays in runner/build. Only runner.cue and runner.bin are
-copied to the repository root build/ folder. Open build/runner.cue in
-DuckStation (runner.bin sits beside it).
+The compile stays in runner/build. The build copies runner.cue,
+runner.bin, runner-nomusic.cue, runner-nomusic.bin, runner-web.cue, and
+runner-web.bin to the repository root build/ folder. Open
+build/runner.cue in DuckStation for the disc with music. Open
+build/runner-nomusic.cue for the same game without music tracks; menu
+sounds are still there. build/runner-web.cue is that small disc again,
+and it paints a command row so a browser can stream the mp3s.
+docs/web.md is the row. All three are written every time this build runs.
+
+XA is the smaller music encoding. Configure with -DRUNNER_XA_MUSIC=ON
+before building. That still writes all three discs.
+
+To play the web disc in a browser the way the GitHub Pages site will,
+from the web folder:
+
+  npm start
+
+Open http://127.0.0.1:8643/?game=runner . The picker is
+http://127.0.0.1:8643/ . The site files live in web/. GitHub Pages
+publishes that folder, plus build/runner-web.bin and runner/audio.
 
 CONTROLS
 --------

@@ -19,7 +19,12 @@
 #include "sprite_sheet.h"
 #include "screen_art.h"
 #include "sound_bank.h"
+#ifndef RUNNER_NO_MUSIC
 #include "music_tracks.h"
+#endif
+#ifdef RUNNER_WEB
+#include "web_row.h"
+#endif
 
 enum {
     ST_BOOT,
@@ -63,13 +68,16 @@ static int distance, best, shown;
 static int hit_timer;
 static uint16_t held, prev;
 
+#ifndef RUNNER_NO_MUSIC
 static int cd_on, cd_started;
 static int music_level = MUSIC_FULL;
+#endif
 static uint16_t art_tpage[ART_COUNT];
 static uint16_t art_clutid[ART_COUNT];
 static uint32_t snd_addr[SND_COUNT];
 static int snd_voice;
 
+#ifndef RUNNER_NO_MUSIC
 /* Shuffled playlist over every track in audio/ (see music_tracks.h). */
 static int music_order[MUSIC_TRACK_COUNT];
 static int music_at;
@@ -100,6 +108,12 @@ enum {
 };
 #else
 static int cd_wait;
+#ifdef RUNNER_WEB
+static int web_seq;
+static uint8_t web_bytes[WEB_ROW_BYTES];
+static uint16_t web_px[320] __attribute__((aligned(4)));
+#endif
+#endif
 #endif
 
 static uint16_t pad_held(void) {
@@ -781,6 +795,15 @@ static void setup_video(void) {
     SetDispMask(1);
 }
 
+#ifdef RUNNER_NO_MUSIC
+static void cd_service(void) {}
+
+static void music_start(void) {}
+
+static void music_volume(int level) {
+    (void)level;
+}
+#else
 static void music_shuffle(int avoid) {
     int i, j, t;
 
@@ -875,6 +898,48 @@ static int music_setup(void) {
     ExitCriticalSection();
     return 1;
 }
+#elif defined(RUNNER_WEB)
+static void web_publish(void) {
+    if (!cd_started || music_cur < 0)
+        web_row_silence(web_bytes);
+    else
+        web_row_music(web_bytes, web_seq, music_cur, music_level);
+    web_row_pixels(web_bytes, web_px);
+}
+
+static int music_play_track(int track) {
+    if (track < 0 || track >= MUSIC_TRACK_COUNT)
+        return 0;
+    music_cur = track;
+    return 1;
+}
+
+static void music_advance(void) {
+    music_at++;
+    if (music_at >= MUSIC_TRACK_COUNT)
+        music_shuffle(music_cur);
+    web_seq = web_seq >= 255 ? 1 : web_seq + 1;
+    if (music_play_track(music_order[music_at]))
+        cd_wait = music_web_frames[music_cur];
+    else
+        cd_wait = 0;
+    web_publish();
+}
+
+static void cd_service(void) {
+    if (!cd_on || cd_wait == 0)
+        return;
+    cd_wait--;
+    if (cd_wait > 0)
+        return;
+    music_advance();
+}
+
+static int music_setup(void) {
+    srand((unsigned)VSync(-1));
+    web_publish();
+    return 1;
+}
 #else
 /* CD track 1 is data; audio tracks start at 2. */
 static int music_play_track(int track) {
@@ -942,8 +1007,15 @@ static void music_start(void) {
         return;
     cd_started = 1;
     music_shuffle(-1);
-#ifdef RUNNER_XA_MUSIC
+#if defined(RUNNER_XA_MUSIC)
     music_play_track(music_order[music_at]);
+#elif defined(RUNNER_WEB)
+    web_seq = 1;
+    if (music_play_track(music_order[music_at]))
+        cd_wait = music_web_frames[music_cur];
+    else
+        cd_wait = 0;
+    web_publish();
 #else
     if (music_play_track(music_order[music_at]))
         cd_wait = music_cd_frames[music_cur];
@@ -954,6 +1026,10 @@ static void music_start(void) {
 
 /* 128 is full volume. The stream keeps playing; only the mix changes. */
 static void music_volume(int level) {
+#ifdef RUNNER_WEB
+    music_level = level;
+    web_publish();
+#else
     CdlATV mix;
     music_level = level;
     mix.val0 = (uint8_t)level;
@@ -961,7 +1037,9 @@ static void music_volume(int level) {
     mix.val2 = (uint8_t)level;
     mix.val3 = 0;
     CdMix(&mix);
+#endif
 }
+#endif
 
 int main(int argc, const char **argv) {
     int last_scroll = 0;
@@ -973,14 +1051,19 @@ int main(int argc, const char **argv) {
     InitPAD(pad_buff[0], 34, pad_buff[1], 34);
     StartPAD();
     ChangeClearPAD(0);
+#ifndef RUNNER_NO_MUSIC
 #ifdef RUNNER_PROFILE
     /* No music: CD interrupts land in the timed parts at random and make
      * runs disagree. */
     cd_on = 0;
+#elif defined(RUNNER_WEB)
+    cd_on = music_setup();
+    world_stamp_row(web_px);
 #else
     cd_on = CdInit();
     if (cd_on)
         cd_on = music_setup();
+#endif
 #endif
 #ifdef RUNNER_PROFILE
     prof_start();

@@ -47,6 +47,9 @@ static inline int clamp(int v, int lo, int hi) {
 void world_init(void);
 void world_flip(void);
 void world_set_clear(int r, int g, int b);
+/* After the buffer about to be shown has been cleared and drawn, copy 320
+ * 15-bit pixels onto its bottom row. Used by the web disc's command line. */
+void world_stamp_row(const uint16_t *px);
 size_t world_bytes_used(void);
 
 /* Bucket 0 draws last. Returns 0 when the frame's primitive buffer is full. */

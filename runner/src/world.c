@@ -22,6 +22,11 @@ typedef struct {
 #define DITHER 1
 
 static RenderContext ctx;
+static const uint16_t *stamp_px;
+
+void world_stamp_row(const uint16_t *px) {
+    stamp_px = px;
+}
 
 void world_init(void) {
     int i;
@@ -56,6 +61,14 @@ void world_flip(void) {
     RenderBuffer *draw = &ctx.buffers[ctx.active];
     RenderBuffer *disp = &ctx.buffers[ctx.active ^ 1];
     DrawSync(0);
+    if (stamp_px) {
+        RECT rect;
+        /* disp is the buffer whose draw just finished, and the one PutDispEnv
+         * is about to show. The clear already happened inside that draw. */
+        setRECT(&rect, 0, (ctx.active ^ 1) * SCREEN_H + (SCREEN_H - 1), SCREEN_W, 1);
+        LoadImage(&rect, (const uint32_t *)stamp_px);
+        DrawSync(0);
+    }
     VSync(0);
     PutDispEnv(&disp->disp);
     DrawOTagEnv(&draw->ot[OT_LENGTH - 1], &draw->draw);

@@ -11,9 +11,11 @@ endif()
 project(runner LANGUAGES C VERSION 0.1.0 DESCRIPTION "A flat runner on a 3D road")
 
 find_program(FFMPEG ffmpeg REQUIRED)
+find_program(FFPROBE ffprobe REQUIRED)
 find_program(PYTHON3 python3 REQUIRED)
 
 # CDDA (Red Book) is the default. XA is optional: smaller disc, PS1-ish quality.
+# Every non-profile build also writes runner-nomusic and runner-web.
 option(RUNNER_XA_MUSIC "Encode music as XA ADPCM instead of CDDA" OFF)
 
 file(GLOB SPRITE_PNGS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/sprites/*.png")
@@ -88,8 +90,6 @@ if(RUNNER_XA_MUSIC)
 			"${CMAKE_CURRENT_SOURCE_DIR}/tools/libpsxav/libpsxav.h"
 		VERBATIM
 	)
-else()
-	find_program(FFPROBE ffprobe REQUIRED)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/tools/write_music_iso.cmake")
@@ -177,17 +177,65 @@ psn00bsdk_add_cd_image(
 	DEPENDS runner ${MUSIC_DISC_DEPS} ${CMAKE_CURRENT_SOURCE_DIR}/system.cnf
 )
 
-# The repo-root build folder receives the disc only. CMake's own files stay
-# in the binary directory (runner/build).
+# The repo-root build folder receives the discs only. CMake's own files stay
+# in the binary directory (runner/build). The profile disc stays in its folder.
 get_filename_component(DISC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build" ABSOLUTE)
 if(NOT RUNNER_PROFILE)
-add_custom_command(
-	TARGET runner_iso POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E make_directory "${DISC_DIR}"
-	COMMAND ${CMAKE_COMMAND} -E copy_if_different
-		"${CMAKE_CURRENT_BINARY_DIR}/runner.bin" "${DISC_DIR}/runner.bin"
-	COMMAND ${CMAKE_COMMAND} -E copy_if_different
-		"${CMAKE_CURRENT_BINARY_DIR}/runner.cue" "${DISC_DIR}/runner.cue"
-	VERBATIM
-)
+	# Same sources, music playback compiled out. Part of the default build.
+	psn00bsdk_add_executable(runner_nomusic NOGPREL ${RUNNER_SOURCES})
+	target_include_directories(runner_nomusic PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+	target_compile_options(runner_nomusic PRIVATE -flto)
+	target_link_options(runner_nomusic PRIVATE -flto -O2)
+	target_compile_definitions(runner_nomusic PRIVATE RUNNER_NO_MUSIC)
+	add_dependencies(runner_nomusic sprite_sheet)
+	psn00bsdk_add_cd_image(
+		runner_nomusic_iso
+		runner-nomusic
+		"${CMAKE_CURRENT_BINARY_DIR}/iso_nomusic.xml"
+		DEPENDS runner_nomusic ${CMAKE_CURRENT_SOURCE_DIR}/system.cnf
+	)
+	add_dependencies(runner_iso runner_nomusic_iso)
+
+	# Same sources. The page plays the mp3s; this disc only paints the command row.
+	psn00bsdk_add_executable(runner_web NOGPREL ${RUNNER_SOURCES})
+	target_include_directories(runner_web PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+	target_compile_options(runner_web PRIVATE -flto)
+	target_link_options(runner_web PRIVATE -flto -O2)
+	target_compile_definitions(runner_web PRIVATE RUNNER_WEB)
+	add_dependencies(runner_web sprite_sheet)
+	psn00bsdk_add_cd_image(
+		runner_web_iso
+		runner-web
+		"${CMAKE_CURRENT_BINARY_DIR}/iso_web.xml"
+		DEPENDS runner_web ${CMAKE_CURRENT_SOURCE_DIR}/system.cnf
+	)
+	add_dependencies(runner_iso runner_web_iso)
+
+	add_custom_command(
+		TARGET runner_iso POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${DISC_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/runner.bin" "${DISC_DIR}/runner.bin"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/runner.cue" "${DISC_DIR}/runner.cue"
+		VERBATIM
+	)
+	add_custom_command(
+		TARGET runner_nomusic_iso POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${DISC_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/runner-nomusic.bin" "${DISC_DIR}/runner-nomusic.bin"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/runner-nomusic.cue" "${DISC_DIR}/runner-nomusic.cue"
+		VERBATIM
+	)
+	add_custom_command(
+		TARGET runner_web_iso POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${DISC_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/runner-web.bin" "${DISC_DIR}/runner-web.bin"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_BINARY_DIR}/runner-web.cue" "${DISC_DIR}/runner-web.cue"
+		VERBATIM
+	)
 endif()

@@ -1,0 +1,15 @@
+{
+  "games": [
+    {
+      "id": "runner",
+      "title": "Runner",
+      "bin": "build/runner-web.bin",
+      "width": 320,
+      "height": 240,
+      "audio": [
+      "runner/audio/runner1.mp3",
+      "runner/audio/runner2-lumenwild.mp3"
+      ]
+    }
+  ]
+}

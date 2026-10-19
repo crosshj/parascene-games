@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parascene Games</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #14141c; color: #e8e6f0; font: 16px/1.4 system-ui, sans-serif; }
+    a { color: #d7c4ff; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; }
+    h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: .02em; }
+    main { padding: 0 20px 32px; }
+    .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; max-width: 880px; }
+    .card { display: block; padding: 18px; border: 1px solid #3a3650; border-radius: 10px; background: #1d1b28; text-decoration: none; color: inherit; }
+    .card:hover, .card.on { border-color: #8d74d6; }
+    .card strong { display: block; margin-bottom: 4px; }
+    .card span { color: #aaa6bb; font-size: 14px; }
+    .play { display: grid; gap: 14px; justify-items: center; }
+    #screen { position: relative; width: min(100%, 960px); aspect-ratio: 320 / 240; background: #000; }
+    #game { position: absolute; inset: 0; }
+    #game canvas.ejs_canvas {
+      width: 100% !important; height: 100% !important;
+      image-rendering: pixelated; image-rendering: crisp-edges;
+    }
+    #bezel { position: absolute; left: 0; right: 0; bottom: 0; height: calc(100% / 240); background: #000; z-index: 4; pointer-events: none; }
+    #play {
+      position: absolute; inset: 0; z-index: 6; border: 0; cursor: pointer;
+      background: #000d; color: #fff; font: 600 20px/1 system-ui, sans-serif;
+    }
+    #play[hidden] { display: none; }
+    #play:disabled { cursor: default; color: #aaa6bb; }
+    #game .ejs_start_button { display: none !important; }
+    #game .ejs_menu_bar, #game .ejs_virtualGamepad_parent, #game .ejs_virtualGamepad_open,
+    #game .ejs_popup_container { display: none !important; }
+    .controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: end; justify-content: center; }
+    .pad { display: grid; grid-template: repeat(3, 52px) / repeat(3, 52px); gap: 6px; }
+    .pad [data-id=up] { grid-area: 1 / 2; }
+    .pad [data-id=left] { grid-area: 2 / 1; }
+    .pad [data-id=right] { grid-area: 2 / 3; }
+    .pad [data-id=down] { grid-area: 3 / 2; }
+    .face { display: grid; grid-template: repeat(3, 52px) / repeat(3, 52px); gap: 6px; }
+    .face [data-id=tri] { grid-area: 1 / 2; }
+    .face [data-id=sqr] { grid-area: 2 / 1; }
+    .face [data-id=cir] { grid-area: 2 / 3; }
+    .face [data-id=crs] { grid-area: 3 / 2; }
+    .menu { display: flex; gap: 8px; }
+    button.btn, .wide { touch-action: none; user-select: none; }
+    button.btn {
+      width: 52px; height: 52px; border: 0; border-radius: 8px; cursor: pointer;
+      background: #2a2838; color: #fff; font: 16px/1 system-ui, sans-serif;
+    }
+    button.btn.on { background: #6d56b8; }
+    button.wide { height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: #2a2838; color: #fff; cursor: pointer; }
+    button.wide.on { background: #6d56b8; }
+    .vol, .padpick { display: flex; align-items: center; gap: 8px; color: #aaa6bb; font-size: 14px; margin-top: 8px; }
+    .padpick select { background: #2a2838; color: #fff; border: 0; border-radius: 8px; padding: 8px 10px; max-width: 220px; }
+    .padpick button { background: #6d56b8; color: #fff; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .note { color: #aaa6bb; max-width: 640px; }
+    #status { min-height: 1.4em; color: #aaa6bb; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Parascene Games</h1>
+    <a id="back" href="./" hidden>All games</a>
+  </header>
+  <main id="app"></main>
+  <script>
+    window.__audioCtxs = [];
+    for (const name of ["AudioContext", "webkitAudioContext"]) {
+      const Orig = window[name];
+      if (!Orig) continue;
+      window[name] = class extends Orig {
+        constructor(...args) {
+          super(...args);
+          window.__audioCtxs.push(this);
+          if (navigator.userActivation?.isActive) this.resume();
+        }
+      };
+    }
+
+    /* gp is the standard Gamepad button. The stick axes match the d-pad. */
+    const BUTTONS = [
+      { id: "up", idx: 4, gp: 12, axis: 1, sign: -1, keys: ["ArrowUp", "KeyW"], label: "↑", slot: "pad" },
+      { id: "left", idx: 6, gp: 14, axis: 0, sign: -1, keys: ["ArrowLeft", "KeyA"], label: "←", slot: "pad" },
+      { id: "right", idx: 7, gp: 15, axis: 0, sign: 1, keys: ["ArrowRight", "KeyD"], label: "→", slot: "pad" },
+      { id: "down", idx: 5, gp: 13, axis: 1, sign: 1, keys: ["ArrowDown", "KeyS"], label: "↓", slot: "pad" },
+      { id: "tri", idx: 9, gp: 3, keys: ["KeyI"], label: "△", slot: "face" },
+      { id: "sqr", idx: 1, gp: 2, keys: ["KeyJ"], label: "□", slot: "face" },
+      { id: "cir", idx: 8, gp: 1, keys: ["KeyL"], label: "○", slot: "face" },
+      { id: "crs", idx: 0, gp: 0, keys: ["KeyK", "Space"], label: "✕", slot: "face" },
+      { id: "select", idx: 2, gp: 8, keys: ["ShiftLeft", "ShiftRight"], label: "Select", slot: "menu" },
+      { id: "start", idx: 3, gp: 9, keys: ["Enter"], label: "Start", slot: "menu" },
+    ];
+    const PAD = ["BUTTON_2", "BUTTON_4", "SELECT", "START", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+      "BUTTON_1", "BUTTON_3", "LEFT_TOP_SHOULDER", "RIGHT_TOP_SHOULDER", "LEFT_BOTTOM_SHOULDER",
+      "RIGHT_BOTTOM_SHOULDER", "LEFT_STICK", "RIGHT_STICK", "LEFT_STICK_X:+1", "LEFT_STICK_X:-1",
+      "LEFT_STICK_Y:+1", "LEFT_STICK_Y:-1", "RIGHT_STICK_X:+1", "RIGHT_STICK_X:-1",
+      "RIGHT_STICK_Y:+1", "RIGHT_STICK_Y:-1"];
+
+    const app = document.getElementById("app");
+    const params = new URLSearchParams(location.search);
+    let pageVolume = 1;
+    try { pageVolume = Number(localStorage.getItem("parascene.volume") ?? "100") / 100; } catch { /* private mode */ }
+    if (!Number.isFinite(pageVolume)) pageVolume = 1;
+
+    function unlockAudio() {
+      for (const c of window.__audioCtxs) c.resume();
+      if (window.__music && window.__music.wantPlay) window.__music.el.play().catch(() => {});
+    }
+    function pumpAudio() {
+      unlockAudio();
+      if (navigator.userActivation?.isActive) requestAnimationFrame(pumpAudio);
+    }
+    function applyEmuVolume() {
+      const emu = window.EJS_emulator;
+      if (emu && typeof emu.setVolume === "function") emu.setVolume(pageVolume);
+    }
+    for (const t of ["pointerdown", "keydown"]) addEventListener(t, unlockAudio, true);
+
+    async function isolate() {
+      if (window.crossOriginIsolated) return "ok";
+      if (!navigator.serviceWorker) return "blocked";
+      await navigator.serviceWorker.register("sw.js");
+      if (!sessionStorage.getItem("coi-reloaded")) {
+        sessionStorage.setItem("coi-reloaded", "1");
+        if (!navigator.serviceWorker.controller) {
+          await new Promise((resolve) => {
+            navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true });
+          });
+        }
+        location.reload();
+        return "reload";
+      }
+      return "blocked";
+    }
+
+    function parseRow(bytes) {
+      if (bytes[0] !== 0x57 || bytes[1] !== 0x45 || bytes[2] !== 0x42 || bytes[3] !== 0x31) return null;
+      if (bytes[4] !== 1) return null;
+      const len = bytes[5];
+      if (len > 33) return null;
+      let sum = 0;
+      for (let i = 0; i < len; i++) sum = (sum + bytes[7 + i]) & 255;
+      if (sum !== bytes[6]) return null;
+      const cmds = [];
+      let p = 0;
+      while (p + 1 < len) {
+        const id = bytes[7 + p];
+        if (id === 0) break;
+        const argLen = bytes[7 + p + 1];
+        if (p + 2 + argLen > len) break;
+        cmds.push({ id, args: bytes.slice(7 + p + 2, 7 + p + 2 + argLen) });
+        p += 2 + argLen;
+      }
+      return cmds;
+    }
+
+    function Music(game) {
+      const el = new Audio();
+      el.preload = "auto";
+      let seq = 0;
+      let gameVol = 128;
+      function loud() {
+        return Math.max(0, Math.min(1, gameVol / 128 * pageVolume));
+      }
+      const api = {
+        el,
+        wantPlay: false,
+        stop() {
+          seq = 0;
+          api.wantPlay = false;
+          el.pause();
+        },
+        command(cmds) {
+          for (const cmd of cmds) {
+            if (cmd.id === 1) api.stop();
+            else if (cmd.id === 2 && cmd.args.length >= 3) {
+              const sequence = cmd.args[0];
+              const track = cmd.args[1];
+              gameVol = cmd.args[2];
+              if (sequence !== seq && sequence !== 0 && game.audio[track]) {
+                seq = sequence;
+                el.src = new URL(game.audio[track], document.baseURI).href;
+                el.currentTime = 0;
+                api.wantPlay = true;
+                el.play().catch(() => {});
+              }
+              el.volume = loud();
+            }
+          }
+        },
+        setPageVolume(v) {
+          pageVolume = v;
+          try { localStorage.setItem("parascene.volume", String(Math.round(v * 100))); } catch { /* private mode */ }
+          el.volume = loud();
+        }
+      };
+      return api;
+    }
+
+    function rowBytes(data, width) {
+      const bytes = new Uint8Array(40);
+      const n = Math.min(320, width);
+      for (let i = 0; i < n; i++) {
+        const o = i * 4;
+        if (data[o] >= 128 && data[o + 1] >= 128 && data[o + 2] >= 128)
+          bytes[i >> 3] |= 0x80 >> (i & 7);
+      }
+      return bytes;
+    }
+
+    const strip = document.createElement("canvas");
+    strip.width = 320;
+    strip.height = 1;
+    const stripCtx = strip.getContext("2d", { willReadFrequently: true, alpha: false });
+
+    /* One scanline from the displayed frame. A cleared WebGL buffer reads as black and fails the magic check. */
+    function readCanvasRow(game) {
+      const src = document.querySelector("#game canvas.ejs_canvas");
+      if (!src || !src.width || !src.height) return null;
+      const rowH = src.height / game.height;
+      stripCtx.imageSmoothingEnabled = false;
+      stripCtx.drawImage(src, 0, src.height - rowH, src.width, rowH, 0, 0, game.width, 1);
+      return rowBytes(stripCtx.getImageData(0, 0, game.width, 1).data, game.width);
+    }
+
+    async function readShotRow(game) {
+      const emu = window.EJS_emulator;
+      if (!emu?.gameManager?.screenshot) return null;
+      const png = await emu.gameManager.screenshot();
+      const bmp = await createImageBitmap(new Blob([png], { type: "image/png" }));
+      const canvas = document.createElement("canvas");
+      canvas.width = game.width;
+      canvas.height = game.height;
+      const g = canvas.getContext("2d", { willReadFrequently: true });
+      g.imageSmoothingEnabled = false;
+      g.drawImage(bmp, 0, 0, game.width, game.height);
+      const bytes = rowBytes(g.getImageData(0, game.height - 1, game.width, 1).data, game.width);
+      bmp.close?.();
+      return bytes;
+    }
+
+    /* Auto frameskip drops a paint only while the audio buffer is low, and
+     * never two in a row. If that signal is idle and the picture is still
+     * late, fall back to skipping every other paint. */
+    function watchPace() {
+      const probe = document.createElement("canvas");
+      probe.width = 8;
+      probe.height = 8;
+      const pg = probe.getContext("2d", { willReadFrequently: true, alpha: false });
+      let tries = 0;
+      function measure() {
+        const src = document.querySelector("#game canvas.ejs_canvas");
+        if (!src || !src.width) {
+          if (tries++ < 8) setTimeout(measure, 500);
+          return;
+        }
+        const deltas = [];
+        let lastHash = "";
+        let lastChange = 0;
+        const t0 = performance.now();
+        function tick(now) {
+          if (now - t0 > 2000) {
+            decide(deltas);
+            return;
+          }
+          try {
+            pg.drawImage(src, src.width * 0.35, src.height * 0.35, src.width * 0.3, src.height * 0.3, 0, 0, 8, 8);
+            const d = pg.getImageData(0, 0, 8, 8).data;
+            let hash = 0;
+            for (let i = 0; i < d.length; i += 16) hash = (hash * 33 + d[i]) >>> 0;
+            const key = String(hash);
+            if (key !== lastHash) {
+              if (lastChange && now - lastChange < 80) deltas.push(now - lastChange);
+              lastChange = now;
+              lastHash = key;
+            }
+          } catch { /* canvas not readable yet */ }
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      }
+      function decide(deltas) {
+        const gm = window.EJS_emulator && EJS_emulator.gameManager;
+        if (!gm) return;
+        if (deltas.length < 20) {
+          if (tries++ < 6) setTimeout(measure, 500);
+          return;
+        }
+        deltas.sort((a, b) => a - b);
+        const mid = deltas[deltas.length >> 1];
+        if (mid <= 22) return;
+        gm.setVariable("pcsx_rearmed_frameskip_type", "fixed_interval");
+        gm.setVariable("pcsx_rearmed_frameskip_interval", "1");
+      }
+      setTimeout(measure, 1500);
+    }
+
+    /* The core sizes its canvas from this observer. Report the PlayStation
+     * frame so a retina display does not allocate a multi-megapixel bitmap.
+     * CSS stretches that bitmap to the on-page box. */
+    function lockFrameSize(game) {
+      const Native = window.ResizeObserver;
+      if (!Native || Native.__frameLock) return;
+      const wrap = (entries) => entries.map((entry) => {
+        const t = entry.target;
+        if (!(t instanceof HTMLCanvasElement) || !t.closest("#game")) return entry;
+        const box = [{ inlineSize: game.width, blockSize: game.height }];
+        return new Proxy(entry, {
+          get(obj, prop) {
+            if (prop === "contentRect") return new DOMRectReadOnly(0, 0, game.width, game.height);
+            if (prop === "devicePixelContentBoxSize" || prop === "contentBoxSize" || prop === "borderBoxSize") return box;
+            const v = obj[prop];
+            return typeof v === "function" ? v.bind(obj) : v;
+          }
+        });
+      });
+      const Locked = class extends Native {
+        constructor(cb) { super((entries, obs) => cb(wrap(entries), obs)); }
+      };
+      Locked.__frameLock = true;
+      window.ResizeObserver = Locked;
+    }
+
+    function boot(game) {
+      const GM = { value: undefined };
+      Object.defineProperty(window, "EJS_GameManager", {
+        configurable: true,
+        get: () => GM.value,
+        set(v) {
+          GM.value = v;
+          const cfg = v.prototype.getRetroArchCfg;
+          v.prototype.getRetroArchCfg = function () { return cfg.call(this) + "audio_sync = false\n"; };
+        },
+      });
+      /* Keyboard and the physical pad both go through simulateInput. */
+      window.EJS_defaultControls = {
+        0: Object.fromEntries(PAD.map((v, i) => [i, { value: "", value2: "" }])),
+        1: {}, 2: {}, 3: {}
+      };
+      window.EJS_player = "#game";
+      window.EJS_core = "psx";
+      window.EJS_gameName = game.id;
+      window.EJS_gameUrl = new URL(game.bin, document.baseURI).href;
+      window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
+      /* The core waits for Play. In 4.2.3, auto language is skipped only when this is false. */
+      window.EJS_startOnLoaded = false;
+      window.EJS_disableAutoLang = false;
+      window.EJS_backgroundColor = "#000";
+      window.EJS_cacheLimit = 0;
+      window.EJS_threads = true;
+      window.EJS_volume = pageVolume;
+      const coreOpts = {
+        ejs_threads: "enabled",
+        pcsx_rearmed_dithering: "disabled",
+        pcsx_rearmed_nocdaudio: "disabled",
+        pcsx_rearmed_frameskip_type: "auto_threshold",
+        pcsx_rearmed_frameskip_threshold: "45",
+        pcsx_rearmed_frameskip_interval: "1"
+      };
+      window.EJS_defaultOptions = { "virtual-gamepad": "disabled", ...coreOpts };
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (!key || !/^ejs-.*-settings$/.test(key)) continue;
+          const saved = JSON.parse(localStorage.getItem(key) || "null");
+          if (!saved || !saved.settings) continue;
+          let dirty = false;
+          for (const [k, v] of Object.entries(coreOpts)) {
+            if (saved.settings[k] !== v) {
+              saved.settings[k] = v;
+              dirty = true;
+            }
+          }
+          if (dirty) localStorage.setItem(key, JSON.stringify(saved));
+        }
+      } catch { /* private mode */ }
+      window.EJS_onGameStart = () => {
+        unlockAudio();
+        applyEmuVolume();
+        setTimeout(applyEmuVolume, 1000);
+        setTimeout(applyEmuVolume, 3000);
+        pumpAudio();
+        watchPace();
+      };
+      window.EJS_ready = () => {
+        const play = document.getElementById("play");
+        if (!play || play.hidden) return;
+        play.disabled = false;
+        play.textContent = "Play";
+      };
+      const data = "https://cdn.emulatorjs.org/4.2.3/data/";
+      for (const url of [window.EJS_gameUrl, data + "cores/pcsx_rearmed-thread-wasm.data", data + "emulator.min.js"])
+        fetch(url).catch(() => {});
+      document.body.append(Object.assign(document.createElement("script"), {
+        src: data + "loader.js"
+      }));
+      lockFrameSize(game);
+      const keep = (proto) => {
+        if (!proto || proto.__rowBuffer || !proto.getContext) return;
+        const orig = proto.getContext;
+        proto.__rowBuffer = true;
+        proto.getContext = function (type, attrs) {
+          if (typeof type === "string" && type.startsWith("webgl"))
+            attrs = Object.assign({}, attrs, { preserveDrawingBuffer: true });
+          return orig.call(this, type, attrs);
+        };
+      };
+      keep(HTMLCanvasElement.prototype);
+      if (typeof OffscreenCanvas === "function") keep(OffscreenCanvas.prototype);
+      let busy = false;
+      let canvasRow = false;
+      let lastShot = 0;
+      setInterval(async () => {
+        if (busy) return;
+        const emu = window.EJS_emulator;
+        if (!emu?.started || emu.paused) return;
+        busy = true;
+        try {
+          let bytes = null;
+          try { bytes = readCanvasRow(game); } catch { bytes = null; }
+          if (bytes && parseRow(bytes)) canvasRow = true;
+          else bytes = null;
+          /* The PNG path stalls the core. Use it only until the canvas row is readable. */
+          if (!bytes && !canvasRow && performance.now() - lastShot > 1000) {
+            lastShot = performance.now();
+            bytes = await readShotRow(game);
+          }
+          const cmds = bytes && parseRow(bytes);
+          if (cmds) window.__music.command(cmds);
+        } catch { /* frame not ready */ }
+        busy = false;
+      }, 200);
+    }
+
+    function wirePad() {
+      const byKey = new Map();
+      for (const b of BUTTONS) {
+        b.el = document.querySelector(`[data-id="${b.id}"]`);
+        b.holders = new Set();
+        for (const k of b.keys) byKey.set(k, b);
+      }
+      function send(b) {
+        const gm = window.EJS_emulator && EJS_emulator.gameManager;
+        if (gm) gm.simulateInput(0, b.idx, b.holders.size ? 1 : 0);
+        b.el.classList.toggle("on", b.holders.size > 0);
+      }
+      function hold(b, who) { if (!b.holders.has(who)) { b.holders.add(who); send(b); } }
+      function free(b, who) { if (b.holders.delete(who)) send(b); }
+      addEventListener("keydown", (e) => {
+        const b = byKey.get(e.code);
+        if (!b || e.metaKey || e.ctrlKey || e.altKey) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.repeat) hold(b, e.code);
+      }, true);
+      addEventListener("keyup", (e) => {
+        const b = byKey.get(e.code);
+        if (!b) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        free(b, e.code);
+      }, true);
+      addEventListener("blur", () => {
+        for (const b of BUTTONS) {
+          for (const who of [...b.holders]) if (who !== "pad") b.holders.delete(who);
+          send(b);
+        }
+      });
+      const padpick = document.getElementById("padpick");
+      const status = document.getElementById("status");
+      let chosen = null;
+      let padSig = "";
+      const hid = { device: null, hat: 8, face: 0, shoulder: 0, lx: 0, ly: 0 };
+      const SONY = [
+        { vendorId: 0x054c, productId: 0x0ce6, usagePage: 0x01 },
+        { vendorId: 0x054c, productId: 0x0df2, usagePage: 0x01 }
+      ];
+      padpick.addEventListener("change", () => {
+        chosen = padpick.value === "" ? null : padpick.value === "hid" ? "hid" : Number(padpick.value);
+      });
+      function padName(p) {
+        const id = p.id || "";
+        const n = p.index + 1;
+        if (/dualsense|0ce6|ps5/i.test(id)) return "PS5 controller " + n;
+        if (/054c|wireless controller|playstation/i.test(id)) return "PlayStation controller " + n;
+        const short = id.split("(")[0].trim();
+        return (short || "Controller") + " " + n;
+      }
+      function hidPressed(b) {
+        const hat = hid.hat;
+        const dir = {
+          up: hat === 0 || hat === 1 || hat === 7,
+          right: hat === 1 || hat === 2 || hat === 3,
+          down: hat === 3 || hat === 4 || hat === 5,
+          left: hat === 5 || hat === 6 || hat === 7
+        };
+        if (b.id === "up") return dir.up || hid.ly < -0.5;
+        if (b.id === "down") return dir.down || hid.ly > 0.5;
+        if (b.id === "left") return dir.left || hid.lx < -0.5;
+        if (b.id === "right") return dir.right || hid.lx > 0.5;
+        if (b.id === "sqr") return !!(hid.face & 0x10);
+        if (b.id === "crs") return !!(hid.face & 0x20);
+        if (b.id === "cir") return !!(hid.face & 0x40);
+        if (b.id === "tri") return !!(hid.face & 0x80);
+        if (b.id === "select") return !!(hid.shoulder & 0x10);
+        if (b.id === "start") return !!(hid.shoulder & 0x20);
+        return false;
+      }
+      function readHid(reportId, buf) {
+        const data = buf instanceof DataView ? buf : new DataView(buf);
+        let stick = 0;
+        let buttons = 7;
+        if (reportId === 0x31) { stick = 1; buttons = 8; }
+        else if (data.byteLength < 50) { stick = 0; buttons = 4; }
+        if (data.byteLength < buttons + 2) return;
+        hid.lx = (data.getUint8(stick) - 128) / 128;
+        hid.ly = (data.getUint8(stick + 1) - 128) / 128;
+        const hatByte = data.getUint8(buttons);
+        hid.hat = hatByte & 0x0f;
+        hid.face = hatByte & 0xf0;
+        hid.shoulder = data.getUint8(buttons + 1);
+      }
+      async function openHid(device) {
+        if (!device.opened) await device.open();
+        hid.device = device;
+        device.oninputreport = (e) => readHid(e.reportId, e.data);
+        chosen = "hid";
+        padSig = "";
+        if (status) status.textContent = device.productName || "PS5 controller";
+      }
+      function syncPads(list) {
+        const sig = list.map(p => p.index + ":" + p.id).join("|") + (hid.device ? "|hid" : "");
+        if (sig === padSig) return;
+        padSig = sig;
+        const previous = chosen;
+        padpick.replaceChildren();
+        if (!list.length && !hid.device) {
+          const o = document.createElement("option");
+          o.value = "";
+          o.textContent = "None yet";
+          padpick.append(o);
+          chosen = null;
+          if (status) status.textContent = navigator.hid
+            ? "Click Find and choose the PS5 controller."
+            : "Click the page, then press ✕ on the controller.";
+          return;
+        }
+        for (const p of list) {
+          const o = document.createElement("option");
+          o.value = String(p.index);
+          o.textContent = padName(p);
+          padpick.append(o);
+        }
+        if (hid.device) {
+          const o = document.createElement("option");
+          o.value = "hid";
+          o.textContent = hid.device.productName || "PS5 controller";
+          padpick.append(o);
+        }
+        const values = [...padpick.options].map(o => o.value);
+        if (previous != null && values.includes(String(previous))) chosen = previous;
+        else chosen = hid.device ? "hid" : list[0].index;
+        padpick.value = String(chosen);
+        if (status) status.textContent = padpick.selectedOptions[0]?.textContent || "";
+      }
+      document.getElementById("findpad").addEventListener("click", async () => {
+        if (!navigator.hid) {
+          if (status) status.textContent = "This browser has no controller chooser. Click the page and press ✕.";
+          return;
+        }
+        try {
+          const devices = await navigator.hid.requestDevice({ filters: SONY });
+          if (devices[0]) await openHid(devices[0]);
+        } catch {
+          if (status) status.textContent = "Controller chooser was closed.";
+        }
+      });
+      if (navigator.hid) {
+        navigator.hid.getDevices().then(devices => {
+          const found = devices.find(d => d.vendorId === 0x054c);
+          if (found) openHid(found).catch(() => {});
+        }).catch(() => {});
+        navigator.hid.addEventListener("disconnect", (e) => {
+          if (e.device === hid.device) {
+            hid.device = null;
+            padSig = "";
+          }
+        });
+      }
+      addEventListener("gamepadconnected", () => { padSig = ""; });
+      (function watchPads() {
+        const list = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+        syncPads(list);
+        const pad = chosen === "hid" ? null : list.find(p => p.index === chosen);
+        let any = false;
+        for (const b of BUTTONS) {
+          const axis = b.axis != null && pad && (pad.axes[b.axis] || 0) * b.sign > 0.5;
+          const down = chosen === "hid" && hid.device
+            ? hidPressed(b)
+            : !!(pad && (pad.buttons[b.gp]?.pressed || axis));
+          if (down) { hold(b, "pad"); any = true; }
+          else free(b, "pad");
+        }
+        requestAnimationFrame(watchPads);
+      })();
+      for (const b of BUTTONS) {
+        b.el.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          try { b.el.setPointerCapture(e.pointerId); } catch { /* already gone */ }
+          hold(b, "p" + e.pointerId);
+        });
+        for (const t of ["pointerup", "pointercancel", "lostpointercapture"])
+          b.el.addEventListener(t, (e) => free(b, "p" + e.pointerId));
+      }
+    }
+
+    function showPicker(games) {
+      app.innerHTML = `<div class="picker"></div><p class="note">Each game here has a small web disc. The music stays in the browser. Press ✕ or Options on a controller to play.</p>`;
+      const list = app.querySelector(".picker");
+      for (const game of games) {
+        const a = document.createElement("a");
+        a.className = "card";
+        a.href = `?game=${encodeURIComponent(game.id)}`;
+        a.innerHTML = `<strong></strong><span>Play</span>`;
+        a.querySelector("strong").textContent = game.title;
+        list.append(a);
+      }
+      const cards = [...list.querySelectorAll(".card")];
+      let at = 0;
+      let prev = {};
+      if (cards[0]) cards[0].classList.add("on");
+      (function watchPicker() {
+        if (!document.querySelector(".picker")) return;
+        const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+        const pad = pads[0];
+        if (pad && cards.length) {
+          const stickX = pad.axes[0] || 0;
+          const stickY = pad.axes[1] || 0;
+          const now = {
+            prev: (pad.buttons[14]?.pressed || stickX < -0.5) || (pad.buttons[12]?.pressed || stickY < -0.5),
+            next: (pad.buttons[15]?.pressed || stickX > 0.5) || (pad.buttons[13]?.pressed || stickY > 0.5),
+            go: pad.buttons[0]?.pressed || pad.buttons[9]?.pressed
+          };
+          if (now.prev && !prev.prev) at = (at + cards.length - 1) % cards.length;
+          if (now.next && !prev.next) at = (at + 1) % cards.length;
+          if ((now.prev && !prev.prev) || (now.next && !prev.next))
+            cards.forEach((c, n) => c.classList.toggle("on", n === at));
+          if (now.go && !prev.go) cards[at].click();
+          prev = now;
+        }
+        requestAnimationFrame(watchPicker);
+      })();
+    }
+
+    function showPlayer(game) {
+      document.getElementById("back").hidden = false;
+      document.title = game.title;
+      app.innerHTML = `
+        <div class="play">
+          <div id="screen"><div id="game"></div><button type="button" id="play" disabled>Loading…</button><div id="bezel"></div></div>
+          <p id="status"></p>
+          <div class="controls">
+            <div class="pad" data-slot="pad"></div>
+            <div class="face" data-slot="face"></div>
+            <div>
+              <div class="menu" data-slot="menu"></div>
+              <label class="vol">Volume <input id="vol" type="range" min="0" max="100" value="${Math.round(pageVolume * 100)}"></label>
+              <label class="padpick">Controller <select id="padpick"></select> <button type="button" id="findpad">Find</button></label>
+            </div>
+          </div>
+        </div>`;
+      for (const b of BUTTONS) {
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = b.slot === "menu" ? "wide" : "btn";
+        el.dataset.id = b.id;
+        el.textContent = b.label;
+        el.setAttribute("aria-label", b.label);
+        document.querySelector(`[data-slot="${b.slot}"]`).append(el);
+      }
+      document.getElementById("vol").addEventListener("input", (e) => {
+        window.__music.setPageVolume(Number(e.target.value) / 100);
+        applyEmuVolume();
+      });
+      window.__music = Music(game);
+      wirePad();
+      boot(game);
+      document.getElementById("play").addEventListener("click", () => {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) {
+          const ctx = new AC();
+          ctx.resume();
+        }
+        unlockAudio();
+        pumpAudio();
+        const start = document.querySelector("#game .ejs_start_button");
+        if (start) start.click();
+        document.getElementById("play").hidden = true;
+      });
+    }
+
+    (async () => {
+      const isolated = await isolate();
+      if (isolated === "reload") return;
+      if (isolated !== "ok") {
+        app.innerHTML = `<p class="note">This page needs cross-origin isolation so the PlayStation core can start. Reload, or run <code>npm start</code> in the web folder and open that address.</p>`;
+        return;
+      }
+      let manifest;
+      try {
+        manifest = await (await fetch("manifest.json")).json();
+      } catch {
+        app.textContent = "No game list.";
+        return;
+      }
+      const id = params.get("game");
+      const game = (manifest.games || []).find((g) => g.id === id);
+      if (!id) showPicker(manifest.games || []);
+      else if (!game) app.textContent = "That game is not on this site.";
+      else showPlayer(game);
+    })();
+  </script>
+</body>
+</html>

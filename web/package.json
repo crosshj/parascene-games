@@ -1,0 +1,7 @@
+{
+  "name": "parascene-web",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  }
+}
