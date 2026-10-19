@@ -219,7 +219,6 @@
       body:has(.play) header {
         width: 100%; height: 48px; padding: 6px 16px; flex: none;
       }
-      body:has(.play) header .logo img { height: 32px; }
       body:has(.play) main {
         width: 100%; flex: 1; min-width: 0; min-height: 0; margin: 0; padding: 0;
         display: flex; flex-direction: column; overflow: hidden;
@@ -364,20 +363,81 @@
     }
 
     function Music(game) {
-      const el = new Audio();
-      el.preload = "auto";
+      const FADE_MS = 2000;
       let seq = 0;
       let gameVol = 128;
+      let active = null;
+      let outgoing = null;
+      let raf = 0;
       function loud() {
         return Math.max(0, Math.min(1, gameVol / 128 * pageVolume));
       }
+      function clampVol(v) {
+        return Math.max(0, Math.min(1, v));
+      }
+      function release(voice) {
+        voice.el.pause();
+        voice.el.removeAttribute("src");
+        voice.el.load();
+      }
+      /* Equal-power overlap: outgoing falls as cos, incoming rises as sin. */
+      function paint(now) {
+        raf = 0;
+        const master = loud();
+        let more = false;
+        if (active && active.fadeIn) {
+          const t = Math.min(1, (now - active.fadeIn) / FADE_MS);
+          active.env = Math.sin(t * Math.PI / 2);
+          if (t >= 1) active.fadeIn = 0;
+          else more = true;
+        }
+        if (active) active.el.volume = clampVol(active.env * master);
+        if (outgoing) {
+          const t = Math.min(1, (now - outgoing.start) / FADE_MS);
+          outgoing.el.volume = clampVol(outgoing.from * Math.cos(t * Math.PI / 2) * master);
+          if (t >= 1) {
+            release(outgoing);
+            outgoing = null;
+          } else more = true;
+        }
+        if (more) raf = requestAnimationFrame(paint);
+      }
+      function touch() {
+        if (!raf) paint(performance.now());
+      }
+      function retire(voice) {
+        if (outgoing) release(outgoing);
+        outgoing = { el: voice.el, from: voice.env, start: performance.now() };
+      }
+      function begin(src, fade) {
+        const el = new Audio();
+        el.preload = "auto";
+        el.src = src;
+        const voice = { el, env: fade ? 0 : 1, fadeIn: fade ? performance.now() : 0 };
+        el.volume = clampVol(voice.env * loud());
+        if (active) retire(active);
+        active = voice;
+        api.el = el;
+        api.wantPlay = true;
+        el.play().catch(() => {});
+        if (fade || outgoing) {
+          if (raf) cancelAnimationFrame(raf);
+          raf = 0;
+          paint(performance.now());
+        }
+      }
       const api = {
-        el,
+        el: new Audio(),
         wantPlay: false,
         stop() {
           seq = 0;
           api.wantPlay = false;
-          el.pause();
+          if (!active) return;
+          retire(active);
+          active = null;
+          if (raf) cancelAnimationFrame(raf);
+          raf = 0;
+          paint(performance.now());
         },
         command(cmds) {
           for (const cmd of cmds) {
@@ -388,19 +448,16 @@
               gameVol = cmd.args[2];
               if (sequence !== seq && sequence !== 0 && game.audio[track]) {
                 seq = sequence;
-                el.src = new URL(game.audio[track], document.baseURI).href;
-                el.currentTime = 0;
-                api.wantPlay = true;
-                el.play().catch(() => {});
+                begin(new URL(game.audio[track], document.baseURI).href, !!(active || outgoing));
               }
-              el.volume = loud();
             }
           }
+          touch();
         },
         setPageVolume(v) {
           pageVolume = v;
           try { localStorage.setItem("parascene.volume", String(Math.round(v * 100))); } catch { /* private mode */ }
-          el.volume = loud();
+          touch();
         }
       };
       return api;

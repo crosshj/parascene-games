@@ -534,12 +534,16 @@ static void start_run(void) {
     distance = 0;
 }
 
+static int action(void) {
+    return edge(PAD_CROSS) || edge(PAD_CIRCLE);
+}
+
 static int confirm(void) {
-    return edge(PAD_CROSS) || edge(PAD_START);
+    return action() || edge(PAD_START);
 }
 
 static int back(void) {
-    return edge(PAD_TRIANGLE) || edge(PAD_CIRCLE);
+    return edge(PAD_TRIANGLE);
 }
 
 static void menu_move(int count) {
@@ -607,11 +611,11 @@ static int update_screens(void) {
         return 0;
     case ST_PAUSE:
         menu_move(2);
-        if (edge(PAD_START) || back() || (edge(PAD_CROSS) && pick == 0)) {
-            play_sound(edge(PAD_CROSS) ? SND_SELECT : edge(PAD_START) ? SND_PAUSE : SND_BACK);
+        if (edge(PAD_START) || back() || (action() && pick == 0)) {
+            play_sound(action() ? SND_SELECT : edge(PAD_START) ? SND_PAUSE : SND_BACK);
             music_volume(MUSIC_FULL);
             state = ST_RUN;
-        } else if (edge(PAD_CROSS)) {
+        } else if (action()) {
             play_sound(SND_SELECT);
             music_volume(MUSIC_FULL);
             go(ST_TITLE);
@@ -684,7 +688,7 @@ static void update(void) {
             step_lane(-1);
         if (edge(PAD_RIGHT) && !edge(PAD_LEFT))
             step_lane(1);
-        if (edge(PAD_CROSS) && player_y == 0 && jump_wind == 0) {
+        if (action() && player_y == 0 && jump_wind == 0) {
             jump_wind = 8;
             land_hold = 0;
         } else if (jump_wind > 0) {
