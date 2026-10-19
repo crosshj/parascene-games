@@ -1029,8 +1029,6 @@
     }
 
     (async () => {
-      const isolated = await isolate();
-      if (isolated === "reload") return;
       let manifest;
       try {
         manifest = await (await fetch("manifest.json")).json();
@@ -1040,11 +1038,21 @@
       }
       const id = params.get("game") || document.documentElement.dataset.game;
       const game = (manifest.games || []).find((g) => g.id === id);
-      if (!id) showPicker(manifest.games || []);
-      else if (!game) app.textContent = "That game is not on this site.";
-      else if (isolated !== "ok")
-        app.innerHTML = `<p class="note">The PlayStation core could not start in this tab. <button type="button" class="wide" onclick="location.reload()">Reload</button></p>`;
-      else showPlayer(game);
+      if (!id) {
+        showPicker(manifest.games || []);
+        return;
+      }
+      if (!game) {
+        app.textContent = "That game is not on this site.";
+        return;
+      }
+      const isolated = await isolate();
+      if (isolated === "reload") return;
+      if (isolated !== "ok") {
+        app.innerHTML = `<p class="note">This page only works in a browser with a service worker enabled.</p>`;
+        return;
+      }
+      showPlayer(game);
     })();
   </script>
 </body>
