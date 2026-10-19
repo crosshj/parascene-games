@@ -132,6 +132,7 @@ static uint16_t pad_held(void) {
     if (!(w & PAD_DOWN)) b |= PAD_DOWN;
     if (!(w & PAD_CROSS)) b |= PAD_CROSS;
     if (!(w & PAD_CIRCLE)) b |= PAD_CIRCLE;
+    if (!(w & PAD_SQUARE)) b |= PAD_SQUARE;
     if (!(w & PAD_TRIANGLE)) b |= PAD_TRIANGLE;
     if (!(w & PAD_START)) b |= PAD_START;
     if (pad->type != PAD_ID_DIGITAL) {
@@ -439,7 +440,7 @@ static void draw_select(void) {
     draw_preview(SCREEN_W / 2, 164, 2);
     select_row(172, ROW_RUNNER, SPR_CHAR_COUNT, "RUNNER", spr_char_name[character]);
     select_row(186, ROW_LEVEL, level_count, "WORLD ", levels[level_index]->name);
-    hud_center(204, "X SELECT   TRIANGLE BACK");
+    hud_center(204, "X SELECT   O BACK");
 }
 
 static const char *const k_pause_items[] = { "CONTINUE", "QUIT TO TITLE" };
@@ -465,7 +466,7 @@ static void draw_ui(void) {
             setWH(bar, SCREEN_W, 22);
             setRGB0(bar, 8, 12, 24);
         }
-        snprintf(line, sizeof line, "RUN %d     X JUMP   START PAUSE", distance);
+        snprintf(line, sizeof line, "RUN %d     START PAUSE", distance);
         text(8, 8, line);
     }
     if (state == ST_PAUSE) {
@@ -534,16 +535,16 @@ static void start_run(void) {
     distance = 0;
 }
 
-static int action(void) {
-    return edge(PAD_CROSS) || edge(PAD_CIRCLE);
-}
-
 static int confirm(void) {
-    return action() || edge(PAD_START);
+    return edge(PAD_CROSS) || edge(PAD_START);
 }
 
 static int back(void) {
-    return edge(PAD_TRIANGLE);
+    return edge(PAD_CIRCLE);
+}
+
+static int jump_pressed(void) {
+    return edge(PAD_CROSS) || edge(PAD_CIRCLE) || edge(PAD_SQUARE) || edge(PAD_TRIANGLE);
 }
 
 static void menu_move(int count) {
@@ -611,11 +612,11 @@ static int update_screens(void) {
         return 0;
     case ST_PAUSE:
         menu_move(2);
-        if (edge(PAD_START) || back() || (action() && pick == 0)) {
-            play_sound(action() ? SND_SELECT : edge(PAD_START) ? SND_PAUSE : SND_BACK);
+        if (edge(PAD_START) || back() || (edge(PAD_CROSS) && pick == 0)) {
+            play_sound(edge(PAD_CROSS) ? SND_SELECT : edge(PAD_START) ? SND_PAUSE : SND_BACK);
             music_volume(MUSIC_FULL);
             state = ST_RUN;
-        } else if (action()) {
+        } else if (edge(PAD_CROSS)) {
             play_sound(SND_SELECT);
             music_volume(MUSIC_FULL);
             go(ST_TITLE);
@@ -629,6 +630,9 @@ static int update_screens(void) {
                 start_run();
             else
                 go(pick == 1 ? ST_SELECT : ST_TITLE);
+        } else if (back()) {
+            play_sound(SND_BACK);
+            go(ST_TITLE);
         }
         return 0;
     default:
@@ -688,7 +692,7 @@ static void update(void) {
             step_lane(-1);
         if (edge(PAD_RIGHT) && !edge(PAD_LEFT))
             step_lane(1);
-        if (action() && player_y == 0 && jump_wind == 0) {
+        if (jump_pressed() && player_y == 0 && jump_wind == 0) {
             jump_wind = 8;
             land_hold = 0;
         } else if (jump_wind > 0) {
