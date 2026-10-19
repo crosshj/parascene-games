@@ -8,6 +8,10 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data === "claim") event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.cache === "only-if-cached" && event.request.mode !== "same-origin")
     return;
@@ -15,9 +19,9 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin)
     return;
   event.respondWith(fetch(event.request).then((res) => {
+    if (res.status === 0 || res.type === "opaque" || res.type === "opaqueredirect" || !res.body)
+      return res;
     const headers = new Headers(res.headers);
-    /* Safari ignores credentialless, so require-corp is what isolates the page there.
-     * The decoded body must not keep the encoded length or Safari drops the response. */
     headers.set("Cross-Origin-Opener-Policy", "same-origin");
     headers.set("Cross-Origin-Embedder-Policy", "require-corp");
     headers.delete("content-length");

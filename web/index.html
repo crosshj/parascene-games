@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="darkreader-lock">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#120a1a">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -292,9 +293,9 @@
     }
     for (const t of ["pointerdown", "keydown"]) addEventListener(t, unlockAudio, true);
 
-    /* A hard reload skips the service worker, so this page can arrive without
-     * the headers at any time, not only on the first visit. Retry a few times
-     * in a short window; past that, something else is wrong. */
+    /* GitHub Pages cannot send COOP/COEP. The worker adds them, then one reload
+     * picks up a document it actually controlled. Reloading with no controller
+     * never isolates the tab, so that path does not count as progress. */
     async function isolate() {
       const KEY = "coi-reloads";
       if (window.crossOriginIsolated) {
@@ -302,33 +303,21 @@
         return "ok";
       }
       if (!navigator.serviceWorker) return "blocked";
-      let tries = [];
-      try { tries = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch { tries = []; }
-      const now = Date.now();
-      tries = tries.filter((t) => now - t < 15000);
-      if (tries.length >= 3) return "blocked";
-      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-      if (navigator.serviceWorker.controller) {
-        await reg.update().catch(() => {});
-        const incoming = reg.installing || reg.waiting;
-        if (incoming)
-          await new Promise((resolve) => {
-            incoming.addEventListener("statechange", () => {
-              if (incoming.state === "activated") resolve();
-            });
-            setTimeout(resolve, 1500);
-          });
-      } else {
-        await navigator.serviceWorker.ready;
-        if (!navigator.serviceWorker.controller) {
-          await Promise.race([
-            new Promise((resolve) => navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true })),
-            new Promise((resolve) => setTimeout(resolve, 1500))
-          ]);
-        }
+      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
+      await navigator.serviceWorker.ready;
+      const worker = reg.active || reg.waiting || reg.installing;
+      if (worker && !navigator.serviceWorker.controller) worker.postMessage("claim");
+      if (!navigator.serviceWorker.controller) {
+        await new Promise((resolve) => {
+          navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true });
+          setTimeout(resolve, 4000);
+        });
       }
-      tries.push(now);
-      try { sessionStorage.setItem(KEY, JSON.stringify(tries)); } catch { /* private mode */ }
+      if (!navigator.serviceWorker.controller) return "blocked";
+      let tried = false;
+      try { tried = sessionStorage.getItem(KEY) === "1"; } catch { /* private mode */ }
+      if (tried) return "blocked";
+      try { sessionStorage.setItem(KEY, "1"); } catch { /* private mode */ }
       location.reload();
       return "reload";
     }
