@@ -133,21 +133,37 @@
     }
     for (const t of ["pointerdown", "keydown"]) addEventListener(t, unlockAudio, true);
 
+    /* A hard reload skips the service worker, so this page can arrive without
+     * the headers at any time, not only on the first visit. Retry a few times
+     * in a short window; past that, something else is wrong. */
     async function isolate() {
-      if (window.crossOriginIsolated) return "ok";
-      if (!navigator.serviceWorker) return "blocked";
-      await navigator.serviceWorker.register("sw.js");
-      if (!sessionStorage.getItem("coi-reloaded")) {
-        sessionStorage.setItem("coi-reloaded", "1");
-        if (!navigator.serviceWorker.controller) {
-          await new Promise((resolve) => {
-            navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true });
-          });
-        }
-        location.reload();
-        return "reload";
+      const KEY = "coi-reloads";
+      if (window.crossOriginIsolated) {
+        try { sessionStorage.removeItem(KEY); } catch { /* private mode */ }
+        return "ok";
       }
-      return "blocked";
+      if (!navigator.serviceWorker) return "blocked";
+      let tries = [];
+      try { tries = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch { tries = []; }
+      const now = Date.now();
+      tries = tries.filter((t) => now - t < 15000);
+      if (tries.length >= 3) return "blocked";
+      const reg = await navigator.serviceWorker.register("sw.js");
+      if (navigator.serviceWorker.controller) {
+        await reg.update().catch(() => {});
+      } else {
+        await navigator.serviceWorker.ready;
+        if (!navigator.serviceWorker.controller) {
+          await Promise.race([
+            new Promise((resolve) => navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true })),
+            new Promise((resolve) => setTimeout(resolve, 1500))
+          ]);
+        }
+      }
+      tries.push(now);
+      try { sessionStorage.setItem(KEY, JSON.stringify(tries)); } catch { /* private mode */ }
+      location.reload();
+      return "reload";
     }
 
     function parseRow(bytes) {
@@ -754,7 +770,7 @@
       const isolated = await isolate();
       if (isolated === "reload") return;
       if (isolated !== "ok") {
-        app.innerHTML = `<p class="note">This page needs cross-origin isolation so the PlayStation core can start. Reload, or run <code>npm start</code> in the web folder and open that address.</p>`;
+        app.innerHTML = `<p class="note">The PlayStation core could not start in this tab. <button type="button" class="wide" onclick="location.reload()">Reload</button></p>`;
         return;
       }
       let manifest;
