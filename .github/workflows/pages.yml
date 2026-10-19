@@ -28,6 +28,7 @@ jobs:
           cp web/index.html web/manifest.json web/sw.js web/.nojekyll _site/
           cp build/runner-web.bin _site/build/
           cp runner/audio/*.mp3 _site/runner/audio/
+          node web/game-pages.js _site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

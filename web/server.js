@@ -6,6 +6,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const { gamePage, gameIds } = require("./game-pages.js");
 
 const port = Number(process.argv[2] || process.env.PORT || 8643);
 const site = __dirname;
@@ -108,8 +109,26 @@ const server = http.createServer((req, res) => {
   } catch {
     return send(res, 400, "Bad request");
   }
+  const bare = /^\/([a-z0-9-]+)$/.exec(urlPath);
+  try {
+    if (bare && gameIds(site).includes(bare[1])) {
+      res.writeHead(301, headers({ Location: urlPath + "/" }));
+      return res.end();
+    }
+  } catch { /* no manifest; fall through */ }
   if (urlPath.endsWith("/"))
     urlPath += "index.html";
+  const page = /^\/([a-z0-9-]+)\/index\.html$/.exec(urlPath);
+  if (page) {
+    try {
+      if (gameIds(site).includes(page[1])) {
+        const html = fs.readFileSync(path.join(site, "index.html"), "utf8");
+        return send(res, 200, req.method === "HEAD" ? "" : gamePage(html, page[1]), types[".html"]);
+      }
+    } catch {
+      return send(res, 500, "No manifest");
+    }
+  }
   const file = resolve(urlPath);
   if (!file)
     return send(res, 404, "Not found");

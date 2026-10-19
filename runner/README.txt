@@ -144,7 +144,7 @@ from the web folder:
 
   npm start
 
-Open http://127.0.0.1:8643/?game=runner . The picker is
+Open http://127.0.0.1:8643/runner/ . The picker is
 http://127.0.0.1:8643/ . The site files live in web/. GitHub Pages
 publishes that folder, plus build/runner-web.bin and runner/audio.
 

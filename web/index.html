@@ -624,7 +624,7 @@
       for (const game of games) {
         const a = document.createElement("a");
         a.className = "card";
-        a.href = `?game=${encodeURIComponent(game.id)}`;
+        a.href = `${encodeURIComponent(game.id)}/`;
         a.innerHTML = `<strong></strong><span>Play</span>`;
         a.querySelector("strong").textContent = game.title;
         list.append(a);
@@ -717,7 +717,7 @@
         app.textContent = "No game list.";
         return;
       }
-      const id = params.get("game");
+      const id = params.get("game") || document.documentElement.dataset.game;
       const game = (manifest.games || []).find((g) => g.id === id);
       if (!id) showPicker(manifest.games || []);
       else if (!game) app.textContent = "That game is not on this site.";
