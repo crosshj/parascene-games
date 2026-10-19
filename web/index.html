@@ -697,12 +697,6 @@
       document.title = game.title;
       app.innerHTML = `
         <div class="play">
-          <div id="getdisc" class="banner" hidden>
-            <span>Play the full disc, with CD music, in DuckStation or on a PlayStation.
-              Unzip it and open <code>${game.id}.cue</code>.</span>
-            <a id="getdisc-link" download>Download BIN/CUE</a>
-            <button type="button" id="getdisc-close" aria-label="Dismiss">×</button>
-          </div>
           <div id="screen"><div id="game"></div><button type="button" id="play" disabled>Loading…</button><div id="bezel"></div></div>
           <p id="status"></p>
           <div class="controls">
@@ -713,6 +707,12 @@
               <label class="vol">Volume <input id="vol" type="range" min="0" max="100" value="${Math.round(pageVolume * 100)}"></label>
               <label class="padpick">Controller <select id="padpick"></select> <button type="button" id="findpad">Find</button></label>
             </div>
+          </div>
+          <div id="getdisc" class="banner" hidden>
+            <span>Play the full disc, with CD music, in DuckStation or on a PlayStation.
+              Unzip it and open <code>${game.id}.cue</code>.</span>
+            <a id="getdisc-link" download>Download BIN/CUE</a>
+            <button type="button" id="getdisc-close" aria-label="Dismiss">×</button>
           </div>
         </div>`;
       for (const b of BUTTONS) {
