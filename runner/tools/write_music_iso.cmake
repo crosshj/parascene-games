@@ -168,6 +168,9 @@ file(WRITE "${_repo}/web/manifest.json" "{
       \"title\": \"Runner\",
       \"bin\": \"build/runner-web.bin\",
       \"download\": \"build/runner.zip\",
+      \"cover\": \"runner/cover.png\",
+      \"share\": \"runner/share.png\",
+      \"blurb\": \"Pick a runner and hit the road. A PlayStation game you can play right in your browser.\",
       \"width\": 320,
       \"height\": 240,
       \"audio\": [

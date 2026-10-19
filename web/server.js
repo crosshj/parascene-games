@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
-const { gamePage, gameIds } = require("./game-pages.js");
+const { gamePage, games } = require("./game-pages.js");
 
 const port = Number(process.argv[2] || process.env.PORT || 8643);
 const site = __dirname;
@@ -21,6 +21,9 @@ const types = {
   ".mp3": "audio/mpeg",
   ".bin": "application/octet-stream",
   ".zip": "application/zip",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
   ".css": "text/css; charset=utf-8"
 };
 
@@ -63,6 +66,8 @@ function resolve(urlPath) {
   if (urlPath === "/build/runner.zip") {
     try { return discZip(); } catch { return null; }
   }
+  if (urlPath === "/runner/cover.png" || urlPath === "/runner/share.png")
+    return path.join(repo, urlPath);
   if (urlPath.startsWith("/runner/audio/")) {
     const name = urlPath.slice("/runner/audio/".length);
     if (!name || name.includes("/") || name.includes("\\") || name.includes(".."))
@@ -129,7 +134,7 @@ const server = http.createServer((req, res) => {
   }
   const bare = /^\/([a-z0-9-]+)$/.exec(urlPath);
   try {
-    if (bare && gameIds(site).includes(bare[1])) {
+    if (bare && games(site).some((g) => g.id === bare[1])) {
       res.writeHead(301, headers({ Location: urlPath + "/" }));
       return res.end();
     }
@@ -139,9 +144,10 @@ const server = http.createServer((req, res) => {
   const page = /^\/([a-z0-9-]+)\/index\.html$/.exec(urlPath);
   if (page) {
     try {
-      if (gameIds(site).includes(page[1])) {
+      const game = games(site).find((g) => g.id === page[1]);
+      if (game) {
         const html = fs.readFileSync(path.join(site, "index.html"), "utf8");
-        return send(res, 200, req.method === "HEAD" ? "" : gamePage(html, page[1]), types[".html"]);
+        return send(res, 200, req.method === "HEAD" ? "" : gamePage(html, game), types[".html"]);
       }
     } catch {
       return send(res, 500, "No manifest");

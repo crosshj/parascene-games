@@ -112,17 +112,63 @@ int world_buffer(void) {
     return ctx.active;
 }
 
-void text(int x, int y, const char *s) {
-    RenderBuffer *buf = &ctx.buffers[ctx.active];
+extern uint16_t _font_tpage;
+extern uint16_t _font_clut;
+
+static int text_glyphs(const char *s) {
     int glyphs = 0;
-    const char *p;
-    for (p = s; *p; p++) {
-        if (*p != ' ' && *p != '\n')
+    for (; *s; s++) {
+        if (*s != ' ' && *s != '\n')
             glyphs++;
     }
-    if (ctx.next + glyphs * sizeof(SPRT_8) + sizeof(DR_TPAGE) > buf->buffer + BUFFER_LENGTH)
+    return glyphs;
+}
+
+void text(int x, int y, const char *s) {
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    if (ctx.next + text_glyphs(s) * sizeof(SPRT_8) + sizeof(DR_TPAGE) > buf->buffer + BUFFER_LENGTH)
         return;
     ctx.next = FntSort(&buf->ot[0], ctx.next, x, y, s);
+}
+
+void text_rgb(int x, int y, const char *s, int r, int g, int b) {
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    SPRT_8 *sprt;
+    DR_TPAGE *tpage;
+    const char *p;
+    int sx = x;
+    if (ctx.next + text_glyphs(s) * sizeof(SPRT_8) + sizeof(DR_TPAGE) > buf->buffer + BUFFER_LENGTH)
+        return;
+    sprt = (SPRT_8 *)ctx.next;
+    for (p = s; *p; p++) {
+        int c = *p;
+        int i;
+        if (c == '\n') {
+            sx = x;
+            y += 8;
+            continue;
+        }
+        if (c >= 'a' && c <= 'z')
+            c -= 32;
+        i = c - ' ';
+        if (i > 0) {
+            i--;
+            setSprt8(sprt);
+            setXY0(sprt, sx, y);
+            setUV0(sprt, (i % 16) * 8, (i / 16) * 8);
+            setRGB0(sprt, r, g, b);
+            sprt->clut = _font_clut;
+            addPrim(&buf->ot[0], sprt);
+            sprt++;
+        }
+        sx += 8;
+    }
+    tpage = (DR_TPAGE *)sprt;
+    tpage->code[0] = _font_tpage;
+    setlen(tpage, 1);
+    setcode(tpage, 0xe1);
+    addPrim(&buf->ot[0], tpage);
+    ctx.next = (uint8_t *)tpage + sizeof(DR_TPAGE);
 }
 
 int project(int x, int y, int z, XY *out) {

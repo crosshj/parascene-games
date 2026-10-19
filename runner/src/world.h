@@ -60,6 +60,8 @@ void *alloc_prim(int bucket, size_t size);
 void world_link(int bucket, void *prim);
 int world_buffer(void);
 void text(int x, int y, const char *s);
+/* The same font, tinted. 128 is full white, so a lower color is dimmer. */
+void text_rgb(int x, int y, const char *s, int r, int g, int b);
 
 int project(int x, int y, int z, XY *out);
 void dim(int *r, int *g, int *b, int z);

@@ -3,82 +3,241 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#120a1a">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <!-- share -->
   <title>Parascene Games</title>
+  <meta name="description" content="Strange ideas. Playable things. PlayStation games from the Parascene community, free to play in your browser.">
+  <link rel="canonical" href="https://games.parascene.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Parascene Games">
+  <meta property="og:title" content="Parascene Games">
+  <meta property="og:description" content="Strange ideas. Playable things. PlayStation games from the Parascene community, free to play in your browser.">
+  <meta property="og:url" content="https://games.parascene.com/">
+  <meta property="og:image" content="https://games.parascene.com/brand/share.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Parascene Games: Strange ideas. Playable things.">
+  <meta name="twitter:card" content="summary_large_image">
+  <!-- /share -->
   <style>
-    :root { color-scheme: dark; }
+    @font-face { font-family: "04b_03"; src: url("brand/04b03.woff2") format("woff2"); font-display: swap; }
+    :root {
+      color-scheme: dark;
+      --bg: #120a1a; --panel: #1e1626; --line: #38244c; --pink: #dd49d4; --violet: #7b4dff;
+      --text: #fff; --dim: rgba(255, 255, 255, .7); --faint: rgba(255, 255, 255, .45);
+      --pixel: "04b_03", ui-monospace, monospace;
+    }
     * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; background: #14141c; color: #e8e6f0; font: 16px/1.4 system-ui, sans-serif; }
-    a { color: #d7c4ff; }
-    header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; }
-    h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: .02em; }
-    main { padding: 0 20px 32px; }
-    .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; max-width: 880px; }
-    .card { display: block; padding: 18px; border: 1px solid #3a3650; border-radius: 10px; background: #1d1b28; text-decoration: none; color: inherit; }
-    .card:hover, .card.on { border-color: #8d74d6; }
-    .card strong { display: block; margin-bottom: 4px; }
-    .card span { color: #aaa6bb; font-size: 14px; }
-    .play { display: grid; gap: 14px; justify-items: center; }
-    #screen { position: relative; width: min(100%, 960px); aspect-ratio: 320 / 240; background: #000; }
+    html { background: var(--bg); }
+    body {
+      margin: 0; min-height: 100dvh; display: flex; flex-direction: column;
+      background: var(--bg); color: var(--text); font: 16px/1.6 var(--pixel);
+      -webkit-font-smoothing: none; font-smooth: never;
+    }
+    a { color: var(--pink); }
+    button, select, input { font: inherit; color: inherit; }
+    header {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      width: min(100%, 1040px); margin: 0 auto; padding: 20px;
+    }
+    header .logo img { display: block; height: 48px; width: auto; }
+    main { flex: 1; width: min(100%, 1040px); margin: 0 auto; padding: 0 20px 40px; }
+    footer {
+      border-top: 1px solid var(--line); padding: 24px 20px 32px;
+      text-align: center; color: var(--dim);
+    }
+    footer p { margin: 0 auto; max-width: 560px; }
+
+    .hero { margin: 24px 0 40px; max-width: 640px; }
+    .hero h1 { margin: 0 0 12px; font-size: 32px; font-weight: normal; line-height: 1.2; }
+    .hero p { margin: 0; color: var(--dim); }
+    .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; }
+    .card {
+      display: block; text-decoration: none; color: inherit;
+      background: var(--panel); border: 2px solid var(--line);
+      transition: transform .12s, border-color .12s, box-shadow .12s;
+    }
+    .card img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; image-rendering: pixelated; background: #000; }
+    .card div { display: flex; justify-content: center; padding: 14px; }
+    .card span { background: var(--pink); color: #fff; padding: 2px 28px; box-shadow: 0 3px 0 #000; }
+    .card:hover, .card:focus-visible, .card.on {
+      outline: none; border-color: var(--pink); transform: translateY(-3px);
+      box-shadow: 0 10px 30px -10px var(--pink);
+    }
+    .card.ghost { background: transparent; border: 2px dashed rgba(221, 73, 212, .35); color: var(--faint); cursor: pointer; }
+    .card.ghost .blank {
+      aspect-ratio: 4 / 3; background:
+        linear-gradient(rgba(221, 73, 212, .28), rgba(221, 73, 212, .28)) center / 40px 2px no-repeat,
+        linear-gradient(rgba(221, 73, 212, .28), rgba(221, 73, 212, .28)) center / 2px 40px no-repeat,
+        #0c0614;
+    }
+    .card.ghost span { background: none; color: var(--faint); box-shadow: none; }
+    .card.ghost:hover, .card.ghost:focus-visible, .card.ghost.on {
+      border-color: rgba(221, 73, 212, .6); box-shadow: none;
+    }
+    dialog {
+      border: 2px solid var(--line); background: var(--panel); color: var(--text);
+      padding: 28px; max-width: 460px; width: calc(100% - 32px);
+    }
+    dialog::backdrop { background: #07030ccc; }
+    dialog h2 { margin: 0 0 12px; font-size: 24px; font-weight: normal; line-height: 1.3; }
+    dialog p { margin: 0 0 22px; color: var(--dim); }
+    dialog menu { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 0; }
+    dialog a { background: var(--pink); color: #fff; text-decoration: none; padding: 8px 16px; box-shadow: 0 3px 0 #000; }
+    dialog button { background: none; border: 0; color: var(--faint); cursor: pointer; padding: 0; }
+    dialog code { font: inherit; color: var(--text); }
+    .islands { display: block; width: min(100%, 720px); height: auto; margin: 56px auto 0; image-rendering: pixelated; opacity: .9; }
+
+    .play { position: relative; isolation: isolate; display: grid; gap: 20px; justify-items: center; }
+    .stage { display: contents; }
+    .play::before {
+      content: ""; position: absolute; inset: -40px -20px auto; height: 70%; z-index: -1;
+      background: var(--cover) center / cover; filter: blur(70px) saturate(1.5); opacity: .35;
+      pointer-events: none;
+    }
+    #screen {
+      position: relative; aspect-ratio: 4 / 3; background: #000;
+      width: min(100%, 960px, calc((100dvh - 200px) * 4 / 3));
+      border: 2px solid var(--line); box-shadow: 0 20px 60px -20px #000, 0 0 0 1px #000;
+    }
     #game { position: absolute; inset: 0; }
     #game canvas.ejs_canvas {
       width: 100% !important; height: 100% !important;
       image-rendering: pixelated; image-rendering: crisp-edges;
     }
     #bezel { position: absolute; left: 0; right: 0; bottom: 0; height: calc(100% / 240); background: #000; z-index: 4; pointer-events: none; }
+    #cover { position: absolute; inset: 0; z-index: 5; width: 100%; height: 100%; image-rendering: pixelated; }
+    #cover[hidden] { display: none; }
     #play {
-      position: absolute; inset: 0; z-index: 6; border: 0; cursor: pointer;
-      background: #000d; color: #fff; font: 600 20px/1 system-ui, sans-serif;
+      position: absolute; left: 50%; top: 75%; transform: translate(-50%, -50%); z-index: 6;
+      width: 40%; height: 15%; padding: 0; border: 2px solid var(--pink); cursor: pointer;
+      background: var(--bg); color: #fff; font-size: clamp(16px, 3vw, 32px); letter-spacing: .1em;
+      box-shadow: 0 4px 0 #000, 0 0 24px -4px var(--pink);
+      animation: pulse 1.6s ease-in-out infinite;
     }
+    #play:hover:not(:disabled) { background: var(--pink); }
     #play[hidden] { display: none; }
-    #play:disabled { cursor: default; color: #aaa6bb; }
+    #play:disabled { cursor: default; color: var(--faint); border-color: var(--line); box-shadow: 0 4px 0 #000; animation: none; }
+    @keyframes pulse { 50% { box-shadow: 0 4px 0 #000, 0 0 36px 2px var(--pink); } }
     #game .ejs_start_button { display: none !important; }
     #game .ejs_menu_bar, #game .ejs_virtualGamepad_parent, #game .ejs_virtualGamepad_open,
     #game .ejs_popup_container { display: none !important; }
-    .controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: end; justify-content: center; }
-    .pad { display: grid; grid-template: repeat(3, 52px) / repeat(3, 52px); gap: 6px; }
+
+    .controls {
+      display: grid; width: min(100%, 520px); align-items: center; gap: 20px 12px;
+      grid-template: "pad face" auto "menu menu" auto / 1fr 1fr;
+    }
+    .pad, .face { display: grid; grid-template: repeat(3, var(--b)) / repeat(3, var(--b)); gap: 4px; --b: clamp(48px, 14vw, 60px); }
+    .pad { grid-area: pad; justify-self: start; }
+    .face { grid-area: face; justify-self: end; }
     .pad [data-id=up] { grid-area: 1 / 2; }
     .pad [data-id=left] { grid-area: 2 / 1; }
     .pad [data-id=right] { grid-area: 2 / 3; }
     .pad [data-id=down] { grid-area: 3 / 2; }
-    .face { display: grid; grid-template: repeat(3, 52px) / repeat(3, 52px); gap: 6px; }
-    .face [data-id=tri] { grid-area: 1 / 2; }
-    .face [data-id=sqr] { grid-area: 2 / 1; }
-    .face [data-id=cir] { grid-area: 2 / 3; }
-    .face [data-id=crs] { grid-area: 3 / 2; }
-    .menu { display: flex; gap: 8px; }
-    button.btn, .wide { touch-action: none; user-select: none; }
+    .face [data-id=tri] { grid-area: 1 / 2; color: #5be3b4; }
+    .face [data-id=sqr] { grid-area: 2 / 1; color: #ff8ed8; }
+    .face [data-id=cir] { grid-area: 2 / 3; color: #ff6b74; }
+    .face [data-id=crs] { grid-area: 3 / 2; color: #7fa8ff; }
+    .menu { grid-area: menu; display: flex; gap: 12px; justify-content: center; }
+    button.btn, button.wide { touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
     button.btn {
-      width: 52px; height: 52px; border: 0; border-radius: 8px; cursor: pointer;
-      background: #2a2838; color: #fff; font: 16px/1 system-ui, sans-serif;
+      width: var(--b); height: var(--b); border: 2px solid var(--line); background: var(--panel);
+      font-family: system-ui, sans-serif; font-size: 22px; box-shadow: 0 3px 0 #000;
     }
-    button.btn.on { background: #6d56b8; }
-    button.wide { height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: #2a2838; color: #fff; cursor: pointer; }
-    button.wide.on { background: #6d56b8; }
-    .vol, .padpick { display: flex; align-items: center; gap: 8px; color: #aaa6bb; font-size: 14px; margin-top: 8px; }
-    .padpick select { background: #2a2838; color: #fff; border: 0; border-radius: 8px; padding: 8px 10px; max-width: 220px; }
-    .padpick button { background: #6d56b8; color: #fff; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
-    .note { color: #aaa6bb; max-width: 640px; }
-    #status { min-height: 1.4em; color: #aaa6bb; }
-    footer { padding: 8px 20px 28px; text-align: center; color: #aaa6bb; font-size: 14px; }
-    .banner {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
-      width: min(100%, 960px); padding: 10px 14px; border: 1px solid #3a3650;
-      border-radius: 10px; background: #1d1b28; font-size: 14px;
+    .face button.btn { border-radius: 50%; }
+    button.wide { height: 36px; padding: 0 18px; border: 2px solid var(--line); background: var(--panel); box-shadow: 0 3px 0 #000; }
+    button.btn.on, button.wide.on { background: var(--line); border-color: var(--pink); transform: translateY(2px); box-shadow: 0 1px 0 #000; }
+
+    .bar {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 28px;
+      width: min(100%, 960px); color: var(--dim);
     }
-    .banner[hidden] { display: none; }
-    .banner span { flex: 1 1 280px; color: #aaa6bb; }
-    .banner a { background: #6d56b8; color: #fff; text-decoration: none; border-radius: 8px; padding: 8px 12px; white-space: nowrap; }
-    .banner button { background: none; border: 0; color: #aaa6bb; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
+    .bar label { display: flex; align-items: center; gap: 10px; }
+    .bar input[type=range] { accent-color: var(--pink); width: 120px; }
+    .bar select { background: var(--panel); border: 2px solid var(--line); padding: 4px 8px; max-width: 220px; }
+    .bar .link { background: none; border: 0; padding: 0; color: var(--pink); cursor: pointer; text-decoration: underline; }
+    .keys { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; width: min(100%, 960px); color: var(--faint); }
+    .keys kbd { font: inherit; color: var(--text); border: 1px solid var(--line); padding: 0 6px; margin-right: 4px; }
+    @media (hover: hover) and (pointer: fine) { .controls { display: none; } }
+    @media (hover: none), (pointer: coarse) { .keys { display: none; } }
+
+    .note { color: var(--dim); }
+    #more {
+      display: none; background: none; border: 0; padding: 2px 0; cursor: pointer;
+      color: var(--faint); font-size: 14px;
+    }
+    #more[hidden] { display: none; }
+    .disc { display: none; gap: 12px; justify-items: start; }
+    #more-sheet .disc:not([hidden]) { display: grid; }
+    .disc p { margin: 0; }
+
+    @media (max-width: 640px) {
+      header { padding: 14px 16px; }
+      header .logo img { height: 36px; }
+      main { padding: 0 16px 32px; }
+      .hero h1 { font-size: 24px; }
+      .hero { margin: 8px 0 28px; }
+      .bar { width: calc(100% - 32px); }
+    }
+    /* Phone only. A desktop-sized window keeps the framed, centered screen. */
+    @media (max-width: 640px) {
+      #more:not([hidden]) { display: inline; }
+      .play > .bar { display: none; }
+      #more-sheet .bar { display: grid; justify-items: start; gap: 18px; width: auto; }
+      #more-sheet .getrom { display: none; }
+      #more-sheet .disc a { background: var(--pink); color: #fff; text-decoration: none; padding: 8px 16px; box-shadow: 0 3px 0 #000; }
+      html:has(.play) { height: 100%; overflow: hidden; }
+      body:has(.play) {
+        position: fixed; inset: 0; width: 100%;
+        height: 100vh; height: 100svh; max-height: 100svh;
+        min-height: 0; margin: 0; overflow: hidden; overscroll-behavior: none;
+      }
+      body:has(.play) footer { display: none; }
+      body:has(.play) header {
+        width: 100%; height: 48px; padding: 6px 16px; flex: none;
+      }
+      body:has(.play) header .logo img { height: 32px; }
+      body:has(.play) main {
+        width: 100%; flex: 1; min-width: 0; min-height: 0; margin: 0; padding: 0;
+        display: flex; flex-direction: column; overflow: hidden;
+      }
+      body:has(.play) .play {
+        flex: 1; min-width: 0; min-height: 0; width: 100%; max-width: 100%; gap: 0; overflow: hidden;
+        display: grid; grid-template-rows: minmax(0, 1fr) auto;
+        align-content: stretch; justify-items: stretch;
+      }
+      body:has(.play) .play::before { left: 0; right: 0; }
+      body:has(.play) .stage {
+        grid-row: 1; min-width: 0; min-height: 0; width: 100%; max-width: 100%; height: 100%;
+        container-type: size; overflow: hidden;
+        display: flex; align-items: flex-start; justify-content: center;
+      }
+      body:has(.play) #screen {
+        width: min(100%, calc(100cqb * 4 / 3)); max-width: 100%; height: auto;
+        border: 0; box-shadow: none; margin: 0;
+      }
+      body:has(.play) .controls {
+        grid-row: 2; position: static; width: 100%; min-width: 0; max-width: 100%;
+        container-type: inline-size;
+        gap: clamp(48px, 8svh, 72px) 16px;
+        padding: 0 16px calc(12px + env(safe-area-inset-bottom));
+        background: var(--bg);
+      }
+      body:has(.play) .pad, body:has(.play) .face {
+        --b: clamp(36px, calc((100cqi - 72px) / 6), 56px);
+      }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Parascene Games</h1>
-    <a id="back" href="./" hidden>All games</a>
+    <a class="logo" href="./" aria-label="Parascene Games"><img src="brand/logo.png" alt="Parascene Games" width="476" height="132"></a>
+    <button type="button" id="more" hidden>More</button>
   </header>
   <main id="app"></main>
   <footer>
-    Made by the team at <a href="https://www.parascene.com" target="_blank" rel="noopener">Parascene</a>. Come say hi, report a bug, or tell us what to build next.
+    <p>Play something. Tell us what broke. Come help make the next thing at <a href="https://www.parascene.com" target="_blank" rel="noopener">parascene.com</a>.</p>
   </footer>
   <script>
     window.__audioCtxs = [];
@@ -502,7 +661,7 @@
       const padpick = document.getElementById("padpick");
       const status = document.getElementById("status");
       let chosen = null;
-      let padSig = "";
+      let padSig = null;
       const hid = { device: null, hat: 8, face: 0, shoulder: 0, lx: 0, ly: 0 };
       const SONY = [
         { vendorId: 0x054c, productId: 0x0ce6, usagePage: 0x01 },
@@ -570,7 +729,7 @@
         if (!list.length && !hid.device) {
           const o = document.createElement("option");
           o.value = "";
-          o.textContent = "None yet";
+          o.textContent = "Press ✕ on a pad";
           padpick.append(o);
           chosen = null;
           if (status) status.textContent = navigator.hid
@@ -648,31 +807,88 @@
     }
 
     function showPicker(games) {
-      app.innerHTML = `<div class="picker"></div><p class="note">Each game here has a small web disc. The music stays in the browser. Press ✕ or Options on a controller to play.</p>`;
+      document.getElementById("more").hidden = true;
+      app.innerHTML = `
+        <section class="hero">
+          <h1>Strange ideas. Playable things.</h1>
+          <p>PlayStation games from the Parascene community. Play them here in your browser, or grab the disc.</p>
+        </section>
+        <div class="picker"></div>
+        <dialog id="join">
+          <h2>This spot is open.</h2>
+          <p>Strange ideas become games here. Bring a character, a song, or a game of your own, and build it with us.</p>
+          <menu>
+            <a href="https://www.parascene.com" target="_blank" rel="noopener">Come build with us</a>
+            <button type="button" id="join-close">Close</button>
+          </menu>
+        </dialog>
+        <img class="islands" src="brand/islands.png" alt="" width="1085" height="363">`;
+      document.getElementById("join-close").addEventListener("click", () => {
+        document.getElementById("join").close();
+      });
+      document.getElementById("join").addEventListener("click", (e) => {
+        if (e.target.id === "join") e.target.close();
+      });
       const list = app.querySelector(".picker");
       for (const game of games) {
         const a = document.createElement("a");
         a.className = "card";
         a.href = `${encodeURIComponent(game.id)}/`;
-        a.innerHTML = `<strong></strong><span>Play</span>`;
-        a.querySelector("strong").textContent = game.title;
+        a.innerHTML = `<img alt="" width="320" height="240"><div><span>Play</span></div>`;
+        a.setAttribute("aria-label", "Play " + game.title);
+        if (game.cover) a.querySelector("img").src = game.cover;
         list.append(a);
       }
-      const cards = [...list.querySelectorAll(".card")];
+      /* Ghosts only complete a row. A single column has no row to fill, so it gets one. */
+      function ghostSlots(cols) {
+        if (cols <= 1) return 1;
+        return (cols - (games.length % cols)) % cols;
+      }
+      function openSlot() {
+        const slot = document.createElement("button");
+        slot.type = "button";
+        slot.className = "card ghost";
+        slot.setAttribute("aria-label", "An open spot. Come build a game with Parascene.");
+        slot.innerHTML = `<div class="blank"></div><div><span>Open</span></div>`;
+        slot.addEventListener("click", () => {
+          const dialog = document.getElementById("join");
+          if (!dialog.open) dialog.showModal();
+        });
+        return slot;
+      }
+      let cards = [];
+      function fillRow() {
+        const cols = getComputedStyle(list).gridTemplateColumns.split(" ").filter(Boolean).length;
+        const want = ghostSlots(cols);
+        const have = list.querySelectorAll(".ghost").length;
+        if (have === want) return;
+        list.querySelectorAll(".ghost").forEach((el) => el.remove());
+        for (let n = 0; n < want; n++) list.append(openSlot());
+        cards = [...list.querySelectorAll(".card")];
+        if (at >= cards.length) at = 0;
+        if (prev.seen) cards.forEach((c, n) => c.classList.toggle("on", n === at));
+      }
       let at = 0;
       let prev = {};
-      if (cards[0]) cards[0].classList.add("on");
+      fillRow();
+      const rows = new ResizeObserver(() => {
+        if (!list.isConnected) { rows.disconnect(); return; }
+        fillRow();
+      });
+      rows.observe(list);
       (function watchPicker() {
-        if (!document.querySelector(".picker")) return;
+        if (!list.isConnected) { rows.disconnect(); return; }
         const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
         const pad = pads[0];
-        if (pad && cards.length) {
+        if (pad && cards.length && !document.getElementById("join").open) {
+          if (!prev.seen) cards[at].classList.add("on");
           const stickX = pad.axes[0] || 0;
           const stickY = pad.axes[1] || 0;
           const now = {
             prev: (pad.buttons[14]?.pressed || stickX < -0.5) || (pad.buttons[12]?.pressed || stickY < -0.5),
             next: (pad.buttons[15]?.pressed || stickX > 0.5) || (pad.buttons[13]?.pressed || stickY > 0.5),
-            go: pad.buttons[0]?.pressed || pad.buttons[9]?.pressed
+            go: pad.buttons[0]?.pressed || pad.buttons[9]?.pressed,
+            seen: true
           };
           if (now.prev && !prev.prev) at = (at + cards.length - 1) % cards.length;
           if (now.next && !prev.next) at = (at + 1) % cards.length;
@@ -688,8 +904,6 @@
     /* Shown only when the zip is actually published, with its real size. */
     async function offerDisc(game) {
       if (!game.download) return;
-      const key = `parascene.disc-banner.${game.id}`;
-      try { if (localStorage.getItem(key) === "closed") return; } catch { /* private mode */ }
       const url = new URL(game.download, document.baseURI).href;
       let size = 0;
       try {
@@ -699,42 +913,80 @@
       } catch {
         return;
       }
-      const banner = document.getElementById("getdisc");
-      if (!banner) return;
-      const link = document.getElementById("getdisc-link");
-      link.href = url;
-      link.setAttribute("download", `${game.id}.zip`);
-      if (size) link.textContent = `Download BIN/CUE (${Math.round(size / 1048576)} MB)`;
-      document.getElementById("getdisc-close").addEventListener("click", () => {
-        banner.hidden = true;
-        try { localStorage.setItem(key, "closed"); } catch { /* private mode */ }
-      });
-      banner.hidden = false;
+      const open = document.getElementById("getdisc");
+      const dialog = document.getElementById("disc");
+      if (!open || !dialog) return;
+      for (const link of [document.getElementById("getdisc-link"), document.getElementById("disc-link")]) {
+        link.href = url;
+        link.setAttribute("download", `${game.id}.zip`);
+        if (size) link.textContent = `Download BIN/CUE (${Math.round(size / 1048576)} MB)`;
+      }
+      open.addEventListener("click", () => { if (!dialog.open) dialog.showModal(); });
+      document.getElementById("disc-close").addEventListener("click", () => dialog.close());
+      dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+      open.hidden = false;
+      document.getElementById("rom").hidden = false;
     }
 
     function showPlayer(game) {
-      document.getElementById("back").hidden = false;
-      document.title = game.title;
+      document.getElementById("more").hidden = false;
+      document.title = `${game.title} | Parascene Games`;
+      const keyName = (k) => k.replace(/^Key/, "").replace(/^Shift.*/, "Shift").replace(/^Arrow.*/, "Arrows");
+      const keyHelp = [
+        ["Move", "Arrows", "WASD"],
+        ...BUTTONS.filter((b) => b.slot !== "pad").map((b) => [b.label, ...new Set(b.keys.map(keyName))])
+      ].map(([label, ...keys]) => `<span>${keys.map((k) => `<kbd>${k}</kbd>`).join("")}${label}</span>`).join("");
       app.innerHTML = `
         <div class="play">
-          <div id="screen"><div id="game"></div><button type="button" id="play" disabled>Loading…</button><div id="bezel"></div></div>
-          <p id="status"></p>
+          <div class="stage">
+          <div id="screen">
+            <div id="game"></div>
+            <img id="cover" alt="" width="${game.width}" height="${game.height}" hidden>
+            <button type="button" id="play" disabled>Loading</button>
+            <div id="bezel"></div>
+          </div>
+          </div>
           <div class="controls">
             <div class="pad" data-slot="pad"></div>
             <div class="face" data-slot="face"></div>
-            <div>
-              <div class="menu" data-slot="menu"></div>
-              <label class="vol">Volume <input id="vol" type="range" min="0" max="100" value="${Math.round(pageVolume * 100)}"></label>
-              <label class="padpick">Controller <select id="padpick"></select> <button type="button" id="findpad">Find</button></label>
+            <div class="menu" data-slot="menu"></div>
+          </div>
+          <div class="keys">${keyHelp}</div>
+          <div class="bar">
+            <label>Volume <input id="vol" type="range" min="0" max="100" value="${Math.round(pageVolume * 100)}"></label>
+            <label class="padpick">Controller <select id="padpick"></select></label>
+            <button type="button" class="link" id="findpad">Find PS5 pad</button>
+            <button type="button" class="link getrom" id="getdisc" hidden>Download ROM</button>
+            <div id="rom" class="disc" hidden>
+              <p>The full disc has CD music. Unzip it and open <code>${game.id}.cue</code> in DuckStation, or burn it.</p>
+              <a id="getdisc-link" download>Download BIN/CUE</a>
             </div>
+            <span id="status" hidden></span>
           </div>
-          <div id="getdisc" class="banner" hidden>
-            <span>Play the full disc, with CD music, in DuckStation or on a PlayStation.
-              Unzip it and open <code>${game.id}.cue</code>.</span>
-            <a id="getdisc-link" download>Download BIN/CUE</a>
-            <button type="button" id="getdisc-close" aria-label="Dismiss">×</button>
-          </div>
+          <dialog id="more-sheet">
+            <h2>More</h2>
+            <menu>
+              <span></span>
+              <button type="button" id="more-close">Close</button>
+            </menu>
+          </dialog>
+          <dialog id="disc">
+            <h2>Play it on a real PlayStation</h2>
+            <p>The full disc has CD music. Unzip it and open <code>${game.id}.cue</code> in DuckStation, or burn it.</p>
+            <menu>
+              <a id="disc-link" download>Download BIN/CUE</a>
+              <button type="button" id="disc-close">Close</button>
+            </menu>
+          </dialog>
         </div>`;
+      if (game.cover) {
+        const url = new URL(game.cover, document.baseURI).href;
+        const cover = document.getElementById("cover");
+        cover.src = url;
+        cover.hidden = false;
+        app.querySelector(".play").style.setProperty("--cover", `url("${url}")`);
+      }
+      if (!navigator.hid) document.getElementById("findpad").hidden = true;
       for (const b of BUTTONS) {
         const el = document.createElement("button");
         el.type = "button";
@@ -747,6 +999,18 @@
       document.getElementById("vol").addEventListener("input", (e) => {
         window.__music.setPageVolume(Number(e.target.value) / 100);
         applyEmuVolume();
+      });
+      const sheet = document.getElementById("more-sheet");
+      const play = app.querySelector(".play");
+      document.getElementById("more").addEventListener("click", () => {
+        sheet.insertBefore(play.querySelector(".bar"), sheet.querySelector("menu"));
+        if (!sheet.open) sheet.showModal();
+      });
+      document.getElementById("more-close").addEventListener("click", () => sheet.close());
+      sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.close(); });
+      sheet.addEventListener("close", () => {
+        const bar = sheet.querySelector(".bar");
+        if (bar) play.append(bar);
       });
       offerDisc(game);
       window.__music = Music(game);
@@ -763,6 +1027,7 @@
         const start = document.querySelector("#game .ejs_start_button");
         if (start) start.click();
         document.getElementById("play").hidden = true;
+        document.getElementById("cover").hidden = true;
       });
     }
 

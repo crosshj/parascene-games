@@ -329,6 +329,13 @@ static void hud_center(int y, const char *s) {
     text((SCREEN_W - n * 8) / 2, y, s);
 }
 
+static void hud_center_rgb(int y, const char *s, int r, int g, int b) {
+    int n = 0;
+    while (s[n])
+        n++;
+    text_rgb((SCREEN_W - n * 8) / 2, y, s, r, g, b);
+}
+
 static void panel(int bucket, int x, int y, int w, int h) {
     TILE *t = alloc_prim(bucket, sizeof(TILE));
     if (t) {
@@ -412,7 +419,8 @@ static void draw_title(void) {
         return;
     if (((tick - FADE) / 30) % 2 == 0)
         hud_center(176, "PRESS START");
-    hud_center(220, "(C) 2026 PARASCENE GAMES");
+    /* Dimmer than PRESS START: 128 would be white. */
+    hud_center_rgb(220, "(C) 2026 PARASCENE", 48, 40, 56);
 }
 
 /* The select screen's rows, chosen with up and down. */
