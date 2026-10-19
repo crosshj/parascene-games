@@ -167,6 +167,7 @@ file(WRITE "${_repo}/web/manifest.json" "{
       \"id\": \"runner\",
       \"title\": \"Runner\",
       \"bin\": \"build/runner-web.bin\",
+      \"download\": \"build/runner.zip\",
       \"width\": 320,
       \"height\": 240,
       \"audio\": [

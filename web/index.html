@@ -59,6 +59,15 @@
     .padpick button { background: #6d56b8; color: #fff; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
     .note { color: #aaa6bb; max-width: 640px; }
     #status { min-height: 1.4em; color: #aaa6bb; }
+    .banner {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+      width: min(100%, 960px); padding: 10px 14px; border: 1px solid #3a3650;
+      border-radius: 10px; background: #1d1b28; font-size: 14px;
+    }
+    .banner[hidden] { display: none; }
+    .banner span { flex: 1 1 280px; color: #aaa6bb; }
+    .banner a { background: #6d56b8; color: #fff; text-decoration: none; border-radius: 8px; padding: 8px 12px; white-space: nowrap; }
+    .banner button { background: none; border: 0; color: #aaa6bb; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
   </style>
 </head>
 <body>
@@ -656,11 +665,44 @@
       })();
     }
 
+    /* Shown only when the zip is actually published, with its real size. */
+    async function offerDisc(game) {
+      if (!game.download) return;
+      const key = `parascene.disc-banner.${game.id}`;
+      try { if (localStorage.getItem(key) === "closed") return; } catch { /* private mode */ }
+      const url = new URL(game.download, document.baseURI).href;
+      let size = 0;
+      try {
+        const res = await fetch(url, { method: "HEAD" });
+        if (!res.ok) return;
+        size = Number(res.headers.get("Content-Length")) || 0;
+      } catch {
+        return;
+      }
+      const banner = document.getElementById("getdisc");
+      if (!banner) return;
+      const link = document.getElementById("getdisc-link");
+      link.href = url;
+      link.setAttribute("download", `${game.id}.zip`);
+      if (size) link.textContent = `Download BIN/CUE (${Math.round(size / 1048576)} MB)`;
+      document.getElementById("getdisc-close").addEventListener("click", () => {
+        banner.hidden = true;
+        try { localStorage.setItem(key, "closed"); } catch { /* private mode */ }
+      });
+      banner.hidden = false;
+    }
+
     function showPlayer(game) {
       document.getElementById("back").hidden = false;
       document.title = game.title;
       app.innerHTML = `
         <div class="play">
+          <div id="getdisc" class="banner" hidden>
+            <span>Play the full disc, with CD music, in DuckStation or on a PlayStation.
+              Unzip it and open <code>${game.id}.cue</code>.</span>
+            <a id="getdisc-link" download>Download BIN/CUE</a>
+            <button type="button" id="getdisc-close" aria-label="Dismiss">×</button>
+          </div>
           <div id="screen"><div id="game"></div><button type="button" id="play" disabled>Loading…</button><div id="bezel"></div></div>
           <p id="status"></p>
           <div class="controls">
@@ -686,6 +728,7 @@
         window.__music.setPageVolume(Number(e.target.value) / 100);
         applyEmuVolume();
       });
+      offerDisc(game);
       window.__music = Music(game);
       wirePad();
       boot(game);

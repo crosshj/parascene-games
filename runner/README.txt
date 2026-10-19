@@ -147,6 +147,8 @@ from the web folder:
 Open http://127.0.0.1:8643/runner/ . The picker is
 http://127.0.0.1:8643/ . The site files live in web/. GitHub Pages
 publishes that folder, plus build/runner-web.bin and runner/audio.
+It also publishes build/runner.zip, runner.cue and runner.bin with the
+CD music, which the player offers in a banner.
 
 CONTROLS
 --------

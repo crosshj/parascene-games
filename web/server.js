@@ -6,6 +6,8 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+const { execFileSync } = require("node:child_process");
 const { gamePage, gameIds } = require("./game-pages.js");
 
 const port = Number(process.argv[2] || process.env.PORT || 8643);
@@ -18,6 +20,7 @@ const types = {
   ".json": "application/json; charset=utf-8",
   ".mp3": "audio/mpeg",
   ".bin": "application/octet-stream",
+  ".zip": "application/zip",
   ".css": "text/css; charset=utf-8"
 };
 
@@ -42,9 +45,24 @@ function inside(root, file) {
   return file === root || file.startsWith(root + path.sep);
 }
 
+/* The Pages build zips runner.cue and runner.bin. Rebuild it here when the disc changes. */
+function discZip() {
+  const dir = path.join(repo, "build");
+  const zip = path.join(os.tmpdir(), "parascene-runner.zip");
+  const newest = Math.max(...["runner.cue", "runner.bin"].map((f) => fs.statSync(path.join(dir, f)).mtimeMs));
+  if (!fs.existsSync(zip) || fs.statSync(zip).mtimeMs < newest) {
+    fs.rmSync(zip, { force: true });
+    execFileSync("zip", ["-q", "-9", zip, "runner.cue", "runner.bin"], { cwd: dir });
+  }
+  return zip;
+}
+
 function resolve(urlPath) {
   if (urlPath === "/build/runner-web.bin")
     return path.join(repo, "build", "runner-web.bin");
+  if (urlPath === "/build/runner.zip") {
+    try { return discZip(); } catch { return null; }
+  }
   if (urlPath.startsWith("/runner/audio/")) {
     const name = urlPath.slice("/runner/audio/".length);
     if (!name || name.includes("/") || name.includes("\\") || name.includes(".."))
