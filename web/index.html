@@ -59,6 +59,7 @@
     .padpick button { background: #6d56b8; color: #fff; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
     .note { color: #aaa6bb; max-width: 640px; }
     #status { min-height: 1.4em; color: #aaa6bb; }
+    footer { padding: 8px 20px 28px; text-align: center; color: #aaa6bb; font-size: 14px; }
     .banner {
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
       width: min(100%, 960px); padding: 10px 14px; border: 1px solid #3a3650;
@@ -76,6 +77,9 @@
     <a id="back" href="./" hidden>All games</a>
   </header>
   <main id="app"></main>
+  <footer>
+    Need help? Visit <a href="https://www.parascene.com/help" target="_blank" rel="noopener">Parascene support</a>.
+  </footer>
   <script>
     window.__audioCtxs = [];
     for (const name of ["AudioContext", "webkitAudioContext"]) {
