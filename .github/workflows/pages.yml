@@ -25,7 +25,12 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p _site/build _site/runner/audio
-          cp web/index.html web/manifest.json web/sw.js web/favicon.svg web/.nojekyll _site/
+          cp web/index.html web/manifest.json web/favicon.svg web/.nojekyll _site/
+          # The worker's URL is the commit, so Pages and Cloudflare cannot keep
+          # serving the previous sw.js under the same name.
+          sw="sw-${GITHUB_SHA:0:12}.js"
+          cp web/sw.js "_site/$sw"
+          sed -i "s|/sw.js|/$sw|" _site/index.html
           cp -r web/brand _site/
           cp runner/cover.png runner/share.png _site/runner/
           cp build/runner-web.bin _site/build/
