@@ -25,7 +25,7 @@
     @font-face { font-family: "04b_03"; src: url("brand/04b03.woff2") format("woff2"); font-display: swap; }
     :root {
       color-scheme: dark;
-      --bg: #120a1a; --panel: #1e1626; --line: #38244c; --pink: #dd49d4; --violet: #7b4dff;
+      --bg: #120a1a; --panel: #1e1626; --face: #2a2234; --hi: color-mix(in srgb, var(--face) 92%, white); --mark: color-mix(in srgb, var(--face) 60%, white); --line: #38244c; --pink: #dd49d4; --violet: #7b4dff;
       --text: #fff; --dim: rgba(255, 255, 255, .7); --faint: rgba(255, 255, 255, .45);
       --pixel: "04b_03", ui-monospace, monospace;
     }
@@ -130,25 +130,44 @@
       grid-template: "pad face" auto "menu menu" auto / 1fr 1fr;
     }
     .pad, .face { display: grid; grid-template: repeat(3, var(--b)) / repeat(3, var(--b)); gap: 4px; --b: clamp(48px, 14vw, 60px); }
-    .pad { grid-area: pad; justify-self: start; }
+    .pad { grid-area: pad; justify-self: start; display: block; width: calc(var(--b) * 3); height: calc(var(--b) * 3); }
     .face { grid-area: face; justify-self: end; }
-    .pad [data-id=up] { grid-area: 1 / 2; }
-    .pad [data-id=left] { grid-area: 2 / 1; }
-    .pad [data-id=right] { grid-area: 2 / 3; }
-    .pad [data-id=down] { grid-area: 3 / 2; }
-    .face [data-id=tri] { grid-area: 1 / 2; color: #5be3b4; }
-    .face [data-id=sqr] { grid-area: 2 / 1; color: #ff8ed8; }
-    .face [data-id=cir] { grid-area: 2 / 3; color: #ff6b74; }
-    .face [data-id=crs] { grid-area: 3 / 2; color: #7fa8ff; }
-    .menu { grid-area: menu; display: flex; gap: 12px; justify-content: center; }
+    .pad svg { display: block; width: 100%; height: 100%; touch-action: none; }
+    .pad path.body {
+      fill: var(--face); stroke: #000; stroke-width: 3; stroke-linejoin: round;
+      cursor: pointer; touch-action: none;
+    }
+    .pad path.body.on { stroke: var(--pink); }
+    .pad path.hi { fill: var(--hi); stroke: none; pointer-events: none; filter: blur(2px); }
+    .face [data-id=tri] { grid-area: 1 / 2; }
+    .face [data-id=sqr] { grid-area: 2 / 1; }
+    .face [data-id=cir] { grid-area: 2 / 3; }
+    .face [data-id=crs] { grid-area: 3 / 2; }
+    .menu { grid-area: menu; display: flex; gap: 36px; justify-content: center; align-items: flex-start; }
     button.btn, button.wide { touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
     button.btn {
-      width: var(--b); height: var(--b); border: 2px solid var(--line); background: var(--panel);
-      font-family: system-ui, sans-serif; font-size: 22px; box-shadow: 0 3px 0 #000;
+      width: var(--b); height: var(--b); border: 2px solid #000; background: var(--panel);
+      font-family: system-ui, sans-serif; font-size: 22px; box-shadow: none;
     }
-    .face button.btn { border-radius: 50%; }
-    button.wide { height: 36px; padding: 0 18px; border: 2px solid var(--line); background: var(--panel); box-shadow: 0 3px 0 #000; }
-    button.btn.on, button.wide.on { background: var(--line); border-color: var(--pink); transform: translateY(2px); box-shadow: 0 1px 0 #000; }
+    .face button.btn {
+      display: grid; place-items: center;
+      border-radius: 50%; color: transparent; font-size: 0;
+      background: var(--face);
+    }
+    .face button.btn svg { width: 76%; height: 76%; }
+    .face button.btn svg * { fill: none; stroke: var(--mark); }
+    button.wide {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      height: auto; padding: 0; border: 0; background: none; box-shadow: none;
+    }
+    button.wide .shape { display: block; width: 64px; height: 40px; }
+    button.wide .body { fill: var(--face); stroke: #000; stroke-width: 2; stroke-linejoin: round; }
+    button.wide .hi { fill: var(--hi); stroke: none; filter: blur(2px); }
+    button.wide .cap { font-size: 16px; line-height: 1; text-transform: uppercase; color: var(--mark); }
+    button.btn.on, button.wide.on { background-color: var(--line); border-color: var(--pink); box-shadow: none; }
+    .face button.btn.on { background: var(--face); }
+    button.wide.on { background: none; border-color: transparent; box-shadow: none; }
+    button.wide.on .body { stroke: var(--pink); }
 
     .bar {
       display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 28px;
@@ -208,7 +227,7 @@
         display: grid; grid-template-rows: minmax(0, 1fr) auto;
         align-content: stretch; justify-items: stretch;
       }
-      body:has(.play) .play::before { left: 0; right: 0; }
+      body:has(.play) .play::before { left: 0; right: 0; height: 120%; }
       body:has(.play) .stage {
         grid-row: 1; min-width: 0; min-height: 0; width: 100%; max-width: 100%; height: 100%;
         container-type: size; overflow: hidden;
@@ -223,7 +242,6 @@
         container-type: inline-size;
         gap: clamp(48px, 8svh, 72px) 16px;
         padding: 0 16px calc(12px + env(safe-area-inset-bottom));
-        background: var(--bg);
       }
       body:has(.play) .pad, body:has(.play) .face {
         --b: clamp(36px, calc((100cqi - 72px) / 6), 56px);
@@ -944,7 +962,18 @@
           </div>
           </div>
           <div class="controls">
-            <div class="pad" data-slot="pad"></div>
+            <div class="pad" data-slot="pad">
+              <svg viewBox="-4 -4 208 208">
+                <path class="body" data-id="up" role="button" aria-label="Up" d="M84 6 H116 A12 12 0 0 1 128 18 V60 L100 86 L72 60 V18 A12 12 0 0 1 84 6 Z"/>
+                <path class="body" data-id="left" role="button" aria-label="Left" d="M6 116 V84 A12 12 0 0 1 18 72 H60 L86 100 L60 128 H18 A12 12 0 0 1 6 116 Z"/>
+                <path class="body" data-id="right" role="button" aria-label="Right" d="M194 84 V116 A12 12 0 0 1 182 128 H140 L114 100 L140 72 H182 A12 12 0 0 1 194 84 Z"/>
+                <path class="body" data-id="down" role="button" aria-label="Down" d="M116 194 H84 A12 12 0 0 1 72 182 V140 L100 114 L128 140 V182 A12 12 0 0 1 116 194 Z"/>
+                <path class="hi" d="M86 16 H114 V26 H86 Z"/>
+                <path class="hi" d="M24 80 H50 V86 H24 Z"/>
+                <path class="hi" d="M150 80 H176 V86 H150 Z"/>
+                <path class="hi" d="M100 126 L110 136 L90 136 Z"/>
+              </svg>
+            </div>
             <div class="face" data-slot="face"></div>
             <div class="menu" data-slot="menu"></div>
           </div>
@@ -985,12 +1014,26 @@
       }
       if (!navigator.hid) document.getElementById("findpad").hidden = true;
       for (const b of BUTTONS) {
+        if (b.slot === "pad") continue;
         const el = document.createElement("button");
         el.type = "button";
         el.className = b.slot === "menu" ? "wide" : "btn";
         el.dataset.id = b.id;
-        el.textContent = b.label;
         el.setAttribute("aria-label", b.label);
+        if (b.slot === "menu") {
+          const draw = b.id === "start"
+            ? `<path class="body" d="M3 2 L61 20 L3 38 Z"/><path class="hi" d="M18 11 L42 18.5 L42 21.5 L18 14 Z"/>`
+            : `<rect class="body" x="1.5" y="1.5" width="61" height="37" rx="8"/><rect class="hi" x="10" y="7" width="44" height="6" rx="1"/>`;
+          el.innerHTML = `<svg class="shape" viewBox="0 0 64 40">${draw}</svg><span class="cap">${b.label}</span>`;
+        } else if (b.slot === "face") {
+          const mark = {
+            tri: `<path d="M50 6 L88 78 L12 78 Z" stroke-width="9" stroke-linejoin="round"/>`,
+            sqr: `<rect x="22" y="22" width="56" height="56" stroke-width="9"/>`,
+            cir: `<circle cx="50" cy="50" r="38" stroke-width="11"/>`,
+            crs: `<path d="M18 18 L82 82 M82 18 L18 82" stroke-width="11" stroke-linecap="round"/>`,
+          }[b.id];
+          el.innerHTML = `<svg viewBox="0 0 100 100" aria-hidden="true">${mark}</svg>`;
+        } else el.textContent = b.label;
         document.querySelector(`[data-slot="${b.slot}"]`).append(el);
       }
       document.getElementById("vol").addEventListener("input", (e) => {
