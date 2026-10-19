@@ -128,7 +128,9 @@
     .controls {
       display: grid; width: min(100%, 520px); align-items: center; gap: 20px 12px;
       grid-template: "pad face" auto "menu menu" auto / 1fr 1fr;
+      -webkit-tap-highlight-color: transparent;
     }
+    .controls :focus, .controls :focus-visible { outline: none; }
     .pad, .face { display: grid; grid-template: repeat(3, var(--b)) / repeat(3, var(--b)); gap: 4px; --b: clamp(48px, 14vw, 60px); }
     .pad { grid-area: pad; justify-self: start; display: block; width: calc(var(--b) * 3); height: calc(var(--b) * 3); }
     .face { grid-area: face; justify-self: end; }
