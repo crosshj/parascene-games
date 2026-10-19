@@ -307,9 +307,17 @@
       const now = Date.now();
       tries = tries.filter((t) => now - t < 15000);
       if (tries.length >= 3) return "blocked";
-      const reg = await navigator.serviceWorker.register("sw.js");
+      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
       if (navigator.serviceWorker.controller) {
         await reg.update().catch(() => {});
+        const incoming = reg.installing || reg.waiting;
+        if (incoming)
+          await new Promise((resolve) => {
+            incoming.addEventListener("statechange", () => {
+              if (incoming.state === "activated") resolve();
+            });
+            setTimeout(resolve, 1500);
+          });
       } else {
         await navigator.serviceWorker.ready;
         if (!navigator.serviceWorker.controller) {
@@ -1034,10 +1042,6 @@
     (async () => {
       const isolated = await isolate();
       if (isolated === "reload") return;
-      if (isolated !== "ok") {
-        app.innerHTML = `<p class="note">The PlayStation core could not start in this tab. <button type="button" class="wide" onclick="location.reload()">Reload</button></p>`;
-        return;
-      }
       let manifest;
       try {
         manifest = await (await fetch("manifest.json")).json();
@@ -1049,6 +1053,8 @@
       const game = (manifest.games || []).find((g) => g.id === id);
       if (!id) showPicker(manifest.games || []);
       else if (!game) app.textContent = "That game is not on this site.";
+      else if (isolated !== "ok")
+        app.innerHTML = `<p class="note">The PlayStation core could not start in this tab. <button type="button" class="wide" onclick="location.reload()">Reload</button></p>`;
       else showPlayer(game);
     })();
   </script>

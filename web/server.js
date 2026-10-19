@@ -30,7 +30,7 @@ const types = {
 function headers(extra) {
   return Object.assign({
     "Cross-Origin-Opener-Policy": "same-origin",
-    "Cross-Origin-Embedder-Policy": "credentialless",
+    "Cross-Origin-Embedder-Policy": "require-corp",
     "Cache-Control": "no-cache"
   }, extra);
 }
