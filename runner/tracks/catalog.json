@@ -273,6 +273,48 @@
       ]
     },
     {
+      "id": "lumenwild.way",
+      "name": "Lumenwild",
+      "status": "runnable",
+      "summary": "The living forest. An S of bends, a hill that returns to grade, a narrowing to one lane and back, then the road runs on.",
+      "capabilities": ["repeat", "yaw", "grade", "lanes"],
+      "start": "trail",
+      "repeatFrom": "trail",
+      "pieces": [
+        {"id": "trail", "length": 8192, "next": "bend-right",
+         "obstacles": [
+           {"at": 1408, "lane": 0},
+           {"at": 3456, "lane": 1},
+           {"at": 5504, "lane": -1},
+           {"at": 7552, "lane": 0}
+         ]},
+        {"id": "bend-right", "length": 4096, "yaw": 90, "next": "glide",
+         "obstacles": [{"at": 1152, "lane": -1}, {"at": 3200, "lane": 1}]},
+        {"id": "glide", "length": 4096, "next": "bend-left",
+         "obstacles": [{"at": 1152, "lane": 0}, {"at": 3200, "lane": -1}]},
+        {"id": "bend-left", "length": 4096, "yaw": -90, "next": "climb",
+         "obstacles": [{"at": 2176, "lane": 1}]},
+        {"id": "climb", "length": 4096, "grade": 22.5, "next": "ease",
+         "obstacles": [{"at": 2176, "lane": -1}]},
+        {"id": "ease", "length": 4096, "grade": -22.5, "next": "drop"},
+        {"id": "drop", "length": 4096, "grade": -22.5, "next": "settle",
+         "obstacles": [{"at": 2176, "lane": 0}]},
+        {"id": "settle", "length": 4096, "grade": 22.5, "next": "to-one",
+         "obstacles": [{"at": 1152, "lane": 1}]},
+        {"id": "to-one", "length": 4096, "lanes": 3, "lanesTo": 1, "anchor": "center", "next": "one"},
+        {"id": "one", "length": 4096, "lanes": 1, "next": "to-three",
+         "obstacles": [{"at": 1152, "lane": 0}, {"at": 3200, "lane": 0}]},
+        {"id": "to-three", "length": 4096, "lanes": 1, "lanesTo": 3, "anchor": "center", "next": "home"},
+        {"id": "home", "length": 8192, "lanes": 3, "next": "trail",
+         "obstacles": [
+           {"at": 1408, "lane": -1},
+           {"at": 3456, "lane": 0},
+           {"at": 5504, "lane": 1},
+           {"at": 7552, "lane": -1}
+         ]}
+      ]
+    },
+    {
       "id": "gap.drop",
       "name": "Gap",
       "status": "view",

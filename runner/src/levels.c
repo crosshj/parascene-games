@@ -8,7 +8,8 @@ extern const Level level_bank;
 extern const Level level_zipper;
 extern const Level level_maxip;
 
-/* The select screen lists levels in this order; the first is the default. */
+/* Profile and the preview walk every level. Story Mode offers the ones
+ * with story set; Arcade Mode offers the rest, in this order. */
 const Level *const levels[] = {
     &level_lumenwild,
     &level_city,

@@ -311,6 +311,71 @@ static int off_screen(const RoadSample *a, const RoadSample *b) {
     return x1 < -EDGE_W || x0 > SCREEN_W + EDGE_W || y1 < 0 || y0 > SCREEN_H;
 }
 
+/* A point `extra` units of u outside one edge. side is -1 for the left. */
+static void edge_out(const RoadSample *a, int side, int extra, int *x, int *y, int *z) {
+    int sx, sy, sz, ox, oy, oz;
+    int w = a->w > 16 ? a->w : 16;
+    if (side < 0) {
+        sx = a->lx; sy = a->ly; sz = a->lz;
+        ox = a->rx; oy = a->ry; oz = a->rz;
+    } else {
+        sx = a->rx; sy = a->ry; sz = a->rz;
+        ox = a->lx; oy = a->ly; oz = a->lz;
+    }
+    *x = sx + (sx - ox) * extra / w;
+    *y = sy + (sy - oy) * extra / w;
+    *z = sz + (sz - oz) * extra / w;
+}
+
+/* One band beside the deck, from `inner` to `outer` u past the curb. */
+static void verge_band(const RoadSample *a, const RoadSample *b, int side,
+                       int inner, int outer, const uint8_t *rgb) {
+    int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
+    int cn[3], cf[3], za, zb, sort, bucket;
+    XY p0, p1, p2, p3;
+    if (outer <= inner)
+        return;
+    edge_out(a, side, inner, &x0, &y0, &z0);
+    edge_out(a, side, outer, &x1, &y1, &z1);
+    edge_out(b, side, inner, &x2, &y2, &z2);
+    edge_out(b, side, outer, &x3, &y3, &z3);
+    if (z0 < 8 || z1 < 8 || z2 < 8 || z3 < 8)
+        return;
+    za = (z0 + z1) / 2;
+    zb = (z2 + z3) / 2;
+    sort = zb > za ? zb : za;
+    if (sort < CLIP)
+        sort = CLIP;
+    if (sort >= VIEW_Z)
+        return;
+    cn[0] = rgb[0]; cn[1] = rgb[1]; cn[2] = rgb[2];
+    cf[0] = rgb[0]; cf[1] = rgb[1]; cf[2] = rgb[2];
+    haze_road(&cn[0], &cn[1], &cn[2], za);
+    haze_road(&cf[0], &cf[1], &cf[2], zb);
+    project(x0, y0, z0, &p0);
+    project(x1, y1, z1, &p1);
+    project(x2, y2, z2, &p2);
+    project(x3, y3, z3, &p3);
+    bucket = sort >= FAR ? view_bucket(sort) : (sort >> OT_SHIFT);
+    emit_piece(p0, p1, p2, p3, bucket, cn, cf, 0);
+}
+
+/* Floor, then the shoulder over its inner part. The deck is drawn after,
+ * so it covers the band where they overlap the asphalt. */
+static void verge(const RoadSample *a, const RoadSample *b) {
+    int side;
+    if (!style->ground && !style->shoulder)
+        return;
+    if (a->gap || b->s - a->s < SLIVER)
+        return;
+    for (side = -1; side <= 1; side += 2) {
+        if (style->ground)
+            verge_band(a, b, side, 0, style->ground, style->ground_c);
+        if (style->shoulder)
+            verge_band(a, b, side, 0, style->shoulder, style->shoulder_c);
+    }
+}
+
 /* The deck shaded from its near edge to its far edge, so the haze ramps
  * across the strip instead of stepping at each seam. */
 static void strip(const RoadSample *a, const RoadSample *b) {
@@ -626,6 +691,7 @@ static void far_strip(const RoadSample *a, const RoadSample *b) {
         return;
     if (off_screen(a, b))
         return;
+    verge(a, b);
     za = (a->lz + a->rz) / 2;
     zb = (b->lz + b->rz) / 2;
     sort = za > zb ? za : zb;
@@ -999,6 +1065,7 @@ static void route_draw(const RoadStyle *st, const LevelFrame *f) {
         int zb = (ring[i + 1].lz + ring[i + 1].rz) / 2;
         if (!seg->deck)
             continue;
+        verge(&ring[i], &ring[i + 1]);
         if (zb >= st->edge_end) {
             edge_lines(&ring[i], &ring[i + 1], zb);
             strip(&ring[i], &ring[i + 1]);

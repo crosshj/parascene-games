@@ -31,6 +31,8 @@ static const RoadStyle k_road = {
     1900,
     {244, 232, 204}, /* dividers */
     &k_obstacle,
+    0, {0, 0, 0},
+    0, {0, 0, 0},
 };
 
 static void zipper_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -55,4 +57,5 @@ const Level level_zipper = {
     zipper_clear,
     zipper_draw,
     &k_light,
+    0,
 };

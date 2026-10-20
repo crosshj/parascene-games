@@ -31,6 +31,8 @@ static const RoadStyle k_road = {
     1900,
     {255, 240, 248}, /* pearl dividers */
     &k_obstacle,
+    0, {0, 0, 0},
+    0, {0, 0, 0},
 };
 
 #ifdef RUNNER_PROFILE
@@ -59,4 +61,5 @@ const Level level_maxip = {
     maxip_clear,
     maxip_draw,
     &k_light,
+    0,
 };

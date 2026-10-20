@@ -79,6 +79,26 @@ The same sequence with a new volume changes loudness and does not seek.
 Today the files are `runner1.mp3` (index 0) and `runner2-lumenwild.mp3`
 (index 1).
 
+### 3 — save
+
+One argument: a generation, 1–255. `0` is unused, and a row that has not
+had a write this session omits the command.
+
+The argument is not the save. Story progress is a file on the PlayStation
+memory card in slot 1, `bu00:UUUVVV-RUNNER`. The record layout is
+`SAVE_VERSION` in `runner/src/save.h`. The browser keeps that card by
+storing the emulator's slot-1 image under the game id `runner`.
+
+When the generation changes, the page flushes that card into browser
+storage. The page also flushes it every few seconds, and again when the
+page is hidden. The next visit loads the card back into the emulator
+before the game boots, and the game reads the file.
+
+A different record version is still the same card image. The page does
+not learn the new fields. The game ignores an older version and will not
+overwrite a newer one. Renaming the game id would store a second card
+and leave the old one behind.
+
 ## When the game sends them
 
 This matches the CD build's music, with the page holding the audio files.
@@ -93,3 +113,5 @@ This matches the CD build's music, with the page holding the audio files.
   mp3 duration, then advances the shuffle and sends a new sequence. The
   next track is a different one from the track that just ended.
 - Menu sounds stay in the game. They are not commands.
+- Clearing a newly reached story stage writes the memory card. The row
+  then carries `save` with a new generation until the next write.

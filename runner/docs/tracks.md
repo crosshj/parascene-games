@@ -68,6 +68,7 @@ rides the bank without knowing about it.
 | Track | Status | Pieces | What it asks of the game |
 |---|---|---|---|
 | `straight.run` | runnable | `start`, `cycle` | Continues. The obstacle cycle repeats. |
+| `lumenwild.way` | runnable | `trail` through `home` | Continues. An S of bends, a hill, then a narrowing to one lane and back. Lumenwild runs it. |
 | `bend.flat` | runnable | `north`, `east-bend`, `south`, `west-bend` | Closes. One lap returns to its start. The FLAT OVAL world runs it. |
 | `hill.loop` | runnable | `start`, one big hill, `turn-back`, two smaller hills, `turn-home`, `home` | Closes. The HILL world runs it. Turns like the oval, with grades on both straights. Both sides lose the same ground to slope: four 4096 ramps out, eight 2048 ramps back, all at 22.5°, with 8192 of flat on each side. |
 | `bank.bend` | runnable | `start`, `turn-in`, `turn`, `turn-out`, `link`, `lean-left`, `carve-left`, `flip`, `carve-right`, `lean-right`, `settle`, `home-in`, `home-turn`, `home-out`, `home` | Closes. The BANK world runs it. Both turn-arounds bank right at 33.75°. On the way back, an S banks left at 22.5°, rolls through level into a 22.5° right bank in `flip`, and settles. The S moves the road outward, so the home turn-around is wider (12288) to meet the start. |
@@ -84,7 +85,7 @@ still missing.
 ## Order
 
 1. **Now.** The path API, `straight.run` as data, the viewer framing every
-   name. City and Lumenwild still run the straight road.
+   name. City still runs the straight road. Lumenwild runs `lumenwild.way`.
 2. **`bend.flat`.** The FLAT OVAL world runs this lap and draws only the
    road. `path_cam` follows yaw, so the camera takes the turns.
 3. **`hill.loop`.** Pitch and height on a closed lap. The HILL world runs
@@ -192,8 +193,8 @@ both ends, so the deck, dividers, and runner lanes follow a lane change
 and a seam exactly as baked. Obstacles are stored in half lanes, so a
 two-lane road can hold a crate at ±75.
 
-Obstacles and the runner go through this API. City and Lumenwild still
-draw their straight ground with `flat()`. FLAT OVAL, HILL, BANK, ZIPPER, and MAXI-P draw their
+Obstacles and the runner go through this API. City still
+draws its straight ground with `flat()`. Lumenwild, FLAT OVAL, HILL, BANK, ZIPPER, and MAXI-P draw their
 road with `road.c`: cross-sections from `path_cam`, with width, lane
 dividers, and deck read from each segment. A world gives `road_draw` a
 `RoadStyle` of materials and adds its own scenery, so a new runnable track

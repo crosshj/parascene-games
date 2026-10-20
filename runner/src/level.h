@@ -41,6 +41,8 @@ typedef struct {
     void (*draw)(const LevelFrame *f);
     /* The world's light, or 0 for light_neutral. */
     const Light *light;
+    /* 1 if Story Mode offers this world. Arcade Mode offers the others. */
+    int story;
 } Level;
 
 extern const Level *const levels[];

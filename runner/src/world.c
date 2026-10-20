@@ -132,6 +132,12 @@ void text(int x, int y, const char *s) {
 }
 
 void text_rgb(int x, int y, const char *s, int r, int g, int b) {
+#ifdef RUNNER_PREVIEW
+    (void)r;
+    (void)g;
+    (void)b;
+    text(x, y, s);
+#else
     RenderBuffer *buf = &ctx.buffers[ctx.active];
     SPRT_8 *sprt;
     DR_TPAGE *tpage;
@@ -169,6 +175,7 @@ void text_rgb(int x, int y, const char *s, int r, int g, int b) {
     setcode(tpage, 0xe1);
     addPrim(&buf->ot[0], tpage);
     ctx.next = (uint8_t *)tpage + sizeof(DR_TPAGE);
+#endif
 }
 
 int project(int x, int y, int z, XY *out) {

@@ -30,6 +30,8 @@ static const RoadStyle k_road = {
     1900,
     {214, 198, 140}, /* dividers */
     &k_obstacle,
+    0, {0, 0, 0},
+    0, {0, 0, 0},
 };
 
 static void oval_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -54,4 +56,5 @@ const Level level_oval = {
     oval_clear,
     oval_draw,
     &k_light,
+    0,
 };

@@ -33,6 +33,8 @@ static const RoadStyle k_road = {
     1900,
     {226, 236, 206}, /* dividers */
     &k_obstacle,
+    0, {0, 0, 0},
+    0, {0, 0, 0},
 };
 
 static void bank_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -57,4 +59,5 @@ const Level level_bank = {
     bank_clear,
     bank_draw,
     &k_light,
+    0,
 };

@@ -298,6 +298,25 @@
     try { pageVolume = Number(localStorage.getItem("parascene.volume") ?? "100") / 100; } catch { /* private mode */ }
     if (!Number.isFinite(pageVolume)) pageVolume = 1;
 
+    /* The game's save is the emulated card, not a byte in the command row.
+       Command 3 means a write finished; flush that card into browser storage. */
+    let cardGen = 0;
+    function flushCard() {
+      const gm = window.EJS_emulator && window.EJS_emulator.gameManager;
+      if (!gm || typeof gm.saveSaveFiles !== "function") return;
+      try { gm.saveSaveFiles(); } catch { /* core is going away */ }
+    }
+    function noteCard(cmds) {
+      for (const cmd of cmds) {
+        if (cmd.id !== 3 || cmd.args.length < 1) continue;
+        const gen = cmd.args[0];
+        if (!gen || gen === cardGen) continue;
+        cardGen = gen;
+        flushCard();
+      }
+    }
+    addEventListener("pagehide", flushCard);
+
     function unlockAudio() {
       for (const c of window.__audioCtxs) c.resume();
       if (window.__music && window.__music.wantPlay) window.__music.el.play().catch(() => {});
@@ -595,7 +614,9 @@
         set(v) {
           GM.value = v;
           const cfg = v.prototype.getRetroArchCfg;
-          v.prototype.getRetroArchCfg = function () { return cfg.call(this) + "audio_sync = false\n"; };
+          v.prototype.getRetroArchCfg = function () {
+            return cfg.call(this) + "audio_sync = false\nblock_sram_overwrite = true\n";
+          };
         },
       });
       /* Keyboard and the physical pad both go through simulateInput. */
@@ -605,7 +626,11 @@
       };
       window.EJS_player = "#game";
       window.EJS_core = "psx";
+      /* This id is the emulated memory card's name. The game writes
+         bu00:UUUVVV-RUNNER onto that card. A new record version stays
+         inside the same card; renaming the id would orphan it. */
       window.EJS_gameName = game.id;
+      window.EJS_fixedSaveInterval = 5000;
       window.EJS_gameUrl = new URL(game.bin, document.baseURI).href;
       window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
       /* The core waits for Play. In 4.2.3, auto language is skipped only when this is false. */
@@ -692,7 +717,10 @@
             bytes = await readShotRow(game);
           }
           const cmds = bytes && parseRow(bytes);
-          if (cmds) window.__music.command(cmds);
+          if (cmds) {
+            window.__music.command(cmds);
+            noteCard(cmds);
+          }
         } catch { /* frame not ready */ }
         busy = false;
       }, 200);

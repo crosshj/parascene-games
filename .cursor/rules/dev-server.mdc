@@ -1,0 +1,16 @@
+---
+description: Do not start the local web dev server
+alwaysApply: true
+---
+
+# Local dev server
+
+Do not start, restart, or stop the local site. The user runs it in their own terminal so the log stays visible.
+
+From `web/`:
+
+```
+npm start
+```
+
+That is `node server.js`, on port 8643. If a check needs the site and nothing is listening, say so and give that command. Do not launch it in the background.

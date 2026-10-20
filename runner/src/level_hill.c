@@ -30,6 +30,8 @@ static const RoadStyle k_road = {
     1900,
     {232, 214, 168}, /* dividers */
     &k_obstacle,
+    0, {0, 0, 0},
+    0, {0, 0, 0},
 };
 
 static void hill_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -55,4 +57,5 @@ const Level level_hill = {
     hill_clear,
     hill_draw,
     &k_light,
+    0,
 };

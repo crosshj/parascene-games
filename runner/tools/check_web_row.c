@@ -64,6 +64,7 @@ int main(void) {
     uint8_t row[WEB_ROW_BYTES];
     uint8_t silence[2] = { WEB_CMD_SILENCE, 0 };
     uint8_t music[5] = { WEB_CMD_MUSIC, 3, 3, 1, 40 };
+    uint8_t saved[8] = { WEB_CMD_MUSIC, 3, 3, 1, 40, WEB_CMD_SAVE, 1, 2 };
     uint8_t broken[WEB_ROW_BYTES];
 
     web_row_silence(row);
@@ -71,6 +72,12 @@ int main(void) {
         return 1;
     web_row_music(row, 3, 1, 40);
     if (check_row(row, music, 5))
+        return 1;
+    web_row_frame(row, 1, 3, 1, 40, 2);
+    if (check_row(row, saved, 8))
+        return 1;
+    web_row_frame(row, 0, 0, 0, 0, 0);
+    if (check_row(row, silence, 2))
         return 1;
     memcpy(broken, row, sizeof row);
     broken[6] ^= 0xFF;

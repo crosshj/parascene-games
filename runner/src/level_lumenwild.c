@@ -19,6 +19,8 @@
 #include <psxgpu.h>
 #include "world.h"
 #include "course.h"
+#include "path.h"
+#include "road.h"
 #include "level.h"
 #include "profile.h"
 #include "lumen_sky.h" /* LUMEN_SKY_W / LUMEN_SKY_H are texture size */
@@ -30,12 +32,6 @@
 /* Growths closer than this balloon and stick on screen; cut them before that. */
 #define CULL_Z 420
 #define SMALL_FAR_Z 6000
-#define LW_SHOULDER 700
-/* World-x extent of the planted forest floor under side growths. */
-#define FOREST_FLOOR 3600
-#define SHOULDER_END 2000
-/* Ground continues past FAR so far mushrooms still have a floor under them. */
-#define FLOOR_END 7000
 /* Keep this much clear beside the asphalt so canopies never cover the road. */
 #define ROAD_CLEAR (ROAD_HALF + 60)
 #define SPORES 20
@@ -68,11 +64,13 @@ enum { LOD_NEAR, LOD_MID, LOD_FAR };
 typedef struct {
     int kind;
     int hero;
-    int x, z;    /* foot of the growth, camera space */
+    int x, z;    /* foot of the growth, camera space, once planted */
+    int u;       /* lateral offset from the centerline */
+    int foot;    /* camera y of the planted foot */
     int h, w, r; /* height, stalk half-width, canopy radius */
     int sway;    /* how far the stalk twists off its foot */
     int phase;
-    int wz;      /* world z, so pulses travel along the forest */
+    int wz;      /* distance along the road, so pulses travel the forest */
     const Scheme *sc;
     uint32_t seed;
 } Growth;
@@ -107,15 +105,11 @@ static const RGB k_spore[8] = {
     {170, 255, 210}, {255, 150, 50}
 };
 
-static const RGB k_moss[6] = {
-    {20, 74, 92}, {32, 40, 110}, {68, 26, 116}, {14, 98, 100}, {48, 56, 134}, {86, 28, 98}
-};
-
 static const ObstacleStyle k_obstacle = {
     {120, 26, 40}, {176, 44, 52}, {220, 70, 40}, {255, 210, 130}, {255, 118, 34}
 };
 
-static int lw_scroll, lw_speed, lw_time, lw_glows;
+static int lw_scroll, lw_speed, lw_time, lw_glows, lw_foot;
 /* Set while drawing things the player must judge, which never deform. */
 static int lw_rigid;
 
@@ -247,6 +241,7 @@ static void screen_quad(const XY *p, int bucket, Col c, int blend) {
 static int pv(int x, int y, int z, XY *out) {
     V3 v = {x, y, z};
     warp(&v);
+    v.y += lw_foot;
     if (v.z < 8)
         return 0;
     project(v.x, v.y, v.z, out);
@@ -369,7 +364,7 @@ static void make_growth(Growth *g, uint32_t s, int zbase, int side, int hero) {
     if (hero)
         roll = 90;
     g->z = zbase + rnd(&s, 0, CELL - 1);
-    g->wz = g->z + lw_scroll;
+    g->wz = g->z;
     g->phase = rnd(&s, 0, 63);
     g->sc = &k_schemes[k_scheme_pick[rnd(&s, 0, 15)]];
     g->w = g->r = g->sway = 0;
@@ -409,7 +404,18 @@ static void make_growth(Growth *g, uint32_t s, int zbase, int side, int hero) {
         ax = clear + rnd(&s, 80, 1400);
     }
     g->x = side * ax;
+    g->u = g->x;
     g->seed = mix(s);
+}
+
+/* The foot follows the road. The stalk then stands in camera space, so a
+ * tree stays upright while its base takes the bend and the grade. */
+static void plant(Growth *g) {
+    int cx, cy, cz;
+    path_cam(g->wz, g->u, 0, &cx, &cy, &cz);
+    g->x = cx;
+    g->z = cz;
+    g->foot = cy;
 }
 
 /* A twisting stalk of stacked bands. Each ring is one projected center,
@@ -633,13 +639,15 @@ static void draw_growth(const Growth *g) {
         return;
     if (iabs(g->x) - reach > (SCREEN_W / 2 + 60) * g->z / (SCREEN_W / 2))
         return;
-    /* Canopy must stay off the asphalt. */
-    if (iabs(g->x) - g->r - g->sway < ROAD_CLEAR && g->z < NEAR_Z + 800)
+    /* Canopy must stay off the asphalt. u is the path lateral, so a bend
+     * does not pull an off-road growth back onto the deck. */
+    if (iabs(g->u) - g->r - g->sway < ROAD_CLEAR && g->z < NEAR_Z + 800)
         return;
     /* Near the horizon the small growths are a pixel or two; the skyline
      * and the tall stalks carry the distance. */
     if (g->z > SMALL_FAR_Z && (g->kind == G_CRYSTAL || g->kind == G_MOUND))
         return;
+    lw_foot = g->foot;
     switch (g->kind) {
     case G_CRYSTAL: PROF(PF_CRYSTAL, crystal(g, lv)); break;
     case G_MOUND: PROF(PF_MOUND, mound(g, lv)); break;
@@ -650,35 +658,46 @@ static void draw_growth(const Growth *g) {
             PROF(PF_STALK_NEAR + lv, stalk_growth(g, lv));
         break;
     }
+    lw_foot = 0;
 }
 
 /* Light trails across the forest floor, longer the faster the run. */
-static void ground_streak(uint32_t s, int zbase) {
-    int z = zbase + rnd(&s, 0, CELL - 1);
+static void ground_streak(uint32_t s, int sbase) {
+    int along = sbase + rnd(&s, 0, CELL - 1);
     int side = rnd(&s, 0, 1) ? 1 : -1;
-    int x = side * (ROAD_HALF + rnd(&s, 30, 560));
+    int u = side * (ROAD_HALF + rnd(&s, 30, 560));
     int w = rnd(&s, 5, 14);
     int len = 50 + lw_speed * 16 + rnd(&s, 0, 120);
+    int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
+    XY q[4];
     const Scheme *sc = &k_schemes[rnd(&s, 0, 4)];
-    if (z > 2600 || z < CULL_Z || z + len < CULL_Z)
+    Col c;
+    path_cam(along + len, u - w, 1, &x0, &y0, &z0);
+    path_cam(along + len, u + w, 1, &x1, &y1, &z1);
+    path_cam(along, u - w, 1, &x2, &y2, &z2);
+    path_cam(along, u + w, 1, &x3, &y3, &z3);
+    if (z2 > 2600 || z2 < CULL_Z || z0 < CULL_Z)
         return;
-    {
-        V3 q[4] = {{x - w, 1, z + len}, {x + w, 1, z + len}, {x - w, 1, z}, {x + w, 1, z}};
-        lw_quad(q, depth_bucket(z) - 1, light(sc->rim, 170, z), BLEND_NONE);
-    }
+    if (!project(x0, y0, z0, &q[0]) || !project(x1, y1, z1, &q[1]) ||
+        !project(x2, y2, z2, &q[2]) || !project(x3, y3, z3, &q[3]))
+        return;
+    c = light(sc->rim, 170, z2);
+    screen_quad(q, depth_bucket(z2) - 1, c, BLEND_NONE);
 }
 
 static void cell(int c) {
     uint32_t s = mix((uint32_t)c * 0x9E3779B1u + 0x2545F491u);
-    int zbase = c * CELL - lw_scroll;
+    int base = c * CELL;
     int side = (s & 4) ? 1 : -1;
     int hero = (s >> 20) % HERO_EVERY == 0;
     Growth g;
-    make_growth(&g, mix(s + 0x632BE5ABu), zbase, side, hero);
+    make_growth(&g, mix(s + 0x632BE5ABu), base, side, hero);
+    plant(&g);
     draw_growth(&g);
-    make_growth(&g, mix(s + 2 * 0x632BE5ABu), zbase, -side, 0);
+    make_growth(&g, mix(s + 2 * 0x632BE5ABu), base, -side, 0);
+    plant(&g);
     draw_growth(&g);
-    PROF(PF_GSTREAK, ground_streak(mix(s ^ 0xBEEFBEEFu), zbase));
+    PROF(PF_GSTREAK, ground_streak(mix(s ^ 0xBEEFBEEFu), base));
 }
 
 static void forest(void) {
@@ -817,7 +836,7 @@ static void sky_draw(int hy) {
 #endif
 
 static void sky(void) {
-    int hy = HORIZON_Y + 6;
+    int hy = path_horizon() + 6;
     if (!sky_ready)
         sky_upload();
     /* CLUT work is cheap but not free; do it every 4 frames. */
@@ -858,9 +877,8 @@ static void sky_add(const XY *p, Col c, int layer_i) {
     sky_count++;
 }
 
-static void build_skyline(void) {
+static void build_skyline(int base) {
     uint32_t s = 0x51ED270Bu;
-    int base = HORIZON_Y + 6;
     int layer_i;
     for (layer_i = 0; layer_i < 2; layer_i++) {
         RGB tone = layer_i ? (RGB){20, 10, 46} : (RGB){52, 22, 92};
@@ -887,163 +905,19 @@ static void build_skyline(void) {
     }
 }
 
+static int sky_base = -1;
+
 static void skyline(void) {
     int buf = world_buffer();
+    int hy = path_horizon() + 6;
     int i;
-    if (!sky_count)
-        build_skyline();
+    if (!sky_count || sky_base != hy) {
+        sky_count = 0;
+        sky_base = hy;
+        build_skyline(hy);
+    }
     for (i = 0; i < sky_count; i++)
         world_link(SKYLINE_BUCKET - sky_layer[i], &sky_prims[buf][i]);
-}
-
-/* The course */
-
-static void path_shade(int *r, int *g, int *b, int z) {
-    Col c = {*r, *g, *b};
-    tint(&c, k_fog, clamp((z - 200) * 200 / (FAR - 200), 0, 200));
-    *r = c.r;
-    *g = c.g;
-    *b = c.b;
-}
-
-/* Across the path at one depth: forest floor, moss, edge light, the road,
- * then the same on the other side. The outer floor sits under mid-range
- * mushrooms so they read as planted. */
-#define PATH_COLS 11
-#define EDGE_W 14
-/* Nearer than this the ground is below the bottom of the screen. */
-#define PATH_NEAR (CAM_H * (SCREEN_W / 2) / (SCREEN_H - HORIZON_Y) - 12)
-static const int16_t k_path_x[PATH_COLS] = {
-    -FOREST_FLOOR, -ROAD_HALF - LW_SHOULDER, -ROAD_HALF - EDGE_W, -ROAD_HALF, -ROAD_HALF / 2, 0,
-    ROAD_HALF / 2, ROAD_HALF, ROAD_HALF + EDGE_W, ROAD_HALF + LW_SHOULDER, FOREST_FLOOR
-};
-
-/* Columns lo..hi of one row, held inside the GPU's safe range. */
-static void path_row(int z, XY *row, int lo, int hi) {
-    int xlo, xhi, i;
-    x_limits(z, &xlo, &xhi);
-    for (i = lo; i <= hi; i++)
-        project(clamp(k_path_x[i], xlo, xhi), 0, z, &row[i]);
-}
-
-static void path_piece(const XY *a, const XY *b, int i, int bucket, Col c) {
-    if (a[i].x == a[i + 1].x && b[i].x == b[i + 1].x)
-        return;
-    emit(&b[i], &b[i + 1], &a[i], &a[i + 1], bucket, c, BLEND_NONE);
-}
-
-/* A cut across a piece at fractions t0..t1 of its width, as a stripe from
- * row a to the point s of the way to row b. At one depth screen x follows
- * world x in a straight line, so this costs no projection. */
-static void path_stripe(const XY *a, const XY *b, int i, int t0, int t1, int s, int bucket, Col c) {
-    XY n0 = lerp_xy(a[i], a[i + 1], t0), n1 = lerp_xy(a[i], a[i + 1], t1);
-    XY f0 = lerp_xy(n0, lerp_xy(b[i], b[i + 1], t0), s);
-    XY f1 = lerp_xy(n1, lerp_xy(b[i], b[i + 1], t1), s);
-    emit(&f0, &f1, &n0, &n1, bucket, c, BLEND_NONE);
-}
-
-static Col path_col(int r, int g, int b, int z) {
-    Col c = {r, g, b};
-    path_shade(&c.r, &c.g, &c.b, z);
-    return c;
-}
-
-/* Columns: 0 floor, 1 moss, 2 edge, 3..6 road, 7 edge, 8 moss, 9 floor.
- * The outer floor is drawn at every depth so far mushrooms stay planted;
- * moss is only near the camera. Markings go in before the road they sit on. */
-static void path(void) {
-    const int d0 = (ROAD_HALF / 2 - LANE / 2 - 8) * 256 / (ROAD_HALF / 2);
-    const int d1 = (ROAD_HALF / 2 - LANE / 2 + 8) * 256 / (ROAD_HALF / 2);
-    XY rows[2][PATH_COLS];
-    XY *a = rows[0], *b = rows[1], *t;
-    int z = PATH_NEAR;
-    path_row(z, a, 0, PATH_COLS - 1);
-    while (z < FAR) {
-        int z1 = z + z / 3;
-        int moss = z < SHOULDER_END, edged = z < 2400;
-        int band = (lw_scroll + z) / STEP;
-        int alt = band & 1;
-        int bucket, i;
-        uint32_t s;
-        Col floor_c;
-        if (z1 < z + 24)
-            z1 = z + 24;
-        if (z1 > FAR)
-            z1 = FAR;
-        bucket = z1 >> OT_SHIFT;
-        /* Always project the outer floor columns — far growths need them. */
-        path_row(z1, b, 0, PATH_COLS - 1);
-        if (((lw_scroll + z) / 128 & 1) == 0) {
-            Col c = path_col(90, 240, 255, z);
-            path_stripe(a, b, 4, d0, d1, 128, bucket, c);
-            path_stripe(a, b, 5, 256 - d1, 256 - d0, 128, bucket, c);
-        }
-        if (edged) {
-            int e = 150 + sn(band * 6 - lw_time * 2) * 100 / 127;
-            Col c = path_col((240 * e) >> 8, (60 * e) >> 8, (210 * e) >> 8, z);
-            path_piece(a, b, 2, bucket, c);
-            path_piece(a, b, 7, bucket, c);
-        }
-        s = mix((uint32_t)band * 0x85EBCA6Bu);
-        floor_c = path_col(16 + alt * 4, 10 + alt * 2, 36 + alt * 6, z);
-        path_piece(a, b, 0, bucket, floor_c);
-        path_piece(a, b, 9, bucket, floor_c);
-        if (moss) {
-            RGB m0 = k_moss[rnd(&s, 0, 5)], m1 = k_moss[rnd(&s, 0, 5)];
-            path_piece(a, b, 1, bucket, path_col(m0.r, m0.g, m0.b, z));
-            path_piece(a, b, 8, bucket, path_col(m1.r, m1.g, m1.b, z));
-        } else {
-            /* Beyond the moss band, keep the shoulder filled with floor. */
-            path_piece(a, b, 1, bucket, floor_c);
-            path_piece(a, b, 8, bucket, floor_c);
-        }
-        {
-            Col c = path_col(30 + alt * 8, 18 + alt * 4, 66 + alt * 12, z);
-            for (i = 3; i < 7; i++)
-                path_piece(a, b, i, bucket, c);
-        }
-        t = a; a = b; b = t;
-        z = z1;
-    }
-    /* Coarse forest floor only, past the course FAR, under background growths. */
-    while (z < FLOOR_END) {
-        int z1 = z + z / 2;
-        int band = (lw_scroll + z) / STEP;
-        int alt = band & 1;
-        int bucket;
-        Col floor_c;
-        if (z1 < z + 48)
-            z1 = z + 48;
-        if (z1 > FLOOR_END)
-            z1 = FLOOR_END;
-        bucket = depth_bucket(z1);
-        path_row(z1, b, 0, PATH_COLS - 1);
-        floor_c = path_col(14 + alt * 3, 8 + alt * 2, 32 + alt * 5, z);
-        path_piece(a, b, 0, bucket, floor_c);
-        path_piece(a, b, 1, bucket, floor_c);
-        path_piece(a, b, 8, bucket, floor_c);
-        path_piece(a, b, 9, bucket, floor_c);
-        t = a; a = b; b = t;
-        z = z1;
-    }
-}
-
-static void obstacles(void) {
-    int band0 = (lw_scroll + CLIP) / STEP;
-    int band1 = (lw_scroll + FAR) / STEP;
-    int band;
-    lw_rigid = 1;
-    for (band = band0; band <= band1; band++) {
-        int s, oz;
-        if (band < 0 || !has_obstacle(band))
-            continue;
-        s = band * STEP + STEP / 2;
-        oz = s - lw_scroll;
-        if (oz < CLIP || oz >= FAR)
-            continue;
-        obstacle_box(s, obstacle_u(band), &k_obstacle);
-    }
-    lw_rigid = 0;
 }
 
 /* Motion */
@@ -1114,19 +988,43 @@ static void speed_streaks(void) {
         if (a >= 10)
             a += 13; /* keeps clear of the runner below the vanishing point */
         p.x = (int16_t)(SCREEN_W / 2 + cs(a) * r0 / 127);
-        p.y = (int16_t)(HORIZON_Y + sn(a) * r0 / 127);
+        p.y = (int16_t)(path_horizon() + sn(a) * r0 / 127);
         q.x = (int16_t)(SCREEN_W / 2 + cs(a) * (r0 + len) / 127);
-        q.y = (int16_t)(HORIZON_Y + sn(a) * (r0 + len) / 127);
+        q.y = (int16_t)(path_horizon() + sn(a) * (r0 + len) / 127);
         streak(p, q, 2 + (ph >> 4), STREAK_BUCKET,
                col(k_spore[(s >> 8) & 7], k * lw_speed / 32));
     }
 }
 
+static const Light k_light = {
+    {10, 6, 28},     /* sky */
+    {34, 20, 80},    /* haze */
+    {148, 128, 168}, /* tint */
+    {70, 48, 96},    /* shadow */
+    96,              /* density */
+};
+
+static const RoadStyle k_road = {
+    &k_light,
+    {20, 10, 46},    /* far ridge */
+    {52, 22, 92},    /* near ridge */
+    {28, 16, 58},    /* asphalt */
+    {14, 8, 32},     /* distant asphalt */
+    {240, 60, 210},  /* curb */
+    2400,
+    {90, 240, 255},  /* dividers */
+    &k_obstacle,
+    900,             /* moss shoulder */
+    {24, 70, 88},
+    2400,            /* forest floor */
+    {12, 6, 28},
+};
+
 static void lumen_clear(const LevelFrame *f, int *r, int *g, int *b) {
     (void)f;
-    *r = k_floor.r;
-    *g = k_floor.g;
-    *b = k_floor.b;
+    *r = k_light.sky[0];
+    *g = k_light.sky[1];
+    *b = k_light.sky[2];
 }
 
 static void lumen_draw(const LevelFrame *f) {
@@ -1134,20 +1032,20 @@ static void lumen_draw(const LevelFrame *f) {
     lw_speed = f->speed;
     lw_time = f->time;
     lw_glows = 0;
+    PROF(PF_SKY, sky());
+    PROF(PF_AURORA, aurora());
+    PROF(PF_SKYLINE, skyline());
     PROF(PF_FOREST, forest());
-    PROF(PF_OBSTACLES, obstacles());
-    PROF(PF_PATH, path());
+    road_draw(&k_road, f);
     PROF(PF_SPORES, spores());
     PROF(PF_STREAKS, speed_streaks());
-    PROF(PF_SKYLINE, skyline());
-    PROF(PF_AURORA, aurora());
-    PROF(PF_SKY, sky());
 }
 
 const Level level_lumenwild = {
     "LUMENWILD",
-    "straight.run",
+    "lumenwild.way",
     lumen_clear,
     lumen_draw,
-    &light_neutral,
+    &k_light,
+    1,
 };

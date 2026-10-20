@@ -25,21 +25,34 @@ static void finish(uint8_t row[WEB_ROW_BYTES], const uint8_t *payload, int len) 
     row[6] = (uint8_t)sum;
 }
 
+void web_row_frame(uint8_t row[WEB_ROW_BYTES], int playing,
+                   int sequence, int track, int volume, int save_gen) {
+    uint8_t payload[8];
+    int len = 0;
+    if (playing) {
+        payload[len++] = WEB_CMD_MUSIC;
+        payload[len++] = 3;
+        payload[len++] = (uint8_t)clamp_int(sequence, 1, 255);
+        payload[len++] = (uint8_t)clamp_int(track, 0, 255);
+        payload[len++] = (uint8_t)clamp_int(volume, 0, 128);
+    } else {
+        payload[len++] = WEB_CMD_SILENCE;
+        payload[len++] = 0;
+    }
+    if (save_gen > 0) {
+        payload[len++] = WEB_CMD_SAVE;
+        payload[len++] = 1;
+        payload[len++] = (uint8_t)clamp_int(save_gen, 1, 255);
+    }
+    finish(row, payload, len);
+}
+
 void web_row_silence(uint8_t row[WEB_ROW_BYTES]) {
-    uint8_t payload[2];
-    payload[0] = WEB_CMD_SILENCE;
-    payload[1] = 0;
-    finish(row, payload, 2);
+    web_row_frame(row, 0, 0, 0, 0, 0);
 }
 
 void web_row_music(uint8_t row[WEB_ROW_BYTES], int sequence, int track, int volume) {
-    uint8_t payload[5];
-    payload[0] = WEB_CMD_MUSIC;
-    payload[1] = 3;
-    payload[2] = (uint8_t)clamp_int(sequence, 1, 255);
-    payload[3] = (uint8_t)clamp_int(track, 0, 255);
-    payload[4] = (uint8_t)clamp_int(volume, 0, 128);
-    finish(row, payload, 5);
+    web_row_frame(row, 1, sequence, track, volume, 0);
 }
 
 void web_row_pixels(const uint8_t row[WEB_ROW_BYTES], uint16_t px[320]) {

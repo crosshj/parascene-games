@@ -22,6 +22,12 @@ typedef struct {
     int edge_end;          /* curbs stop at this depth; 0 for none */
     uint8_t dash[3];       /* lane dividers */
     const ObstacleStyle *obstacle;
+    /* Ground outside each curb, in the same u as the deck. 0 draws none.
+     * shoulder is the near band; ground is the wider floor under it. */
+    int shoulder;
+    uint8_t shoulder_c[3];
+    int ground;
+    uint8_t ground_c[3];
 } RoadStyle;
 
 /* Ridge silhouette by absolute heading, at path_horizon(). */

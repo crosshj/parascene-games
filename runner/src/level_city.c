@@ -145,4 +145,5 @@ const Level level_city = {
     city_clear,
     city_draw,
     &light_neutral,
+    0,
 };
