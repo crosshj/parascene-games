@@ -23,6 +23,11 @@ typedef struct {
 
 static RenderContext ctx;
 static const uint16_t *stamp_px;
+static int frame_mark;
+
+void world_mark(void) {
+    frame_mark = VSync(-1);
+}
 
 void world_stamp_row(const uint16_t *px) {
     stamp_px = px;
@@ -69,6 +74,11 @@ void world_flip(void) {
         LoadImage(&rect, (const uint32_t *)stamp_px);
         DrawSync(0);
     }
+    /* A picture that finished inside its first scan waits out the second,
+     * so a light frame stays at 30. A picture that already used that scan
+     * presents on the next blank and does not wait for a third. */
+    if (VSync(-1) - frame_mark < 1)
+        VSync(0);
     VSync(0);
     PutDispEnv(&disp->disp);
     DrawOTagEnv(&draw->ot[OT_LENGTH - 1], &draw->draw);

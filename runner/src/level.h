@@ -9,6 +9,7 @@ typedef struct {
     int scroll; /* distance run; camera z plus scroll is world z */
     int speed;  /* scroll gained this frame, 0 while stopped */
     int time;   /* animation clock; holds still while the game is frozen */
+    int x;      /* runner's lateral offset from the centerline */
 } LevelFrame;
 
 /* The light a world casts, in one place. Everything the world draws and the

@@ -45,6 +45,9 @@ static inline int clamp(int v, int lo, int hi) {
 }
 
 void world_init(void);
+/* Remember the scan this picture started on. world_flip holds the picture
+ * for two scans when the work finishes inside the first one. */
+void world_mark(void);
 void world_flip(void);
 void world_set_clear(int r, int g, int b);
 /* After the buffer about to be shown has been cleared and drawn, copy 320

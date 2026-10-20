@@ -1325,13 +1325,22 @@ int main(int argc, const char **argv) {
 #endif
 
     for (;;) {
+        int step;
         int sr = 0, sg = 0, sb = 0;
         LevelFrame frame;
-        PROF(PF_UPDATE, update());
-        cd_service();
+        /* Two steps of the 60 Hz clock, then one picture. Both steps and
+         * the draw run before any wait, so the picture gets both scans.
+         * Waiting for a scan first would push a picture that needed two
+         * scans onto a third. */
+        world_mark();
+        for (step = 0; step < 2; step++) {
+            PROF(PF_UPDATE, update());
+            cd_service();
+        }
         frame.scroll = scroll;
         frame.speed = scroll > last_scroll ? scroll - last_scroll : 0;
         frame.time = anim_tick;
+        frame.x = player_x;
         last_scroll = scroll;
         if (state == ST_BOOT) {
             draw_boot();

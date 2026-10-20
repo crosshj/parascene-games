@@ -7,7 +7,7 @@
 #ifndef PROF_FRAMES
 #define PROF_FRAMES 900
 #endif
-#define CYCLES_PER_FRAME 564480 /* 33.8688 MHz at 60 Hz */
+#define CYCLES_PER_FRAME (564480 * 2) /* 33.8688 MHz across two NTSC blanks */
 #define CYCLES_PER_LINE 2152
 
 uint32_t prof_ticks[PF_COUNT];
@@ -90,7 +90,7 @@ int prof_frame(const char *level, size_t bytes) {
     level_last = level_worst = level_worst_frame = 0;
     for (i = 0; i < PF_COUNT; i++)
         ticks_last[i] = 0;
-    printf("PROF %s: %d frames, average per frame, %% of a 60 Hz frame\n", level, frames);
+    printf("PROF %s: %d frames, average per frame, %% of a 30 Hz frame\n", level, frames);
     for (i = PF_CRYSTAL; i <= PF_GSTREAK; i++)
         kinds += prof_ticks[i];
     for (i = 0; i < PF_COUNT; i++) {

@@ -524,9 +524,10 @@
       return bytes;
     }
 
-    /* Auto frameskip drops a paint only while the audio buffer is low, and
-     * never two in a row. If that signal is idle and the picture is still
-     * late, fall back to skipping every other paint. */
+    /* The game shows a new picture every other scan, about 33 ms. Auto
+     * frameskip drops a paint only while the audio buffer is low, and never
+     * two in a row. If that signal is idle and the picture is later than a
+     * 30 Hz frame, fall back to skipping every other paint. */
     function watchPace() {
       const probe = document.createElement("canvas");
       probe.width = 8;
@@ -573,7 +574,7 @@
         }
         deltas.sort((a, b) => a - b);
         const mid = deltas[deltas.length >> 1];
-        if (mid <= 22) return;
+        if (mid <= 42) return;
         gm.setVariable("pcsx_rearmed_frameskip_type", "fixed_interval");
         gm.setVariable("pcsx_rearmed_frameskip_interval", "1");
       }

@@ -34,9 +34,7 @@
 #define SMALL_FAR_Z 6000
 /* Keep this much clear beside the asphalt so canopies never cover the road. */
 #define ROAD_CLEAR (ROAD_HALF + 60)
-#define SPORES 20
-#define SPORE_RANGE 2600
-#define STREAKS 12
+#define STREAKS 64
 #define MAX_GLOWS 20
 
 /* One cell in HERO_EVERY carries a full-detail giant. */
@@ -323,27 +321,6 @@ static void under(int x, int y, int z, int rx, int rz, int bucket, Col c) {
     q[2] = (V3){x - rx, y, z};
     q[3] = (V3){x, y, z - rz};
     lw_quad(q, bucket, c, BLEND_NONE);
-}
-
-/* A screen-space streak from a thin far end to a wider near end. */
-static void streak(XY a, XY b, int w, int bucket, Col c) {
-    XY p[4];
-    int dx = b.x - a.x, dy = b.y - a.y;
-    if (iabs(dx) + iabs(dy) < 2) {
-        p[0].x = b.x; p[0].y = (int16_t)(b.y - w);
-        p[1].x = (int16_t)(b.x + w); p[1].y = b.y;
-        p[2].x = (int16_t)(b.x - w); p[2].y = b.y;
-        p[3].x = b.x; p[3].y = (int16_t)(b.y + w);
-    } else {
-        int ox = 0, oy = 0;
-        if (iabs(dx) > iabs(dy)) oy = w;
-        else ox = w;
-        p[0].x = (int16_t)(a.x - ox / 2); p[0].y = (int16_t)(a.y - oy / 2);
-        p[1].x = (int16_t)(a.x + ox / 2); p[1].y = (int16_t)(a.y + oy / 2);
-        p[2].x = (int16_t)(b.x - ox); p[2].y = (int16_t)(b.y - oy);
-        p[3].x = (int16_t)(b.x + ox); p[3].y = (int16_t)(b.y + oy);
-    }
-    screen_quad(p, bucket, c, BLEND_ADD);
 }
 
 /* Growths */
@@ -714,8 +691,18 @@ static void forest(void) {
     }
 }
 
-/* Backdrop: one soft sky texture, uploaded once. Animation is low priority:
- * a slow UV crawl, and a CLUT pulse only every few frames. */
+/* Backdrop: one soft sky texture, uploaded once. A turn slides it across
+ * the screen and the picture repeats. The CLUT pulse stays low priority. */
+
+/* 1024 heading units (~90°) fill one screen, the same span as the ridges
+ * on the other worlds. A full turn is four copies and lands back at home. */
+static int sky_scroll(void) {
+    int s = path_yaw() * SCREEN_W / 1024;
+    s %= SCREEN_W;
+    if (s < 0)
+        s += SCREEN_W;
+    return s;
+}
 
 #ifndef RUNNER_PREVIEW
 static uint16_t sky_tpage;
@@ -812,8 +799,8 @@ static void sky_draw(int hy) {
     }
 }
 #else
-/* Sky stays still, 1:1 horizontally: left 256px from page 0, right 64px from
- * page 1. No horizontal stretch, so a one-texel spire is one screen pixel. */
+/* 1:1 texels, so a one-texel spire stays one screen pixel. The bitmap is
+ * one screen wide and split across two pages at x = 256. */
 static void sky_panel(int x0, int x1, int hy, int u0, int u1, uint16_t tpage) {
     POLY_FT4 *p = alloc_prim(SKY_BUCKET, sizeof(POLY_FT4));
     int v0 = LUMEN_SKY_V0, v1 = LUMEN_SKY_V0 + LUMEN_SKY_H - 1;
@@ -829,9 +816,25 @@ static void sky_panel(int x0, int x1, int hy, int u0, int u1, uint16_t tpage) {
     p->clut = sky_clutid;
 }
 
+/* tex0..tex1 is a run inside the bitmap, not across its wrap. */
+static void sky_span(int x, int tex0, int tex1, int hy) {
+    while (tex0 < tex1) {
+        int page = tex0 >= LUMEN_SKY_PAGE_W;
+        int page_end = page ? LUMEN_SKY_W : LUMEN_SKY_PAGE_W;
+        int n = tex1 < page_end ? tex1 : page_end;
+        int u0 = tex0 - (page ? LUMEN_SKY_PAGE_W : 0);
+        sky_panel(x, x + (n - tex0), hy, u0, u0 + (n - tex0) - 1,
+                  page ? sky_tpage2 : sky_tpage);
+        x += n - tex0;
+        tex0 = n;
+    }
+}
+
 static void sky_draw(int hy) {
-    sky_panel(0, LUMEN_SKY_PAGE_W, hy, 0, LUMEN_SKY_PAGE_W - 1, sky_tpage);
-    sky_panel(LUMEN_SKY_PAGE_W, SCREEN_W, hy, 0, SCREEN_W - LUMEN_SKY_PAGE_W - 1, sky_tpage2);
+    int shift = sky_scroll();
+    sky_span(0, shift, LUMEN_SKY_W, hy);
+    if (shift)
+        sky_span(LUMEN_SKY_W - shift, 0, shift, hy);
 }
 #endif
 
@@ -854,13 +857,18 @@ static void aurora(void) {
 }
 
 /* Forest shapes too far to approach: two rows of canopies and spires on the
- * horizon. They hold still, like distant hills, so their primitives are
- * built once and only relinked each frame. */
-#define SKYLINE_MAX 96
+ * horizon. Built once, then a second copy one screen to the right. A turn
+ * slides both with the draw offset — the same scroll as the sky — and the
+ * copy fills the gap. Rewriting every vertex each frame thrashed the cache
+ * on a bend, which is when the forest is already heaviest. */
+#define SKYLINE_MAX 128
 
 static POLY_F4 sky_prims[2][SKYLINE_MAX];
+static DR_OFFSET sky_ofs[2];
+static DR_OFFSET sky_restore[2];
 static uint8_t sky_layer[SKYLINE_MAX];
 static int sky_count;
+static int sky_period;
 
 static void set_f4(POLY_F4 *p, const XY *q, Col c) {
     setPolyF4(p);
@@ -869,7 +877,7 @@ static void set_f4(POLY_F4 *p, const XY *q, Col c) {
 }
 
 static void sky_add(const XY *p, Col c, int layer_i) {
-    if (sky_count == SKYLINE_MAX)
+    if (sky_count >= SKYLINE_MAX)
         return;
     set_f4(&sky_prims[0][sky_count], p, c);
     set_f4(&sky_prims[1][sky_count], p, c);
@@ -879,11 +887,13 @@ static void sky_add(const XY *p, Col c, int layer_i) {
 
 static void build_skyline(int base) {
     uint32_t s = 0x51ED270Bu;
-    int layer_i;
+    int layer_i, i;
     for (layer_i = 0; layer_i < 2; layer_i++) {
         RGB tone = layer_i ? (RGB){20, 10, 46} : (RGB){52, 22, 92};
-        int x = -30 + layer_i * 13;
-        while (x < SCREEN_W + 30) {
+        /* One screen of shapes. The scroll repeats it, so the margins
+         * that used to hide the frame edges are the wrap itself. */
+        int x = layer_i * 13;
+        while (x < SCREEN_W) {
             int w = rnd(&s, 8, 22) * (layer_i + 2) / 2;
             int th = rnd(&s, 6, 24) * (layer_i + 2) / 2;
             int stem = 1 + rnd(&s, 0, 2) + layer_i;
@@ -903,6 +913,21 @@ static void build_skyline(int base) {
             x += w * rnd(&s, 80, 170) / 100;
         }
     }
+    /* One screen over, so a slide up to a screen width still has trees. */
+    sky_period = sky_count;
+    for (i = 0; i < sky_period && sky_count < SKYLINE_MAX; i++) {
+        int b;
+        sky_layer[sky_count] = sky_layer[i];
+        for (b = 0; b < 2; b++) {
+            POLY_F4 *d = &sky_prims[b][sky_count];
+            *d = sky_prims[b][i];
+            d->x0 = (int16_t)(d->x0 + SCREEN_W);
+            d->x1 = (int16_t)(d->x1 + SCREEN_W);
+            d->x2 = (int16_t)(d->x2 + SCREEN_W);
+            d->x3 = (int16_t)(d->x3 + SCREEN_W);
+        }
+        sky_count++;
+    }
 }
 
 static int sky_base = -1;
@@ -910,89 +935,97 @@ static int sky_base = -1;
 static void skyline(void) {
     int buf = world_buffer();
     int hy = path_horizon() + 6;
-    int i;
+    int shift = sky_scroll();
+    int ybase = buf * SCREEN_H;
+    int i, n;
     if (!sky_count || sky_base != hy) {
         sky_count = 0;
         sky_base = hy;
         build_skyline(hy);
     }
-    for (i = 0; i < sky_count; i++)
+    /* Straight ahead links the original row only. A turn also links the
+     * copy and lets the GPU slide the row; the vertices stay put. */
+    n = shift ? sky_count : sky_period;
+    if (shift) {
+        setDrawOffset(&sky_restore[buf], 0, ybase);
+        world_link(SKYLINE_BUCKET - 1, &sky_restore[buf]);
+    }
+    for (i = 0; i < n; i++)
         world_link(SKYLINE_BUCKET - sky_layer[i], &sky_prims[buf][i]);
+    if (shift) {
+        setDrawOffset(&sky_ofs[buf], -shift, ybase);
+        world_link(SKYLINE_BUCKET, &sky_ofs[buf]);
+    }
 }
 
 /* Motion */
 
-typedef struct { int16_t x, y, z; uint8_t color; } Spore;
-
-static Spore spore_table[SPORES];
-static int spores_ready;
-
-static void make_spores(void) {
-    int i;
-    for (i = 0; i < SPORES; i++) {
-        uint32_t s = mix((uint32_t)i * 0x27D4EB2Fu + 0x165667B1u);
-        int side = (s & 1) ? 1 : -1;
-        spore_table[i].x = (int16_t)(side * (220 + (int)((s >> 1) % 1200)));
-        spore_table[i].y = (int16_t)(50 + (int)((s >> 12) % 640));
-        spore_table[i].z = (int16_t)((s >> 4) % SPORE_RANGE);
-        spore_table[i].color = (uint8_t)((s >> 20) & 7);
-    }
-}
-
-/* Each spore is projected once; its tail lies on the line back to the
- * vanishing point, scaled by how much farther away the tail is. */
 static void spores(void) {
-    int wrap = lw_scroll % SPORE_RANGE;
-    int i;
-    if (!spores_ready) {
-        make_spores();
-        spores_ready = 1;
-    }
-    for (i = 0; i < SPORES; i++) {
-        const Spore *sp = &spore_table[i];
-        V3 v;
-        XY head, tail;
-        int z = sp->z - wrap, d;
-        if (z < 0)
-            z += SPORE_RANGE;
-        z += 40;
-        v.x = sp->x + sn(lw_time + i * 13) * 24 / 127;
-        v.y = sp->y + sn(lw_time * 2 + i * 7) * 30 / 127;
-        v.z = z;
-        warp(&v);
-        project(v.x, v.y, v.z, &head);
-        if (!xy_ok(&head))
-            continue;
-        d = 16 + lw_speed * 10;
-        tail.x = (int16_t)(SCREEN_W / 2 + (head.x - SCREEN_W / 2) * v.z / (v.z + d));
-        tail.y = (int16_t)(HORIZON_Y + (head.y - HORIZON_Y) * v.z / (v.z + d));
-        streak(tail, head, clamp(560 / z, 1, 4), depth_bucket(z),
-               glow(k_spore[sp->color], 256 - z / 12, z));
-    }
 }
 
-/* Thin streaks racing out of the vanishing point along the screen edges. */
+/* Additive, so the road shows through. One pixel, no quad. */
+static void glow_line(XY a, XY b, int bucket, Col c) {
+    LINE_F2 *line;
+    DR_TPAGE *mode;
+    if (!xy_ok(&a) || !xy_ok(&b) || !edge_ok(a, b))
+        return;
+    if (world_bytes_used() + sizeof(LINE_F2) + sizeof(DR_TPAGE) > BUFFER_LENGTH)
+        return;
+    line = alloc_prim(bucket, sizeof(LINE_F2));
+    if (!line)
+        return;
+    setLineF2(line);
+    setSemiTrans(line, 1);
+    setRGB0(line, clamp(c.r, 0, 255), clamp(c.g, 0, 255), clamp(c.b, 0, 255));
+    setXY2(line, a.x, a.y, b.x, b.y);
+    mode = alloc_prim(bucket, sizeof(DR_TPAGE));
+    if (mode)
+        setDrawTPage(mode, 0, 1, getTPage(0, BLEND_ADD, 0, 0));
+}
+
+/* A tube around the road. Its center sits above the deck so the road cuts
+ * the circle near the bottom. Lines are generators of that tube: one angle
+ * around the circle, stepped along the road, so each one lies on the wall
+ * and points the way the road points there. The crown is held to the top of
+ * the screen: at the near end of a line, world height cannot pass the value
+ * that projects to y = 0. */
+#define TUBE_R 460
+#define TUBE_LIFT 340
+
 static void speed_streaks(void) {
+    int picture = lw_time >> 1;
     int i;
     if (lw_speed <= 0)
         return;
     for (i = 0; i < STREAKS; i++) {
-        int t = lw_time * 5 + i * 23;
-        int ph = t & 63;
-        uint32_t s = mix((uint32_t)(t >> 6) * 0x9E3779B1u + (uint32_t)i * 0x85EBCA77u);
-        int a = (int)(s % 26) - 4;
-        int r0 = 130 + ph * 6;
-        int len = 12 + lw_speed * 4 + ph;
-        int k = ph < 8 ? ph * 32 : 255 - ph * 2;
-        XY p, q;
-        if (a >= 10)
-            a += 13; /* keeps clear of the runner below the vanishing point */
-        p.x = (int16_t)(SCREEN_W / 2 + cs(a) * r0 / 127);
-        p.y = (int16_t)(path_horizon() + sn(a) * r0 / 127);
-        q.x = (int16_t)(SCREEN_W / 2 + cs(a) * (r0 + len) / 127);
-        q.y = (int16_t)(path_horizon() + sn(a) * (r0 + len) / 127);
-        streak(p, q, 2 + (ph >> 4), STREAK_BUCKET,
-               col(k_spore[(s >> 8) & 7], k * lw_speed / 32));
+        /* Half the slots, a different half every picture. */
+        int a = -6 + i * 44 / (STREAKS - 1);
+        int flick = (picture * 3 + i * 7) & 7;
+        int ph = (picture * 5 + i * 11) & 63;
+        int ahead = 300 + (i * 17 + ph * 9) % 380;
+        int step = 70 + (i & 3) * 24;
+        int cax = cs(a), sax = sn(a);
+        int u = TUBE_R * cax / 127;
+        int h = TUBE_LIFT + TUBE_R * sax / 127;
+        int cap = CAM_H + HORIZON_Y * ahead / (SCREEN_W / 2);
+        int k = 180 + ((i * 19 + picture) & 63);
+        XY far, near;
+        int zf, zn;
+        if (flick > 3)
+            continue;
+        if (h > cap)
+            h = cap;
+        if (h < 48)
+            continue;
+        zf = path_project(lw_scroll + ahead + step, u, h, &far);
+        zn = path_project(lw_scroll + ahead, u, h, &near);
+        if (zf < 48 || zn < 48)
+            continue;
+        if (far.y < 0)
+            far.y = 0;
+        if (near.y < 0)
+            near.y = 0;
+        glow_line(far, near, STREAK_BUCKET, col(k_spore[i & 7], k * lw_speed / 32));
     }
 }
 

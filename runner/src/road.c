@@ -343,7 +343,9 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
         return;
     za = (z0 + z1) / 2;
     zb = (z2 + z3) / 2;
-    sort = zb > za ? zb : za;
+    /* The outer corner on a bend swings toward the camera. Sorting by it
+     * puts the floor in a nearer slice than the curb, and the floor wins. */
+    sort = (b->lz + b->rz) / 2;
     if (sort < CLIP)
         sort = CLIP;
     if (sort >= VIEW_Z)
@@ -360,8 +362,9 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
     emit_piece(p0, p1, p2, p3, bucket, cn, cf, 0);
 }
 
-/* Floor, then the shoulder over its inner part. The deck is drawn after,
- * so it covers the band where they overlap the asphalt. */
+/* Shoulder over the floor. Link this after the deck and curb: the first
+ * primitive in a bucket is the one that shows, so the floor has to be last
+ * or it paints over the curb. */
 static void verge(const RoadSample *a, const RoadSample *b) {
     int side;
     if (!style->ground && !style->shoulder)
@@ -369,10 +372,10 @@ static void verge(const RoadSample *a, const RoadSample *b) {
     if (a->gap || b->s - a->s < SLIVER)
         return;
     for (side = -1; side <= 1; side += 2) {
-        if (style->ground)
-            verge_band(a, b, side, 0, style->ground, style->ground_c);
         if (style->shoulder)
             verge_band(a, b, side, 0, style->shoulder, style->shoulder_c);
+        if (style->ground)
+            verge_band(a, b, side, 0, style->ground, style->ground_c);
     }
 }
 
@@ -691,13 +694,13 @@ static void far_strip(const RoadSample *a, const RoadSample *b) {
         return;
     if (off_screen(a, b))
         return;
-    verge(a, b);
     za = (a->lz + a->rz) / 2;
     zb = (b->lz + b->rz) / 2;
     sort = za > zb ? za : zb;
     if (sort < FAR) {
         edge_lines(a, b, zb);
         strip(a, b);
+        verge(a, b);
         return;
     }
     if (za >= VIEW_Z && zb >= VIEW_Z)
@@ -708,6 +711,7 @@ static void far_strip(const RoadSample *a, const RoadSample *b) {
     poly_g4(&a->l, &a->r, &b->l, &b->r, view_bucket(sort),
             c0[0], c0[1], c0[2], c0[0], c0[1], c0[2],
             c1[0], c1[1], c1[2], c1[0], c1[1], c1[2], BLEND_NONE);
+    verge(a, b);
 }
 
 static int on_screen(const RoadSample *p, int cz) {
@@ -943,6 +947,7 @@ static void branch_draw(int s0, int s1) {
         if (zb < style->edge_end && za < FAR) {
             strip(&ring[i], &ring[i + 1]);
             strip_edges(&ring[i], &ring[i + 1]);
+            verge(&ring[i], &ring[i + 1]);
         } else {
             far_strip(&ring[i], &ring[i + 1]);
         }
@@ -1065,7 +1070,6 @@ static void route_draw(const RoadStyle *st, const LevelFrame *f) {
         int zb = (ring[i + 1].lz + ring[i + 1].rz) / 2;
         if (!seg->deck)
             continue;
-        verge(&ring[i], &ring[i + 1]);
         if (zb >= st->edge_end) {
             edge_lines(&ring[i], &ring[i + 1], zb);
             strip(&ring[i], &ring[i + 1]);
@@ -1073,6 +1077,7 @@ static void route_draw(const RoadStyle *st, const LevelFrame *f) {
             strip(&ring[i], &ring[i + 1]);
             strip_edges(&ring[i], &ring[i + 1]);
         }
+        verge(&ring[i], &ring[i + 1]);
     }
 
 #ifdef RUNNER_PROFILE
