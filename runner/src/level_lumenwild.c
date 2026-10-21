@@ -47,8 +47,6 @@
 #define SKY_BUCKET (OT_LENGTH - 1)
 #define SKYLINE_BUCKET (OT_LENGTH - 2)
 #define FAR_BUCKET (OT_LENGTH - 8)
-#define STREAK_BUCKET ((CHAR_Z >> OT_SHIFT) + 2)
-
 typedef struct { int x, y, z; } V3;
 typedef struct { uint8_t r, g, b; } RGB;
 typedef struct { int r, g, b; } Col;
@@ -107,7 +105,7 @@ static const ObstacleStyle k_obstacle = {
     {120, 26, 40}, {176, 44, 52}, {220, 70, 40}, {255, 210, 130}, {255, 118, 34}
 };
 
-static int lw_scroll, lw_speed, lw_time, lw_glows, lw_foot;
+static int lw_scroll, lw_speed, lw_time, lw_x, lw_glows, lw_foot;
 /* Set while drawing things the player must judge, which never deform. */
 static int lw_rigid;
 
@@ -963,7 +961,7 @@ static void skyline(void) {
 static void spores(void) {
 }
 
-/* Additive, so the road shows through. One pixel, no quad. */
+/* Averaged with the scene, so the grey stays see-through. One pixel. */
 static void glow_line(XY a, XY b, int bucket, Col c) {
     LINE_F2 *line;
     DR_TPAGE *mode;
@@ -980,17 +978,53 @@ static void glow_line(XY a, XY b, int bucket, Col c) {
     setXY2(line, a.x, a.y, b.x, b.y);
     mode = alloc_prim(bucket, sizeof(DR_TPAGE));
     if (mode)
-        setDrawTPage(mode, 0, 1, getTPage(0, BLEND_ADD, 0, 0));
+        setDrawTPage(mode, 0, 1, getTPage(0, BLEND_AVG, 0, 0));
 }
 
-/* A tube around the road. Its center sits above the deck so the road cuts
- * the circle near the bottom. Lines are generators of that tube: one angle
- * around the circle, stepped along the road, so each one lies on the wall
- * and points the way the road points there. The crown is held to the top of
- * the screen: at the near end of a line, world height cannot pass the value
- * that projects to y = 0. */
+/* A tube standing on the road, centered on the runner. The bottom of the
+ * circle is the deck, so the low lines sit on the road beside the character.
+ * Lines are generators: one angle all the way around, stepped along the road.
+ * The crown is the centerline height that lands on the top of the screen,
+ * measured with the camera as it is this frame, so a downhill shortens the
+ * tube. Width stays put; only the height follows the crown. */
 #define TUBE_R 460
-#define TUBE_LIFT 340
+/* Height of the crown above the deck on level ground, the height that
+ * meets the top of the screen at the runner. Kept fixed so a rising road
+ * does not flatten the tube into the sliver of screen above it. Lines
+ * that leave the top of the screen are dropped. */
+#define TUBE_CROWN (CAM_H + HORIZON_Y * CHAR_Z / (SCREEN_W / 2))
+
+/* The two projected ends already give the line's direction. Carry the
+ * lower end to just past the bottom of the screen without more samples. */
+static void extend_bottom(XY *far, XY *near) {
+    int dy, dx, reach, nx, ny, span;
+    if (near->y < 0 || near->y >= SCREEN_H || far->y >= near->y)
+        return;
+    dy = near->y - far->y;
+    if (dy < 1)
+        return;
+    dx = near->x - far->x;
+    if (dx > 2000)
+        dx = 2000;
+    if (dx < -2000)
+        dx = -2000;
+    reach = SCREEN_H + 12 - near->y;
+    nx = near->x + dx * reach / dy;
+    ny = SCREEN_H + 12;
+    span = iabs(nx - far->x);
+    if (iabs(ny - far->y) > span)
+        span = iabs(ny - far->y);
+    if (span > 480) {
+        nx = far->x + (nx - far->x) * 480 / span;
+        ny = far->y + (ny - far->y) * 480 / span;
+    }
+    if (nx < -1000)
+        nx = -1000;
+    if (nx > 1000)
+        nx = 1000;
+    near->x = nx;
+    near->y = ny;
+}
 
 static void speed_streaks(void) {
     int picture = lw_time >> 1;
@@ -998,34 +1032,42 @@ static void speed_streaks(void) {
     if (lw_speed <= 0)
         return;
     for (i = 0; i < STREAKS; i++) {
-        /* Half the slots, a different half every picture. */
-        int a = -6 + i * 44 / (STREAKS - 1);
-        int flick = (picture * 3 + i * 7) & 7;
-        int ph = (picture * 5 + i * 11) & 63;
-        int ahead = 300 + (i * 17 + ph * 9) % 380;
-        int step = 70 + (i & 3) * 24;
+        /* Each slot has its own angle, speed, and phase, and the angle
+         * jumps when the slot respawns. A shared step around the circle
+         * reads as a spiral. travel still shrinks ahead, so a live line
+         * runs toward the camera. On for one fifth of its cycle. */
+        uint32_t slot = mix((uint32_t)i * 0x9E3779B9u);
+        int span = 480;
+        int cycle = span * 5;
+        int speed = 128 + (int)((slot >> 8) & 63);
+        uint32_t clock = (uint32_t)picture * (uint32_t)speed + (slot >> 16);
+        int travel = (int)(clock % (uint32_t)cycle);
+        int a = (int)(mix(slot ^ (clock / (uint32_t)cycle)) & 63);
+        int ahead = CHAR_Z + span - travel % span;
+        int step = 48 + (int)((slot >> 24) & 63);
         int cax = cs(a), sax = sn(a);
-        int u = TUBE_R * cax / 127;
-        int h = TUBE_LIFT + TUBE_R * sax / 127;
-        int cap = CAM_H + HORIZON_Y * ahead / (SCREEN_W / 2);
-        int k = 180 + ((i * 19 + picture) & 63);
+        int u = lw_x + TUBE_R * cax / 127;
+        int h = TUBE_CROWN * (sax + 127) / 254;
+        Col grey = {112, 112, 112};
+        int bucket;
         XY far, near;
         int zf, zn;
-        if (flick > 3)
-            continue;
-        if (h > cap)
-            h = cap;
-        if (h < 48)
+        if (travel >= span)
             continue;
         zf = path_project(lw_scroll + ahead + step, u, h, &far);
         zn = path_project(lw_scroll + ahead, u, h, &near);
         if (zf < 48 || zn < 48)
             continue;
-        if (far.y < 0)
-            far.y = 0;
-        if (near.y < 0)
-            near.y = 0;
-        glow_line(far, near, STREAK_BUCKET, col(k_spore[i & 7], k * lw_speed / 32));
+        if (far.y < 0 || near.y < 0)
+            continue;
+        extend_bottom(&far, &near);
+        /* The offscreen tip is close to the camera. Sort by the line's real
+         * distance instead, and never nearer than the road under the runner,
+         * so the runner and the obstacles (drawn later, or closer) cover it. */
+        bucket = ahead >> OT_SHIFT;
+        if (bucket < (CHAR_Z >> OT_SHIFT))
+            bucket = CHAR_Z >> OT_SHIFT;
+        glow_line(far, near, bucket, grey);
     }
 }
 
@@ -1064,6 +1106,7 @@ static void lumen_draw(const LevelFrame *f) {
     lw_scroll = f->scroll;
     lw_speed = f->speed;
     lw_time = f->time;
+    lw_x = f->x;
     lw_glows = 0;
     PROF(PF_SKY, sky());
     PROF(PF_AURORA, aurora());
