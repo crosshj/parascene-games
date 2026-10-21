@@ -36,8 +36,8 @@ enum {
     ST_PAUSE,
     ST_HIT,
     ST_OVER,
-    ST_CLEAR,
-    ST_SOON
+    ST_AWAY,
+    ST_TALLY
 };
 
 enum { MODE_STORY, MODE_ARCADE };
@@ -73,21 +73,53 @@ static int story_run;
 static int story_reach = 1;
 static int save_applied;
 static int stage_index;
+static int jumps, hits;
+/* How far the runner has run ahead of the camera after a finish. */
+static int runner_ahead;
+/* Camera scroll where the finish shot holds. */
+static int stick_at;
 
-/* lumenwild.way, in order: the S of bends, the hill, the pinch.
- * trail+bend-right+glide+bend-left = 20480
- * climb+ease+drop+settle = 16384 more, 36864
- * to-one+one+to-three+home = 20480 more, 57344 */
+/* Each stage is one road, about 45 seconds, and the road ends.
+ * The trail opens on a bend, narrows, and its finish drops and turns.
+ * The rise opens the other way, stays narrow through the hill, then drops.
+ * The pinch opens on a dip, closes to one lane, and drops into the finish. */
 enum { STAGE_COUNT = 3 };
+/* A short clear run into the gantry, and nothing past it. */
+#define FINISH_CLEAR 4096
+#define STAGE_FINISH 108544
+/* Camera coasts this far past the gantry, then the runner pulls away. */
+#define STICK_PAST 700
+/* Runner lead at which the tally covers the held shot. */
+#define ZOOM_AHEAD 2600
+#define PTS_JUMP 100
+#define PTS_HIT 100
+/* Ten more jumps than hits. A basic bar, not a tuned one. */
+#define CLEAR_SCORE 1000
 static const struct {
     const char *name;
+    const char *track;
     int start;
     int finish;
 } k_stages[STAGE_COUNT] = {
-    {"THE TRAIL", 0, 20480},
-    {"THE RISE", 20480, 36864},
-    {"THE PINCH", 36864, 57344},
+    {"THE TRAIL", "lumenwild.trail", 0, STAGE_FINISH},
+    {"THE RISE", "lumenwild.rise", 0, STAGE_FINISH},
+    {"THE PINCH", "lumenwild.pinch", 0, STAGE_FINISH},
 };
+static const uint8_t k_goal_post[3] = {210, 220, 240};
+static const uint8_t k_goal_beam[3] = {255, 214, 64};
+
+static int stage_end(int index) {
+    return k_stages[index].finish;
+}
+
+static int stage_score(void) {
+    return jumps * PTS_JUMP - hits * PTS_HIT;
+}
+
+/* Road position of the runner. Ahead of the camera once a stage is over. */
+static int runner_s(void) {
+    return scroll + CHAR_Z + runner_ahead;
+}
 static int anim_tick;
 static int jump_wind;
 static int land_hold;
@@ -218,7 +250,7 @@ static void draw_shadow(void) {
         w = 14;
     if (depth < 12)
         depth = 12;
-    z0 = CHAR_Z - depth / 2;
+    z0 = CHAR_Z + runner_ahead - depth / 2;
     z1 = z0 + depth;
     path_project(scroll + z1, player_x - w, 2, &far_l);
     path_project(scroll + z1, player_x + w, 2, &far_r);
@@ -232,10 +264,16 @@ static void draw_shadow(void) {
     tone = 128 - player_y;
     if (tone < 40)
         tone = 40;
-    /* One slot in front of the road under the feet, so the near half is not covered. */
-    bucket = (CHAR_Z >> OT_SHIFT) - 1;
+    /* One slot in front of the road under the feet, so the near half is not covered.
+     * Once the runner has left the camera, sort with where they are. */
+    if (runner_ahead > 0)
+        bucket = (CHAR_Z + runner_ahead) >> OT_SHIFT;
+    else
+        bucket = (CHAR_Z >> OT_SHIFT) - 1;
     if (bucket < 1)
         bucket = 1;
+    if (bucket >= OT_LENGTH)
+        bucket = OT_LENGTH - 1;
     spr = alloc_prim(bucket, sizeof(POLY_FT4));
     if (!spr)
         return;
@@ -309,17 +347,23 @@ static void draw_runner(void) {
     XY feet;
     int sz, h, w, frame, bucket, ax, ay, bx, by, ux, uy;
     POLY_FT4 *spr;
-    sz = path_stand(scroll + CHAR_Z, player_x, player_y, &feet, &ax, &ay);
+    sz = path_stand(runner_s(), player_x, player_y, &feet, &ax, &ay);
     if (sz < 8)
         return;
     h = (78 * (SCREEN_W / 2)) / sz;
-    if (h < 8)
-        h = 8;
+    /* A held chase keeps the figure readable. The finish lets it shrink away. */
+    if (h < (runner_ahead > 0 ? 2 : 8))
+        h = runner_ahead > 0 ? 2 : 8;
     w = h * spr_base_fw[spr_char_base[character]] / spr_base_fh[spr_char_base[character]];
     frame = posed_frame();
-    bucket = (CHAR_Z >> OT_SHIFT) - 1;
+    if (runner_ahead > 0)
+        bucket = sz >> OT_SHIFT;
+    else
+        bucket = (CHAR_Z >> OT_SHIFT) - 1;
     if (bucket < 1)
         bucket = 1;
+    if (bucket >= OT_LENGTH)
+        bucket = OT_LENGTH - 1;
     /* Tinted texels would dither; the runner stays crisp. In a bucket the
      * last allocated draws first: off, the runner, then on again. */
     dither_mode(bucket, 1);
@@ -514,20 +558,27 @@ static void draw_stages(void) {
     hud_center(160, "X SELECT   O BACK");
 }
 
-static const char *const k_clear_items[] = { "NEXT STAGE", "STAGE LIST" };
-
-static void draw_story_end(void) {
-    if (state == ST_SOON) {
-        panel(3, 36, 70, 248, 100);
-        hud_center(86, "COMING SOON");
-        hud_center(106, "LUMENWILD COMPLETE");
-        hud_center(140, "X  STAGE LIST");
-        return;
+static void draw_tally(void) {
+    char line[48];
+    int score = stage_score();
+    int cleared = score >= CLEAR_SCORE;
+    panel(3, 24, 36, 272, 148);
+    hud_center(48, k_stages[stage_index].name);
+    snprintf(line, sizeof line, "JUMPS %d   +%d", jumps, jumps * PTS_JUMP);
+    hud_center(72, line);
+    snprintf(line, sizeof line, "HITS  %d   -%d", hits, hits * PTS_HIT);
+    hud_center(88, line);
+    snprintf(line, sizeof line, "SCORE %d", score);
+    hud_center(112, line);
+    if (cleared && stage_index + 1 >= STAGE_COUNT)
+        hud_center(136, "LUMENWILD COMPLETE");
+    else if (cleared)
+        hud_center(136, "CLEARED");
+    else {
+        snprintf(line, sizeof line, "NEED %d", CLEAR_SCORE);
+        hud_center(136, line);
     }
-    panel(3, 36, 64, 248, 112);
-    hud_center(78, "STAGE CLEAR");
-    hud_center(98, k_stages[stage_index].name);
-    draw_menu(122, k_clear_items, 2);
+    hud_center(160, "X  STAGE LIST");
 }
 
 static const char *const k_pause_items[] = { "CONTINUE", "QUIT TO TITLE" };
@@ -554,14 +605,14 @@ static void draw_ui(void) {
             setRGB0(bar, 8, 12, 24);
         }
         if (story_run) {
-            const int span = k_stages[stage_index].finish - k_stages[stage_index].start;
+            int span = k_stages[stage_index].finish - k_stages[stage_index].start;
             int run = scroll + CHAR_Z - k_stages[stage_index].start;
             int pct = span > 0 ? run * 100 / span : 0;
             if (pct < 0)
                 pct = 0;
             if (pct > 100)
                 pct = 100;
-            snprintf(line, sizeof line, "%s %d%%   START PAUSE", k_stages[stage_index].name, pct);
+            snprintf(line, sizeof line, "%s %d%%  SCORE %d", k_stages[stage_index].name, pct, stage_score());
         } else {
             snprintf(line, sizeof line, "RUN %d     START PAUSE", distance);
         }
@@ -577,6 +628,51 @@ static void draw_ui(void) {
         snprintf(line, sizeof line, "DISTANCE %d   BEST %d", shown, best);
         hud_center(88, line);
         draw_menu(116, k_over_items, 3);
+    }
+}
+
+/* The step the runner is about to take. One mark per box: a jump if they
+ * clear it, a hit if they meet it. A box in another lane is neither. */
+static void judge_boxes(int step) {
+    int pz0 = runner_s();
+    int pz1 = pz0 + step;
+    int b0, b1, b;
+    if (step <= 0)
+        return;
+    b0 = pz0 / STEP;
+    b1 = pz1 / STEP;
+    if (b0 < 0)
+        b0 = 0;
+    for (b = b0; b <= b1; b++) {
+        int oz, x;
+        if (!has_obstacle(b) || course_box_kind(b))
+            continue;
+        oz = b * STEP + STEP / 2;
+        if (oz <= pz0 || oz > pz1)
+            continue;
+        x = obstacle_u(b);
+        if (iabs(player_x - x) >= 80)
+            continue;
+        if (player_y >= OBST_H - 4) {
+            course_box_set(b, BOX_JUMP);
+            jumps++;
+        } else {
+            course_box_set(b, BOX_HIT);
+            hits++;
+        }
+    }
+}
+
+static void open_tally(void) {
+    state = ST_TALLY;
+    tick = 0;
+    if (stage_score() >= CLEAR_SCORE && stage_index + 1 >= story_reach) {
+        int was = story_reach;
+        story_reach = stage_index + 2;
+        if (story_reach > STAGE_COUNT)
+            story_reach = STAGE_COUNT;
+        if (story_reach != was)
+            save_store(story_reach);
     }
 }
 
@@ -626,6 +722,11 @@ static void to_title(void) {
 
 static void start_run(void) {
     story_run = 0;
+    jumps = 0;
+    hits = 0;
+    runner_ahead = 0;
+    course_boxes_reset(0);
+    course_quiet(0, 0);
     go(ST_RUN);
     if (!path_open(levels[level_index]->track))
         path_open("straight.run");
@@ -645,6 +746,13 @@ static void start_stage(int index) {
     stage_index = index;
     start_run();
     story_run = 1;
+    jumps = 0;
+    hits = 0;
+    runner_ahead = 0;
+    course_boxes_reset(k_stages[index].start / STEP);
+    course_quiet(stage_end(index) - FINISH_CLEAR, 0x7fffffff);
+    if (!path_open(k_stages[index].track))
+        path_open("straight.run");
     scroll = k_stages[index].start;
     lane_u = 0;
     player_x = 0;
@@ -770,17 +878,7 @@ static int update_screens(void) {
         }
         anim_tick++;
         return 0;
-    case ST_CLEAR:
-        menu_move(2);
-        if (confirm()) {
-            play_sound(SND_SELECT);
-            if (pick == 0)
-                start_stage(stage_index + 1);
-            else
-                open_stages();
-        }
-        return 0;
-    case ST_SOON:
+    case ST_TALLY:
         if (confirm() || back()) {
             play_sound(confirm() ? SND_SELECT : SND_BACK);
             open_stages();
@@ -840,7 +938,7 @@ static void step_lane(int dir) {
 /* Keep the runner on its lane as the road under it moves: across a
  * centerline jump at a fork or join, and as lanes slide, open, or merge. */
 static void follow_road(void) {
-    int s = scroll + CHAR_Z;
+    int s = runner_s();
     int u[PATH_LANES];
     int jump = path_follow(s, lane_u);
     player_x -= jump;
@@ -874,32 +972,43 @@ static void update(void) {
         prev = held;
         return;
     }
-    if (state == ST_RUN) {
-        speed = 20;
-        if (edge(PAD_START)) {
-            play_sound(SND_PAUSE);
-            music_volume(MUSIC_PAUSED);
-            state = ST_PAUSE;
-            pick = 0;
-            prev = held;
-            return;
-        }
-        if (edge(PAD_LEFT) && !edge(PAD_RIGHT))
-            step_lane(-1);
-        if (edge(PAD_RIGHT) && !edge(PAD_LEFT))
-            step_lane(1);
-        if (jump_pressed() && player_y == 0 && jump_wind == 0) {
-            jump_wind = 8;
-            land_hold = 0;
-        } else if (jump_wind > 0) {
-            jump_wind--;
-            if (jump_wind == 0)
-                player_vy = 15;
-        }
-        distance = scroll / 48;
+    if (state == ST_RUN || state == ST_AWAY) {
+        int stuck = state == ST_AWAY && scroll >= stick_at;
+        speed = stuck ? 0 : 20;
+        if (state == ST_RUN) {
+            if (edge(PAD_START)) {
+                play_sound(SND_PAUSE);
+                music_volume(MUSIC_PAUSED);
+                state = ST_PAUSE;
+                pick = 0;
+                prev = held;
+                return;
+            }
+            if (edge(PAD_LEFT) && !edge(PAD_RIGHT))
+                step_lane(-1);
+            if (edge(PAD_RIGHT) && !edge(PAD_LEFT))
+                step_lane(1);
+            if (jump_pressed() && player_y == 0 && jump_wind == 0) {
+                jump_wind = 8;
+                land_hold = 0;
+            } else if (jump_wind > 0) {
+                jump_wind--;
+                if (jump_wind == 0)
+                    player_vy = 15;
+            }
+            distance = scroll / 48;
 #ifndef RUNNER_PROFILE
-        collide();
+            if (story_run)
+                judge_boxes(speed);
+            else
+                collide();
 #endif
+        }
+        if (stuck) {
+            runner_ahead += 20;
+            if (runner_ahead > ZOOM_AHEAD)
+                runner_ahead = ZOOM_AHEAD;
+        }
     } else if (state == ST_HIT) {
         if (hit_timer > 0)
             hit_timer--;
@@ -914,7 +1023,7 @@ static void update(void) {
     if (dx > 12) player_x += 12;
     else if (dx < -12) player_x -= 12;
     else player_x = target;
-    if (state == ST_RUN && player_y == 0 && land_hold > 0)
+    if ((state == ST_RUN || state == ST_AWAY) && player_y == 0 && land_hold > 0)
         land_hold--;
     {
         int was_up = player_y > 0;
@@ -922,7 +1031,7 @@ static void update(void) {
         if (player_vy > -20)
             player_vy--;
         if (player_y <= 0) {
-            if (was_up && state == ST_RUN)
+            if (was_up && (state == ST_RUN || state == ST_AWAY))
                 land_hold = 8;
             player_y = 0;
             player_vy = 0;
@@ -930,19 +1039,14 @@ static void update(void) {
     }
     anim_tick++;
     scroll += speed;
-    if (speed)
+    if (speed || runner_ahead)
         follow_road();
-    if (story_run && state == ST_RUN && scroll + CHAR_Z >= k_stages[stage_index].finish) {
-        if (stage_index + 1 >= story_reach) {
-            int was = story_reach;
-            story_reach = stage_index + 2;
-            if (story_reach > STAGE_COUNT)
-                story_reach = STAGE_COUNT;
-            if (story_reach != was)
-                save_store(story_reach);
-        }
-        go(stage_index + 1 < STAGE_COUNT ? ST_CLEAR : ST_SOON);
+    if (story_run && state == ST_RUN && scroll + CHAR_Z >= stage_end(stage_index)) {
+        state = ST_AWAY;
+        stick_at = stage_end(stage_index) + STICK_PAST;
     }
+    if (state == ST_AWAY && runner_ahead >= ZOOM_AHEAD)
+        open_tally();
     prev = held;
 }
 
@@ -1341,6 +1445,13 @@ int main(int argc, const char **argv) {
         frame.speed = scroll > last_scroll ? scroll - last_scroll : 0;
         frame.time = anim_tick;
         frame.x = player_x;
+        /* The stage list shows the stage under the cursor. A run keeps the
+         * stage that is playing, including its tally. */
+        frame.stage = 0;
+        if (mode == MODE_STORY && state == ST_STAGE)
+            frame.stage = pick;
+        else if (mode == MODE_STORY && story_run)
+            frame.stage = stage_index;
         last_scroll = scroll;
         if (state == ST_BOOT) {
             draw_boot();
@@ -1348,17 +1459,29 @@ int main(int argc, const char **argv) {
             draw_title();
         } else {
             const Level *lv = levels[level_index];
-            if (!path_open(lv->track))
+            const char *track = lv->track;
+            if (mode == MODE_STORY && state == ST_STAGE)
+                track = k_stages[pick].track;
+            else if (story_run)
+                track = k_stages[stage_index].track;
+            if (!path_open(track))
                 path_open("straight.run");
             path_begin(frame.scroll);
             lv->clear_color(&frame, &sr, &sg, &sb);
             PROF_LONG(PF_LEVEL, lv->draw(&frame));
+            if (story_run && (state == ST_RUN || state == ST_PAUSE ||
+                              state == ST_AWAY || state == ST_TALLY)) {
+                int goal = stage_end(stage_index);
+                /* The bar is a few panels. Skip it until the finish is near. */
+                if (goal > frame.scroll && goal < frame.scroll + 8000)
+                    road_gantry(goal, k_goal_post, k_goal_beam);
+            }
             if (state == ST_SELECT) {
                 draw_select();
             } else if (state == ST_STAGE) {
                 draw_stages();
-            } else if (state == ST_CLEAR || state == ST_SOON) {
-                PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_story_end()));
+            } else if (state == ST_TALLY) {
+                PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_tally()));
             } else {
                 PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_ui()));
             }

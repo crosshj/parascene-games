@@ -227,6 +227,9 @@ function show(index) {
   const strategy = track.span.repeat || (track.span.closes ? "closes" : track.span.repeats ? "continues" : "");
   if (strategy === "closes") {
     root.add(marker(start, "start · closes", scale));
+  } else if (strategy === "ends") {
+    root.add(marker(start, "start", scale));
+    root.add(marker(end, "ends", scale));
   } else if (strategy) {
     root.add(marker(start, "start", scale));
     root.add(marker(end, strategy === "turns" ? "turns" : "repeats", scale));

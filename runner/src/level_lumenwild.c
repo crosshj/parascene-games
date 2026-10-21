@@ -12,7 +12,11 @@
  * sweeps overhead.
  *
  * Every growth comes from a hash of its cell along z, so the forest is the
- * same on every run and nothing is stored between frames. */
+ * same on every run and nothing is stored between frames.
+ *
+ * Story mode runs this same forest three times. The growths stay. The light
+ * takes a short step with each stage: the rise warms a little, the pinch
+ * sits a little lower. */
 
 #include <stdint.h>
 #include <string.h>
@@ -90,10 +94,70 @@ static const Scheme k_schemes[5] = {
     {{30, 16, 70}, {100, 120, 255}, {80, 255, 255}},
 };
 
-/* Scheme 3 has the hot orange core, so it stays rare. */
-static const uint8_t k_scheme_pick[16] = {
-    0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 3
+/* Which glow is common. Each stage leans one step, and the mix stays the forest's. */
+static const uint8_t k_scheme_pick[3][16] = {
+    {0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 3},
+    {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 4, 4, 4, 3, 3, 3},
+    {0, 0, 0, 1, 1, 1, 1, 2, 2, 4, 4, 4, 3, 3, 3, 3},
 };
+
+/* How thick the air is. A step clearer on the rise, a step thicker on the pinch. */
+static const int k_density[3] = {96, 88, 116};
+
+/* The light actually drawn. Filled from the constants above for one stage. */
+static int lw_stage = -1;
+static int sky_refresh;
+static int sky_dirty;
+static Light lw_light;
+static RoadStyle lw_road;
+static ObstacleStyle lw_obstacle;
+static Scheme lw_schemes[5];
+static RGB lw_floor_glow, lw_floor, lw_fog, lw_fade;
+static Col lw_streak;
+
+/* Move one color along the night. Stage 0 is the color as authored. */
+static RGB mood_rgb(RGB c) {
+    int r = c.r, g = c.g, b = c.b;
+    int pull;
+    if (lw_stage <= 0)
+        return c;
+    if (lw_stage == 1) {
+        /* A little blue moves toward red, and the night lifts a step. */
+        pull = b / 12;
+        r += pull + 4;
+        g += 2 - pull / 6;
+        b += 2 - pull;
+    } else {
+        /* The cool light eases off, and the night sits a step lower. */
+        pull = b / 10;
+        r = (r + pull / 2) * 15 / 16;
+        g = g * 7 / 8;
+        b = (b - pull) * 15 / 16;
+    }
+    if (r < 0) r = 0;
+    if (g < 0) g = 0;
+    if (b < 0) b = 0;
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+    return (RGB){(uint8_t)r, (uint8_t)g, (uint8_t)b};
+}
+
+static void mood3(uint8_t dst[3], const uint8_t src[3]) {
+    RGB c = mood_rgb((RGB){src[0], src[1], src[2]});
+    dst[0] = c.r;
+    dst[1] = c.g;
+    dst[2] = c.b;
+}
+
+static uint16_t mood_clut(uint16_t c) {
+    RGB v = mood_rgb((RGB){
+        (uint8_t)((c & 31) << 3),
+        (uint8_t)(((c >> 5) & 31) << 3),
+        (uint8_t)(((c >> 10) & 31) << 3)
+    });
+    return (uint16_t)((v.r >> 3) | ((v.g >> 3) << 5) | ((v.b >> 3) << 10) | (c & 0x8000));
+}
 
 static const RGB k_spore[8] = {
     {90, 240, 255}, {90, 240, 255}, {60, 200, 255},
@@ -164,13 +228,13 @@ static void depth_cue(Col *c, int z) {
         c->b += (c->b - avg) * k / 2400;
     }
     if (z > LW_FAR - 2500)
-        tint(c, k_fade, clamp((z - (LW_FAR - 2500)) * 256 / 2500, 0, 256));
+        tint(c, lw_fade, clamp((z - (LW_FAR - 2500)) * 256 / 2500, 0, 256));
 }
 
 /* A surface that only reflects: distance pulls it into the cool fog. */
 static Col surface(RGB c, int k, int z) {
     Col o = col(c, k);
-    tint(&o, k_fog, fog_t(z));
+    tint(&o, lw_fog, fog_t(z));
     depth_cue(&o, z);
     return o;
 }
@@ -178,7 +242,7 @@ static Col surface(RGB c, int k, int z) {
 /* A light source keeps its color farther into the fog. */
 static Col light(RGB c, int k, int z) {
     Col o = col(c, k);
-    tint(&o, k_fog, fog_t(z) / 2);
+    tint(&o, lw_fog, fog_t(z) / 2);
     depth_cue(&o, z);
     return o;
 }
@@ -341,7 +405,7 @@ static void make_growth(Growth *g, uint32_t s, int zbase, int side, int hero) {
     g->z = zbase + rnd(&s, 0, CELL - 1);
     g->wz = g->z;
     g->phase = rnd(&s, 0, 63);
-    g->sc = &k_schemes[k_scheme_pick[rnd(&s, 0, 15)]];
+    g->sc = &lw_schemes[k_scheme_pick[lw_stage < 0 ? 0 : lw_stage][rnd(&s, 0, 15)]];
     g->w = g->r = g->sway = 0;
     if (roll < 30) {
         g->kind = G_CRYSTAL;
@@ -596,7 +660,7 @@ static void mound(const Growth *g, int lv) {
         if (!project4(q, pt))
             continue;
         screen_quad(pt, bk0 - j,
-                    j ? surface(k_schemes[(g->seed >> 8) % 5].body, 330, z) : surface(g->sc->body, 280, z),
+                    j ? surface(lw_schemes[(g->seed >> 8) % 5].body, 330, z) : surface(g->sc->body, 280, z),
                     BLEND_NONE);
         if (j == 0 && lv != LOD_FAR)
             layer(pt, pt[0], 90, bk0 - 2, light(g->sc->rim, 120, z), BLEND_NONE);
@@ -645,7 +709,7 @@ static void ground_streak(uint32_t s, int sbase) {
     int len = 50 + lw_speed * 16 + rnd(&s, 0, 120);
     int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
     XY q[4];
-    const Scheme *sc = &k_schemes[rnd(&s, 0, 4)];
+    const Scheme *sc = &lw_schemes[rnd(&s, 0, 4)];
     Col c;
     path_cam(along + len, u - w, 1, &x0, &y0, &z0);
     path_cam(along + len, u + w, 1, &x1, &y1, &z1);
@@ -740,12 +804,12 @@ static void sky_cycle_clut(void) {
     int band, i;
     RECT rect;
     for (i = 1; i <= LUMEN_SKY_GRAD_LAST; i++)
-        sky_clut_live[i] = lumen_sky_clut[i];
+        sky_clut_live[i] = mood_clut(lumen_sky_clut[i]);
     for (band = 0; band < LUMEN_SKY_BEAM_BANDS; band++) {
         int base = LUMEN_SKY_CYCLE_FIRST + band * LUMEN_SKY_BEAM_RING;
         for (i = 0; i < LUMEN_SKY_BEAM_RING; i++)
             sky_clut_live[base + i] =
-                lumen_sky_clut[base + ((i + shift) % LUMEN_SKY_BEAM_RING)];
+                mood_clut(lumen_sky_clut[base + ((i + shift) % LUMEN_SKY_BEAM_RING)]);
     }
     /* Stars: dense in the bitmap, but only LUMEN_SKY_STAR_LIT CLUT slots
      * are bright. Epoch advances slowly so they don't strobe. */
@@ -771,7 +835,7 @@ static void sky_cycle_clut(void) {
             g = (g * pulse) >> 8;
             b = (b * pulse) >> 8;
             sky_clut_live[LUMEN_SKY_STAR_FIRST + i] =
-                (uint16_t)(r | (g << 5) | (b << 10) | (c & 0x8000));
+                mood_clut((uint16_t)(r | (g << 5) | (b << 10) | (c & 0x8000)));
         }
     }
     setRECT(&rect, LUMEN_SKY_CLUT_X, LUMEN_SKY_CLUT_Y, 256, 1);
@@ -841,13 +905,14 @@ static void sky(void) {
     if (!sky_ready)
         sky_upload();
     /* CLUT work is cheap but not free; do it every 4 frames. */
-    if ((lw_time >> 2) != sky_clut_tick) {
+    if (sky_refresh || (lw_time >> 2) != sky_clut_tick) {
+        sky_refresh = 0;
         sky_clut_tick = lw_time >> 2;
         sky_cycle_clut();
     }
     sky_draw(hy);
     gradient(0, hy, SCREEN_W, SCREEN_H - hy, SKY_BUCKET,
-             k_floor_glow.r, k_floor_glow.g, k_floor_glow.b, k_floor.r, k_floor.g, k_floor.b);
+             lw_floor_glow.r, lw_floor_glow.g, lw_floor_glow.b, lw_floor.r, lw_floor.g, lw_floor.b);
 }
 
 static void aurora(void) {
@@ -887,7 +952,7 @@ static void build_skyline(int base) {
     uint32_t s = 0x51ED270Bu;
     int layer_i, i;
     for (layer_i = 0; layer_i < 2; layer_i++) {
-        RGB tone = layer_i ? (RGB){20, 10, 46} : (RGB){52, 22, 92};
+        RGB tone = mood_rgb(layer_i ? (RGB){20, 10, 46} : (RGB){52, 22, 92});
         /* One screen of shapes. The scroll repeats it, so the margins
          * that used to hide the frame edges are the wrap itself. */
         int x = layer_i * 13;
@@ -936,9 +1001,10 @@ static void skyline(void) {
     int shift = sky_scroll();
     int ybase = buf * SCREEN_H;
     int i, n;
-    if (!sky_count || sky_base != hy) {
+    if (!sky_count || sky_base != hy || sky_dirty) {
         sky_count = 0;
         sky_base = hy;
+        sky_dirty = 0;
         build_skyline(hy);
     }
     /* Straight ahead links the original row only. A turn also links the
@@ -1048,7 +1114,7 @@ static void speed_streaks(void) {
         int cax = cs(a), sax = sn(a);
         int u = lw_x + TUBE_R * cax / 127;
         int h = TUBE_CROWN * (sax + 127) / 254;
-        Col grey = {112, 112, 112};
+        Col grey = lw_streak;
         int bucket;
         XY far, near;
         int zf, zn;
@@ -1095,14 +1161,65 @@ static const RoadStyle k_road = {
     {12, 6, 28},
 };
 
+static void apply_stage(int stage) {
+    int i;
+    RGB streak;
+    if (stage < 0)
+        stage = 0;
+    if (stage > 2)
+        stage = 2;
+    if (stage == lw_stage)
+        return;
+    lw_stage = stage;
+    lw_light = k_light;
+    lw_light.density = k_density[stage];
+    mood3(lw_light.sky, k_light.sky);
+    mood3(lw_light.haze, k_light.haze);
+    mood3(lw_light.tint, k_light.tint);
+    mood3(lw_light.shadow, k_light.shadow);
+    lw_road = k_road;
+    lw_road.light = &lw_light;
+    lw_road.obstacle = &lw_obstacle;
+    mood3(lw_road.ridge_far, k_road.ridge_far);
+    mood3(lw_road.ridge_near, k_road.ridge_near);
+    mood3(lw_road.road, k_road.road);
+    mood3(lw_road.road_far, k_road.road_far);
+    mood3(lw_road.edge, k_road.edge);
+    mood3(lw_road.dash, k_road.dash);
+    mood3(lw_road.shoulder_c, k_road.shoulder_c);
+    mood3(lw_road.ground_c, k_road.ground_c);
+    lw_obstacle = k_obstacle;
+    mood3(lw_obstacle.back, k_obstacle.back);
+    mood3(lw_obstacle.left, k_obstacle.left);
+    mood3(lw_obstacle.right, k_obstacle.right);
+    mood3(lw_obstacle.top, k_obstacle.top);
+    mood3(lw_obstacle.front, k_obstacle.front);
+    for (i = 0; i < 5; i++) {
+        lw_schemes[i].body = mood_rgb(k_schemes[i].body);
+        lw_schemes[i].rim = mood_rgb(k_schemes[i].rim);
+        lw_schemes[i].core = mood_rgb(k_schemes[i].core);
+    }
+    lw_floor_glow = mood_rgb(k_floor_glow);
+    lw_floor = mood_rgb(k_floor);
+    lw_fog = mood_rgb(k_fog);
+    lw_fade = mood_rgb(k_fade);
+    streak = mood_rgb((RGB){112, 112, 112});
+    lw_streak.r = streak.r;
+    lw_streak.g = streak.g;
+    lw_streak.b = streak.b;
+    sky_refresh = 1;
+    sky_dirty = 1;
+}
+
 static void lumen_clear(const LevelFrame *f, int *r, int *g, int *b) {
-    (void)f;
-    *r = k_light.sky[0];
-    *g = k_light.sky[1];
-    *b = k_light.sky[2];
+    apply_stage(f->stage);
+    *r = lw_light.sky[0];
+    *g = lw_light.sky[1];
+    *b = lw_light.sky[2];
 }
 
 static void lumen_draw(const LevelFrame *f) {
+    apply_stage(f->stage);
     lw_scroll = f->scroll;
     lw_speed = f->speed;
     lw_time = f->time;
@@ -1112,16 +1229,16 @@ static void lumen_draw(const LevelFrame *f) {
     PROF(PF_AURORA, aurora());
     PROF(PF_SKYLINE, skyline());
     PROF(PF_FOREST, forest());
-    road_draw(&k_road, f);
+    road_draw(&lw_road, f);
     PROF(PF_SPORES, spores());
     PROF(PF_STREAKS, speed_streaks());
 }
 
 const Level level_lumenwild = {
     "LUMENWILD",
-    "lumenwild.way",
+    "lumenwild.trail",
     lumen_clear,
     lumen_draw,
-    &k_light,
+    &lw_light,
     1,
 };

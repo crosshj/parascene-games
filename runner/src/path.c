@@ -185,14 +185,26 @@ static void basis(int yaw, int pitch, int roll,
     *uz = mul_q(rz0, sr) + mul_q(uz0, cr);
 }
 
+/* cycle 0 is a road that ends. Past the last segment, samples stay on it. */
+static int road_ends(void) {
+    return active->cycle <= 0;
+}
+
 static int band_index(int band) {
+    if (road_ends()) {
+        if (band >= active->count)
+            return active->count - 1;
+        if (band < 0)
+            return 0;
+        return band;
+    }
     if (band < active->lead)
         return band;
     return active->lead + (band - active->lead) % active->cycle;
 }
 
 static int band_lap(int band) {
-    if (band < active->lead)
+    if (road_ends() || band < active->lead)
         return 0;
     return (band - active->lead) / active->cycle;
 }
@@ -248,20 +260,51 @@ static const PathSeg *sample_at_s(int s, int *x, int *y, int *z) {
         local = STEP;
     }
     if (band != cache_band) {
-        if (band < active->lead) {
+        if (road_ends() && band >= active->count) {
+            /* One more step of the last segment, repeated, so the deck
+             * runs on instead of jumping back to the start. */
+            const PathSeg *end = &active->seg[active->count - 1];
+            int over = band - (active->count - 1);
+            int dx = end->x1 - end->x;
+            int dy = end->y1 - end->y;
+            int dz = end->z1 - end->z;
+            cache_a = end;
+            cache_b = end;
+            cache_x = end->x + (int)((long long)dx * over);
+            cache_y = end->y + (int)((long long)dy * over);
+            cache_z = end->z + (int)((long long)dz * over);
+            cache_band = band;
+        } else if (road_ends()) {
             lap = 0;
             idx = band;
+            nidx = band + 1 < active->count ? band + 1 : band;
+            cache_a = seg_at(idx);
+            cache_b = seg_at(nidx);
+            cache_x = cache_a->x;
+            cache_y = cache_a->y;
+            cache_z = cache_a->z;
+            cache_band = band;
+        } else if (band < active->lead) {
+            lap = 0;
+            idx = band;
+            nidx = idx + 1;
+            cache_a = seg_at(idx);
+            cache_b = seg_at(nidx);
+            cache_x = cache_a->x;
+            cache_y = cache_a->y;
+            cache_z = cache_a->z;
+            cache_band = band;
         } else {
             lap = (band - active->lead) / active->cycle;
             idx = band - lap * active->cycle;
+            nidx = idx + 1 == active->lead + active->cycle ? active->lead : idx + 1;
+            cache_a = seg_at(idx);
+            cache_b = seg_at(nidx);
+            cache_x = cache_a->x + lap * active->rep_x;
+            cache_y = cache_a->y + lap * active->rep_y;
+            cache_z = cache_a->z + lap * active->rep_z;
+            cache_band = band;
         }
-        nidx = idx + 1 == active->lead + active->cycle ? active->lead : idx + 1;
-        cache_a = seg_at(idx);
-        cache_b = seg_at(nidx);
-        cache_x = cache_a->x + lap * active->rep_x;
-        cache_y = cache_a->y + lap * active->rep_y;
-        cache_z = cache_a->z + lap * active->rep_z;
-        cache_band = band;
     }
     a = cache_a;
     sample_local = local;
@@ -692,6 +735,8 @@ int path_may_crate(int band) {
     int idx;
     if (band < 0)
         return 0;
+    if (road_ends() && band >= active->count)
+        return 0;
     idx = band_index(band);
     return active->count > BAND_MAX || (band_flags[idx] & BAND_MAY_CRATE);
 }
@@ -796,7 +841,7 @@ int path_branch(int k, int s, int *s0, int *s1) {
     int band = s < 0 ? 0 : s / STEP;
     int lap = 0;
     if (band >= b->band1) {
-        if (b->band0 < active->lead)
+        if (road_ends() || b->band0 < active->lead)
             return 0;
         lap = (band - b->band1) / active->cycle + 1;
     }

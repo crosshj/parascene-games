@@ -29,3 +29,16 @@ typedef struct {
  * obstacle_box uses dim(); pass shade for aerial perspective, etc. */
 void obstacle_box(int s, int u, const ObstacleStyle *style);
 void obstacle_box_shade(int s, int u, const ObstacleStyle *style, Shade shade);
+
+/* Marks on the boxes of one stage. A jumped box draws bright, a hit box
+ * draws in the negative of that color. Bands are absolute; base_band is
+ * the stage's first band, and the table covers one 3-minute run. */
+enum { BOX_NONE = 0, BOX_JUMP = 1, BOX_HIT = 2 };
+
+void course_boxes_reset(int base_band);
+/* Obstacle centers in [s0, s1) are absent. s0 >= s1 clears the span. */
+void course_quiet(int s0, int s1);
+void course_box_set(int band, int kind);
+int course_box_kind(int band);
+/* base when the band has no mark. */
+const ObstacleStyle *course_box_style(int band, const ObstacleStyle *base);

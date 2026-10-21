@@ -273,45 +273,240 @@
       ]
     },
     {
-      "id": "lumenwild.way",
-      "name": "Lumenwild",
+      "id": "lumenwild.trail",
+      "name": "Lumenwild trail",
       "status": "runnable",
-      "summary": "The living forest. An S of bends, a hill that returns to grade, a narrowing to one lane and back, then the road runs on.",
-      "capabilities": ["repeat", "yaw", "grade", "lanes"],
-      "start": "trail",
-      "repeatFrom": "trail",
+      "summary": "Story stage 1. The road bends on three lanes, narrows to two through a corner, gives the lanes back, then narrows again. Still narrow, it drops and turns, opens, and takes one last curve into the finish. The road ends.",
+      "capabilities": ["yaw", "grade", "lanes"],
+      "start": "open",
       "pieces": [
-        {"id": "trail", "length": 8192, "next": "bend-right",
+        {"id": "open", "length": 8192, "next": "bend-r",
          "obstacles": [
-           {"at": 1408, "lane": 0},
-           {"at": 3456, "lane": 1},
-           {"at": 5504, "lane": -1},
-           {"at": 7552, "lane": 0}
+           {"at": 4992, "lane": 1}
          ]},
-        {"id": "bend-right", "length": 4096, "yaw": 90, "next": "glide",
-         "obstacles": [{"at": 1152, "lane": -1}, {"at": 3200, "lane": 1}]},
-        {"id": "glide", "length": 4096, "next": "bend-left",
-         "obstacles": [{"at": 1152, "lane": 0}, {"at": 3200, "lane": -1}]},
-        {"id": "bend-left", "length": 4096, "yaw": -90, "next": "climb",
-         "obstacles": [{"at": 2176, "lane": 1}]},
-        {"id": "climb", "length": 4096, "grade": 22.5, "next": "ease",
-         "obstacles": [{"at": 2176, "lane": -1}]},
-        {"id": "ease", "length": 4096, "grade": -22.5, "next": "drop"},
-        {"id": "drop", "length": 4096, "grade": -22.5, "next": "settle",
-         "obstacles": [{"at": 2176, "lane": 0}]},
-        {"id": "settle", "length": 4096, "grade": 22.5, "next": "to-one",
-         "obstacles": [{"at": 1152, "lane": 1}]},
-        {"id": "to-one", "length": 4096, "lanes": 3, "lanesTo": 1, "anchor": "center", "next": "one"},
-        {"id": "one", "length": 4096, "lanes": 1, "next": "to-three",
-         "obstacles": [{"at": 1152, "lane": 0}, {"at": 3200, "lane": 0}]},
-        {"id": "to-three", "length": 4096, "lanes": 1, "lanesTo": 3, "anchor": "center", "next": "home"},
-        {"id": "home", "length": 8192, "lanes": 3, "next": "trail",
+        {"id": "bend-r", "length": 12288, "yaw": 90, "next": "along",
          "obstacles": [
-           {"at": 1408, "lane": -1},
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1},
+           {"at": 8832, "lane": -1}
+         ]},
+        {"id": "along", "length": 4096, "next": "bend-l",
+         "obstacles": [
+           {"at": 2176, "lane": 0}
+         ]},
+        {"id": "bend-l", "length": 12288, "yaw": -90, "next": "run",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1},
+           {"at": 8832, "lane": -1}
+         ]},
+        {"id": "run", "length": 8192, "next": "to-two",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "to-two", "length": 4096, "lanes": 3, "lanesTo": 2, "anchor": "center", "next": "hook"},
+        {"id": "hook", "length": 8192, "lanes": 2, "yaw": 90, "next": "widen",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 4224, "lane": 0.5},
+           {"at": 7296, "lane": -0.5}
+         ]},
+        {"id": "widen", "length": 4096, "lanes": 2, "lanesTo": 3, "anchor": "center", "next": "bend-r2"},
+        {"id": "bend-r2", "length": 8192, "yaw": -90, "next": "to-two-b",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "to-two-b", "length": 4096, "lanes": 3, "lanesTo": 2, "anchor": "center", "next": "hook-b"},
+        {"id": "hook-b", "length": 12288, "lanes": 2, "yaw": 90, "next": "fall",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 4224, "lane": 0.5},
+           {"at": 7296, "lane": -0.5},
+           {"at": 10368, "lane": 0.5}
+         ]},
+        {"id": "fall", "length": 8192, "lanes": 2, "yaw": 45, "grade": -22.5, "next": "ease",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 4224, "lane": 0.5},
+           {"at": 7296, "lane": -0.5}
+         ]},
+        {"id": "ease", "length": 4096, "lanes": 2, "grade": 22.5, "next": "widen-b",
+         "obstacles": [{"at": 2176, "lane": 0.5}]},
+        {"id": "widen-b", "length": 4096, "lanes": 2, "lanesTo": 3, "anchor": "center", "next": "sweep"},
+        {"id": "sweep", "length": 4096, "yaw": -90, "next": "home",
+         "obstacles": [{"at": 1152, "lane": 0}]},
+        {"id": "home", "length": 2048, "next": "beyond"},
+        {"id": "beyond", "length": 8192}
+      ]
+    },
+    {
+      "id": "lumenwild.rise",
+      "name": "Lumenwild rise",
+      "status": "runnable",
+      "summary": "Story stage 2. Opens bending the other way from the trail, then narrows, and the hill arrives while it is still narrow. It opens into a wide curve, then drops and turns into the finish. The road ends.",
+      "capabilities": ["yaw", "grade", "lanes"],
+      "start": "lead",
+      "pieces": [
+        {"id": "lead", "length": 8192, "next": "bend-r",
+         "obstacles": [
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "bend-r", "length": 8192, "yaw": -90, "next": "along",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "along", "length": 8192, "next": "to-two",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "to-two", "length": 4096, "lanes": 3, "lanesTo": 2, "anchor": "center", "next": "hook"},
+        {"id": "hook", "length": 8192, "lanes": 2, "yaw": 90, "next": "climb",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 3456, "lane": 0.5},
+           {"at": 5760, "lane": -0.5},
+           {"at": 8064, "lane": 0.5}
+         ]},
+        {"id": "climb", "length": 8192, "lanes": 2, "yaw": -45, "grade": 22.5, "next": "ease",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 3456, "lane": 0.5},
+           {"at": 5760, "lane": -0.5},
+           {"at": 8064, "lane": 0.5}
+         ]},
+        {"id": "ease", "length": 4096, "lanes": 2, "grade": -22.5, "next": "drop",
+         "obstacles": [
+           {"at": 2176, "lane": -0.5}
+         ]},
+        {"id": "drop", "length": 8192, "lanes": 2, "yaw": 45, "grade": -22.5, "next": "settle",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 3456, "lane": 0.5},
+           {"at": 5760, "lane": -0.5},
+           {"at": 8064, "lane": 0.5}
+         ]},
+        {"id": "settle", "length": 4096, "lanes": 2, "grade": 22.5, "next": "widen",
+         "obstacles": [
+           {"at": 2176, "lane": -0.5}
+         ]},
+        {"id": "widen", "length": 4096, "lanes": 2, "lanesTo": 3, "anchor": "center", "next": "glide"},
+        {"id": "glide", "length": 8192, "next": "span",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "span", "length": 4096, "next": "bend-l",
+         "obstacles": [
+           {"at": 2176, "lane": 0}
+         ]},
+        {"id": "bend-l", "length": 12288, "yaw": 90, "next": "dive",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1},
+           {"at": 8832, "lane": -1}
+         ]},
+        {"id": "dive", "length": 8192, "yaw": -45, "grade": -22.5, "next": "level",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4224, "lane": 1},
+           {"at": 7296, "lane": -1}
+         ]},
+        {"id": "level", "length": 4096, "grade": 22.5, "next": "sweep",
+         "obstacles": [{"at": 2176, "lane": 0}]},
+        {"id": "sweep", "length": 4096, "yaw": 90, "next": "home",
+         "obstacles": [{"at": 1152, "lane": 1}]},
+        {"id": "home", "length": 2048, "next": "beyond"},
+        {"id": "beyond", "length": 8192}
+      ]
+    },
+    {
+      "id": "lumenwild.pinch",
+      "name": "Lumenwild pinch",
+      "status": "runnable",
+      "summary": "Story stage 3. Opens with a dip, then a curve and two hills, then the road closes to two and then to one. The single lane bends, then drops and turns into the finish. The road ends.",
+      "capabilities": ["yaw", "grade", "lanes"],
+      "start": "dip",
+      "pieces": [
+        {"id": "dip", "length": 8192, "grade": -22.5, "next": "haul",
+         "obstacles": [
+           {"at": 4992, "lane": 1},
+           {"at": 7296, "lane": -1}
+         ]},
+        {"id": "haul", "length": 8192, "grade": 45, "next": "crest",
+         "obstacles": [
+           {"at": 2176, "lane": -1},
+           {"at": 4992, "lane": 0},
+           {"at": 7296, "lane": 1}
+         ]},
+        {"id": "crest", "length": 8192, "grade": -22.5, "next": "bend-r",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4992, "lane": 1}
+         ]},
+        {"id": "bend-r", "length": 8192, "yaw": 90, "next": "climb",
+         "obstacles": [
+           {"at": 1152, "lane": 1},
+           {"at": 4224, "lane": -1},
+           {"at": 7296, "lane": 0}
+         ]},
+        {"id": "climb", "length": 4096, "grade": 22.5, "next": "ease",
+         "obstacles": [
+           {"at": 2176, "lane": 0}
+         ]},
+        {"id": "ease", "length": 4096, "grade": -22.5, "next": "bend-l",
+         "obstacles": [
+           {"at": 2176, "lane": 0}
+         ]},
+        {"id": "bend-l", "length": 8192, "yaw": -90, "next": "drop",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 4224, "lane": 1},
+           {"at": 7296, "lane": -1}
+         ]},
+        {"id": "drop", "length": 4096, "grade": -22.5, "next": "settle",
+         "obstacles": [
+           {"at": 2176, "lane": 0}
+         ]},
+        {"id": "settle", "length": 4096, "grade": 22.5, "next": "to-two",
+         "obstacles": [
+           {"at": 2176, "lane": 0}
+         ]},
+        {"id": "to-two", "length": 4096, "lanes": 3, "lanesTo": 2, "anchor": "center", "next": "two"},
+        {"id": "two", "length": 8192, "lanes": 2, "yaw": 90, "next": "to-one",
+         "obstacles": [
+           {"at": 1152, "lane": -0.5},
+           {"at": 3456, "lane": 0.5},
+           {"at": 5760, "lane": -0.5},
+           {"at": 8064, "lane": 0.5}
+         ]},
+        {"id": "to-one", "length": 4096, "lanes": 2, "lanesTo": 1, "anchor": "center", "next": "pinch"},
+        {"id": "pinch", "length": 16384, "lanes": 1, "yaw": -90, "next": "dive",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
            {"at": 3456, "lane": 0},
-           {"at": 5504, "lane": 1},
-           {"at": 7552, "lane": -1}
-         ]}
+           {"at": 5760, "lane": 0},
+           {"at": 8064, "lane": 0},
+           {"at": 10368, "lane": 0},
+           {"at": 12672, "lane": 0},
+           {"at": 14976, "lane": 0}
+         ]},
+        {"id": "dive", "length": 8192, "lanes": 1, "yaw": 45, "grade": -22.5, "next": "level",
+         "obstacles": [
+           {"at": 1152, "lane": 0},
+           {"at": 3456, "lane": 0},
+           {"at": 5760, "lane": 0},
+           {"at": 8064, "lane": 0}
+         ]},
+        {"id": "level", "length": 4096, "lanes": 1, "grade": 22.5, "next": "kick",
+         "obstacles": [{"at": 2176, "lane": 0}]},
+        {"id": "kick", "length": 4096, "lanes": 1, "yaw": -90, "next": "home",
+         "obstacles": [{"at": 1152, "lane": 0}]},
+        {"id": "home", "length": 2048, "lanes": 1, "next": "beyond"},
+        {"id": "beyond", "length": 8192, "lanes": 1}
       ]
     },
     {

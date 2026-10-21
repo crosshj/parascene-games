@@ -37,6 +37,8 @@ void road_draw(const RoadStyle *st, const LevelFrame *f);
 /* A flat panel across the road at one s, hazed into the air. Call after
  * road_draw in the same frame. */
 void road_panel(int s, int u0, int u1, int v0, int v1, int r, int g, int b);
-/* City-style overhead bar over the start line of a closed track, once a
- * lap. Nothing on a track that does not close. Call after road_draw. */
+/* Overhead bar at one s: two posts and a beam. Call after road_draw. */
+void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]);
+/* That bar over the start line of a closed track, once a lap. Nothing on
+ * a track that does not close. Call after road_draw. */
 void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3]);

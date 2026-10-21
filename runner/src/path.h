@@ -2,6 +2,9 @@
  * offset from the centerline, v is height above the deck. The open span is
  * one period; past the lead, s repeats the cycle.
  *
+ * A road with cycle 0 ends. Past its last segment the deck runs straight
+ * on the heading it finished with, and it does not come back to the start.
+ *
  * path_cam follows the segment yaw, pitch, and roll. On straight.run all
  * are zero, so the frame stays (u, v, s - scroll). The camera takes 3/4 of
  * the grade under it and none of the roll, so a banked deck tilts on a

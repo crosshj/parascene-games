@@ -1,0 +1,22 @@
+---
+description: Build every runner disc variant together
+alwaysApply: true
+---
+
+# Runner discs
+
+A runner build writes all three discs. Do not build only the web disc, only the CD, or only the no-music disc.
+
+From `runner/build`:
+
+```
+ninja
+```
+
+That is the default target. It links the CD program and produces:
+
+- `build/runner.bin` and `build/runner.cue` (CD audio)
+- `build/runner-nomusic.bin` and `build/runner-nomusic.cue`
+- `build/runner-web.bin` and `build/runner-web.cue`
+
+The profile build is separate and is not part of this.

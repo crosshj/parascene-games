@@ -3,6 +3,57 @@
 #include "path.h"
 #include "profile.h"
 
+#include <string.h>
+
+/* 432000 / STEP is 1688 bands. A little past that still lands in the table. */
+#define BOX_MAX 1728
+
+static int box_base;
+static uint8_t box_kind[BOX_MAX];
+static int quiet_s0, quiet_s1;
+
+/* The warm crate, flipped cold and pulled down. */
+static const ObstacleStyle box_hit = {
+    {40, 26, 120}, {52, 44, 150}, {40, 70, 180}, {130, 140, 210}, {34, 80, 170}
+};
+
+static const ObstacleStyle box_jump = {
+    {30, 90, 40}, {50, 150, 60}, {70, 200, 80}, {200, 255, 150}, {90, 240, 100}
+};
+
+void course_boxes_reset(int base_band) {
+    box_base = base_band;
+    memset(box_kind, 0, sizeof box_kind);
+}
+
+void course_quiet(int s0, int s1) {
+    quiet_s0 = s0;
+    quiet_s1 = s1;
+}
+
+void course_box_set(int band, int kind) {
+    int i = band - box_base;
+    if (i < 0 || i >= BOX_MAX)
+        return;
+    box_kind[i] = (uint8_t)kind;
+}
+
+int course_box_kind(int band) {
+    int i = band - box_base;
+    if (i < 0 || i >= BOX_MAX)
+        return BOX_NONE;
+    return box_kind[i];
+}
+
+const ObstacleStyle *course_box_style(int band, const ObstacleStyle *base) {
+    int kind = course_box_kind(band);
+    if (kind == BOX_JUMP)
+        return &box_jump;
+    if (kind == BOX_HIT)
+        return &box_hit;
+    return base;
+}
+
 int obstacle_u(int band) {
     const PathSeg *seg;
     if (band < 0)
@@ -15,7 +66,11 @@ int obstacle_u(int band) {
 
 int has_obstacle(int band) {
     const PathSeg *seg;
+    int s;
     if (!path_may_crate(band))
+        return 0;
+    s = band * STEP + STEP / 2;
+    if (s >= quiet_s0 && s < quiet_s1)
         return 0;
     seg = path_at(band * STEP);
     return seg && seg->obstacle != OBSTACLE_NONE;

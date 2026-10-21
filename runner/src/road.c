@@ -519,9 +519,15 @@ void road_panel(int s, int u0, int u1, int v0, int v1, int r, int g, int b) {
     quad(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, sortz, r, g, b);
 }
 
+void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]) {
+    int edge = ROAD_HALF + 8;
+    road_panel(s, -edge - 36, -edge, 0, 230, post[0], post[1], post[2]);
+    road_panel(s, edge, edge + 36, 0, 230, post[0], post[1], post[2]);
+    road_panel(s, -edge, edge, 200, 228, beam[0], beam[1], beam[2]);
+}
+
 void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3]) {
     int lap = path_lap();
-    int edge = ROAD_HALF + 8;
     int s;
     if (!lap)
         return;
@@ -533,9 +539,7 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
         s += lap;
     if (s >= scroll + FAR)
         return;
-    road_panel(s, -edge - 36, -edge, 0, 230, post[0], post[1], post[2]);
-    road_panel(s, edge, edge + 36, 0, 230, post[0], post[1], post[2]);
-    road_panel(s, -edge, edge, 200, 228, beam[0], beam[1], beam[2]);
+    road_gantry(s, post, beam);
 #ifdef RUNNER_PROFILE
     prof_ticks[PF_R_GANTRY] += (prof_now() - prof_t0_) & 0xFFFF;
 #endif
@@ -790,7 +794,7 @@ static void far_crate(int s, int u, const RoadSample *a, const RoadSample *b) {
     t = b->s > a->s ? clamp((s0 - a->s) * 4096 / (b->s - a->s), -2048, 4096) : 0;
     deck_point(a, b, t, u - w, &x0, &y0, &z0);
     if (z0 + OBST_D / 2 < FAR) {
-        obstacle_box_shade(s, u, style->obstacle, haze_road);
+        obstacle_box_shade(s, u, course_box_style(s / STEP, style->obstacle), haze_road);
         return;
     }
     if (z0 >= CRATE_Z)
@@ -1107,7 +1111,7 @@ static void route_draw(const RoadStyle *st, const LevelFrame *f) {
         if (os < road_s0 || os > road_s1)
             continue;
         deck_under(os);
-        obstacle_box_shade(os, obstacle_u(band), st->obstacle, haze_road);
+        obstacle_box_shade(os, obstacle_u(band), course_box_style(band, st->obstacle), haze_road);
     }
 #ifdef RUNNER_PROFILE
     prof_ticks[PF_R_CRATES] += (prof_now() - prof_t0_) & 0xFFFF;

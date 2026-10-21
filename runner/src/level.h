@@ -10,6 +10,7 @@ typedef struct {
     int speed;  /* scroll gained this frame, 0 while stopped */
     int time;   /* animation clock; holds still while the game is frozen */
     int x;      /* runner's lateral offset from the centerline */
+    int stage;  /* story stage under this world; 0 when the world has one look */
 } LevelFrame;
 
 /* The light a world casts, in one place. Everything the world draws and the
