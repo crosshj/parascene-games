@@ -60,4 +60,6 @@ const Level level_bank = {
     bank_draw,
     &k_light,
     0,
+    0,
+    0,
 };

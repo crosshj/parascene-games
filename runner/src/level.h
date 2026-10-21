@@ -13,6 +13,16 @@ typedef struct {
     int stage;  /* story stage under this world; 0 when the world has one look */
 } LevelFrame;
 
+/* Story roads share this finish. A `beyond` piece runs on past it. */
+#define STAGE_FINISH 108544
+
+typedef struct {
+    const char *name;
+    const char *track;
+    int start;
+    int finish;
+} Stage;
+
 /* The light a world casts, in one place. Everything the world draws and the
  * runner it carries take their color from here.
  *
@@ -45,6 +55,9 @@ typedef struct {
     const Light *light;
     /* 1 if Story Mode offers this world. Arcade Mode offers the others. */
     int story;
+    /* Story stages on this world. Arcade worlds leave these empty. */
+    const Stage *stages;
+    int stage_count;
 } Level;
 
 extern const Level *const levels[];

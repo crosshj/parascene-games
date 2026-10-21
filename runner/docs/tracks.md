@@ -73,6 +73,24 @@ rides the bank without knowing about it.
 | `lumenwild.trail` | runnable | `open` through `beyond` | Ends. Story stage 1. Opens bending one way. Long curves, two narrowings to two lanes. The second one drops and turns, then the road opens into a last curve. |
 | `lumenwild.rise` | runnable | `lead` through `beyond` | Ends. Story stage 2. Opens bending the other way. The hill arrives while the road is two lanes. After it opens, the finish drops and turns. |
 | `lumenwild.pinch` | runnable | `dip` through `beyond` | Ends. Story stage 3. Opens with a dip, then curves and two hills, then closes to one lane. That lane bends, then drops and turns into the finish. |
+| `vesper.sweep` | runnable | `open` through `beyond` | Ends. Vesper City stage 1. A long banked sweep, then a level run. |
+| `vesper.esse` | runnable | `open` through `beyond` | Ends. Vesper City stage 2. An S that banks left, rolls through level into a right bank, then a long run. |
+| `vesper.hook` | runnable | `open` through `beyond` | Ends. Vesper City stage 3. A banked bend, a long run, and a tighter banked bend into the finish. |
+| `shatter.split` | runnable | `open` through `beyond` | Ends. Shatterglass stage 1. One fork: three lanes split into two and one and meet again. |
+| `shatter.switch` | runnable | `open` through `beyond` | Ends. Shatterglass stage 2. A switchback, then a fork. |
+| `shatter.join` | runnable | `open` through `beyond` | Ends. Shatterglass stage 3. A fork that swaps its lanes, a turn, and a second fork. |
+| `reach.ridge` | runnable | `open` through `beyond` | Ends. Vesper Reach stage 1. Two climbs and two descents, no bank. |
+| `reach.climb` | runnable | `open` through `beyond` | Ends. Vesper Reach stage 2. The climb is banked. The road turns while it is up, then descends and rolls level. |
+| `reach.drop` | runnable | `open` through `beyond` | Ends. Vesper Reach stage 3. A rise, a long run, then a steep banked drop that levels out. |
+| `sine.gate` | runnable | `open` through `beyond` | Ends. Sineworks stage 1. Narrows to two lanes, holds, and opens. |
+| `sine.beat` | runnable | `open` through `beyond` | Ends. Sineworks stage 2. Lane changes close together, down to one lane and back to three. |
+| `sine.crush` | runnable | `open` through `beyond` | Ends. Sineworks stage 3. Closes to one lane, holds, and opens again. |
+| `meridian.drift` | runnable | `open` through `beyond` | Ends. Pale Meridian stage 1. A long S that drops into a level ice crack and climbs out. |
+| `meridian.fork` | runnable | `open` through `beyond` | Ends. Pale Meridian stage 2. An S into a fork, then a drop into a level ice crack. |
+| `meridian.verge` | runnable | `open` through `beyond` | Ends. Pale Meridian stage 3. A drop into an ice crack, a fork while the road is still down, then the climb out. |
+| `cathedral.ribbon` | runnable | `open` through `beyond` | Ends. Null Cathedral stage 1. One gentle banked sweep. |
+| `cathedral.vault` | runnable | `open` through `beyond` | Ends. Null Cathedral stage 2. A rise into a banked turn, then a descent back to level. |
+| `cathedral.choir` | runnable | `open` through `beyond` | Ends. Null Cathedral stage 3. A banked climb that returns to level, then a fork. |
 | `bend.flat` | runnable | `north`, `east-bend`, `south`, `west-bend` | Closes. One lap returns to its start. The FLAT OVAL world runs it. |
 | `hill.loop` | runnable | `start`, one big hill, `turn-back`, two smaller hills, `turn-home`, `home` | Closes. The HILL world runs it. Turns like the oval, with grades on both straights. Both sides lose the same ground to slope: four 4096 ramps out, eight 2048 ramps back, all at 22.5°, with 8192 of flat on each side. |
 | `bank.bend` | runnable | `start`, `turn-in`, `turn`, `turn-out`, `link`, `lean-left`, `carve-left`, `flip`, `carve-right`, `lean-right`, `settle`, `home-in`, `home-turn`, `home-out`, `home` | Closes. The BANK world runs it. Both turn-arounds bank right at 33.75°. On the way back, an S banks left at 22.5°, rolls through level into a 22.5° right bank in `flip`, and settles. The S moves the road outward, so the home turn-around is wider (12288) to meet the start. |
@@ -89,7 +107,7 @@ still missing.
 ## Order
 
 1. **Now.** The path API, `straight.run` as data, the viewer framing every
-   name. City still runs the straight road. Lumenwild's story stages run `lumenwild.trail`, `lumenwild.rise`, and `lumenwild.pinch`.
+   name. City still runs the straight road. Each story world runs three ending roads: Lumenwild `lumenwild.trail`, `lumenwild.rise`, `lumenwild.pinch`; Vesper City `vesper.sweep`, `vesper.esse`, `vesper.hook`; Shatterglass `shatter.split`, `shatter.switch`, `shatter.join`; Vesper Reach `reach.ridge`, `reach.climb`, `reach.drop`; the Sineworks `sine.gate`, `sine.beat`, `sine.crush`; Pale Meridian `meridian.drift`, `meridian.fork`, `meridian.verge`; Null Cathedral `cathedral.ribbon`, `cathedral.vault`, `cathedral.choir`.
 2. **`bend.flat`.** The FLAT OVAL world runs this lap and draws only the
    road. `path_cam` follows yaw, so the camera takes the turns.
 3. **`hill.loop`.** Pitch and height on a closed lap. The HILL world runs
@@ -198,7 +216,7 @@ and a seam exactly as baked. Obstacles are stored in half lanes, so a
 two-lane road can hold a crate at ±75.
 
 Obstacles and the runner go through this API. City still
-draws its straight ground with `flat()`. Lumenwild, FLAT OVAL, HILL, BANK, ZIPPER, and MAXI-P draw their
+draws its straight ground with `flat()`. Lumenwild, Vesper City, Shatterglass, Vesper Reach, the Sineworks, Pale Meridian, Null Cathedral, FLAT OVAL, HILL, BANK, ZIPPER, and MAXI-P draw their
 road with `road.c`: cross-sections from `path_cam`, with width, lane
 dividers, and deck read from each segment. A world gives `road_draw` a
 `RoadStyle` of materials and adds its own scenery, so a new runnable track

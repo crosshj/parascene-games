@@ -79,14 +79,8 @@ static int runner_ahead;
 /* Camera scroll where the finish shot holds. */
 static int stick_at;
 
-/* Each stage is one road, about 45 seconds, and the road ends.
- * The trail opens on a bend, narrows, and its finish drops and turns.
- * The rise opens the other way, stays narrow through the hill, then drops.
- * The pinch opens on a dip, closes to one lane, and drops into the finish. */
-enum { STAGE_COUNT = 3 };
 /* A short clear run into the gantry, and nothing past it. */
 #define FINISH_CLEAR 4096
-#define STAGE_FINISH 108544
 /* Camera coasts this far past the gantry, then the runner pulls away. */
 #define STICK_PAST 700
 /* Runner lead at which the tally covers the held shot. */
@@ -95,21 +89,32 @@ enum { STAGE_COUNT = 3 };
 #define PTS_HIT 100
 /* Ten more jumps than hits. A basic bar, not a tuned one. */
 #define CLEAR_SCORE 1000
-static const struct {
-    const char *name;
-    const char *track;
-    int start;
-    int finish;
-} k_stages[STAGE_COUNT] = {
-    {"THE TRAIL", "lumenwild.trail", 0, STAGE_FINISH},
-    {"THE RISE", "lumenwild.rise", 0, STAGE_FINISH},
-    {"THE PINCH", "lumenwild.pinch", 0, STAGE_FINISH},
-};
+extern const Level level_lumenwild;
 static const uint8_t k_goal_post[3] = {210, 220, 240};
 static const uint8_t k_goal_beam[3] = {255, 214, 64};
 
+static const Stage *stages(void) {
+    return levels[level_index]->stages;
+}
+
+static int stage_n(void) {
+    return levels[level_index]->stage_count;
+}
+
+/* The save counts Lumenwild stages. The other worlds stay open so their
+ * roads can be run without spending that count. */
+static int lumen_world(void) {
+    return levels[level_index] == &level_lumenwild;
+}
+
+static int stage_open(int index) {
+    if (!lumen_world())
+        return 1;
+    return index < story_reach;
+}
+
 static int stage_end(int index) {
-    return k_stages[index].finish;
+    return stages()[index].finish;
 }
 
 static int stage_score(void) {
@@ -542,15 +547,14 @@ static void draw_select(void) {
 }
 
 static void draw_stages(void) {
-    int i;
+    int i, n = stage_n();
     panel(3, 40, 48, 240, 150);
-    hud_center(64, "LUMENWILD");
-    for (i = 0; i < STAGE_COUNT; i++) {
+    hud_center(64, levels[level_index]->name);
+    for (i = 0; i < n; i++) {
         char line[40];
         int y = 96 + i * 16;
-        int open = i < story_reach;
-        snprintf(line, sizeof line, pick == i ? "> %s <" : "  %s  ", k_stages[i].name);
-        if (open)
+        snprintf(line, sizeof line, pick == i ? "> %s <" : "  %s  ", stages()[i].name);
+        if (stage_open(i))
             hud_center(y, line);
         else
             hud_center_rgb(y, line, 48, 40, 64);
@@ -563,15 +567,17 @@ static void draw_tally(void) {
     int score = stage_score();
     int cleared = score >= CLEAR_SCORE;
     panel(3, 24, 36, 272, 148);
-    hud_center(48, k_stages[stage_index].name);
+    hud_center(48, stages()[stage_index].name);
     snprintf(line, sizeof line, "JUMPS %d   +%d", jumps, jumps * PTS_JUMP);
     hud_center(72, line);
     snprintf(line, sizeof line, "HITS  %d   -%d", hits, hits * PTS_HIT);
     hud_center(88, line);
     snprintf(line, sizeof line, "SCORE %d", score);
     hud_center(112, line);
-    if (cleared && stage_index + 1 >= STAGE_COUNT)
-        hud_center(136, "LUMENWILD COMPLETE");
+    if (cleared && stage_index + 1 >= stage_n()) {
+        snprintf(line, sizeof line, "%s COMPLETE", levels[level_index]->name);
+        hud_center(136, line);
+    }
     else if (cleared)
         hud_center(136, "CLEARED");
     else {
@@ -605,14 +611,14 @@ static void draw_ui(void) {
             setRGB0(bar, 8, 12, 24);
         }
         if (story_run) {
-            int span = k_stages[stage_index].finish - k_stages[stage_index].start;
-            int run = scroll + CHAR_Z - k_stages[stage_index].start;
+            int span = stages()[stage_index].finish - stages()[stage_index].start;
+            int run = scroll + CHAR_Z - stages()[stage_index].start;
             int pct = span > 0 ? run * 100 / span : 0;
             if (pct < 0)
                 pct = 0;
             if (pct > 100)
                 pct = 100;
-            snprintf(line, sizeof line, "%s %d%%  SCORE %d", k_stages[stage_index].name, pct, stage_score());
+            snprintf(line, sizeof line, "%s %d%%  SCORE %d", stages()[stage_index].name, pct, stage_score());
         } else {
             snprintf(line, sizeof line, "RUN %d     START PAUSE", distance);
         }
@@ -666,11 +672,12 @@ static void judge_boxes(int step) {
 static void open_tally(void) {
     state = ST_TALLY;
     tick = 0;
-    if (stage_score() >= CLEAR_SCORE && stage_index + 1 >= story_reach) {
+    if (lumen_world() && stage_score() >= CLEAR_SCORE && stage_index + 1 >= story_reach) {
         int was = story_reach;
+        int n = stage_n();
         story_reach = stage_index + 2;
-        if (story_reach > STAGE_COUNT)
-            story_reach = STAGE_COUNT;
+        if (story_reach > n)
+            story_reach = n;
         if (story_reach != was)
             save_store(story_reach);
     }
@@ -749,11 +756,11 @@ static void start_stage(int index) {
     jumps = 0;
     hits = 0;
     runner_ahead = 0;
-    course_boxes_reset(k_stages[index].start / STEP);
+    course_boxes_reset(stages()[index].start / STEP);
     course_quiet(stage_end(index) - FINISH_CLEAR, 0x7fffffff);
-    if (!path_open(k_stages[index].track))
+    if (!path_open(stages()[index].track))
         path_open("straight.run");
-    scroll = k_stages[index].start;
+    scroll = stages()[index].start;
     lane_u = 0;
     player_x = 0;
     path_follow(scroll + CHAR_Z, 0);
@@ -765,10 +772,10 @@ static void open_stages(void) {
     go(ST_STAGE);
     if (at < 0)
         at = 0;
-    if (at >= STAGE_COUNT)
-        at = STAGE_COUNT - 1;
+    if (at >= stage_n())
+        at = stage_n() - 1;
     pick = at;
-    scroll = k_stages[pick].start;
+    scroll = stages()[pick].start;
 }
 
 static int confirm(void) {
@@ -851,7 +858,7 @@ static int update_screens(void) {
         }
         if (confirm()) {
             play_sound(SND_SELECT);
-            if (mode == MODE_STORY)
+            if (mode == MODE_STORY && stage_n() > 0)
                 open_stages();
             else
                 start_run();
@@ -863,13 +870,13 @@ static int update_screens(void) {
         anim_tick++;
         return 0;
     case ST_STAGE:
-        menu_move(STAGE_COUNT);
+        menu_move(stage_n());
         if (pick < 0)
             pick = 0;
-        if (pick >= STAGE_COUNT)
-            pick = STAGE_COUNT - 1;
-        scroll = k_stages[pick].start;
-        if (confirm() && pick < story_reach) {
+        if (pick >= stage_n())
+            pick = stage_n() - 1;
+        scroll = stages()[pick].start;
+        if (confirm() && stage_open(pick)) {
             play_sound(SND_SELECT);
             start_stage(pick);
         } else if (back()) {
@@ -954,7 +961,7 @@ static void save_service(void) {
     if (!done || save_applied)
         return;
     save_applied = 1;
-    if (loaded > story_reach && loaded <= STAGE_COUNT)
+    if (loaded > story_reach && loaded <= level_lumenwild.stage_count)
         story_reach = loaded;
     else if (story_reach > loaded && story_reach > 1)
         save_store(story_reach);
@@ -1461,9 +1468,9 @@ int main(int argc, const char **argv) {
             const Level *lv = levels[level_index];
             const char *track = lv->track;
             if (mode == MODE_STORY && state == ST_STAGE)
-                track = k_stages[pick].track;
+                track = stages()[pick].track;
             else if (story_run)
-                track = k_stages[stage_index].track;
+                track = stages()[stage_index].track;
             if (!path_open(track))
                 path_open("straight.run");
             path_begin(frame.scroll);

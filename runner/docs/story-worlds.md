@@ -56,7 +56,7 @@ Lane changes.
 horizons, sweeping S-curves, and splitting paths. A surreal test of
 everything learned.
 
-Yaw and forks, after the earlier mechanics have all appeared.
+Yaw, grade, and forks. The road drops into an ice crack, then climbs back out.
 
 ## 7. Null Cathedral
 

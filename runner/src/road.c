@@ -1,3 +1,4 @@
+#include <psxgpu.h>
 #include "world.h"
 #include "course.h"
 #include "path.h"
@@ -40,6 +41,7 @@ typedef struct {
     int gap;          /* 1 when off-screen road was skipped since the sample before */
     int lx, ly, rx, ry; /* the edges in camera space, with lz and rz */
     int kl, kr;       /* each curb's width, 0..4096 of EDGE_W */
+    int room_l, room_r; /* how far past each edge the floor may run before another road */
     const PathSeg *seg;
 } RoadSample;
 
@@ -364,7 +366,9 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
 
 /* Shoulder over the floor. Link this after the deck and curb: the first
  * primitive in a bucket is the one that shows, so the floor has to be last
- * or it paints over the curb. */
+ * or it paints over the curb. On a fork the floor stops short of the other
+ * deck. The route is drawn first, and a floor linked before the other road
+ * would cover it. */
 static void verge(const RoadSample *a, const RoadSample *b) {
     int side;
     if (!style->ground && !style->shoulder)
@@ -372,10 +376,22 @@ static void verge(const RoadSample *a, const RoadSample *b) {
     if (a->gap || b->s - a->s < SLIVER)
         return;
     for (side = -1; side <= 1; side += 2) {
-        if (style->shoulder)
-            verge_band(a, b, side, 0, style->shoulder, style->shoulder_c);
-        if (style->ground)
-            verge_band(a, b, side, 0, style->ground, style->ground_c);
+        int room = side < 0 ? a->room_l : a->room_r;
+        int room_b = side < 0 ? b->room_l : b->room_r;
+        int sh = style->shoulder;
+        int gr = style->ground;
+        if (room_b < room)
+            room = room_b;
+        if (room < 16)
+            continue;
+        if (sh > room)
+            sh = room;
+        if (gr > room)
+            gr = room;
+        if (sh > 0)
+            verge_band(a, b, side, 0, sh, style->shoulder_c);
+        if (gr > 0)
+            verge_band(a, b, side, 0, gr, style->ground_c);
     }
 }
 
@@ -467,6 +483,84 @@ static int next_s(int s, int ds, int *end) {
     return b >= 0 ? b * STEP : s + ds;
 }
 
+/* The other road's edge, in this sample's u. *ok is 0 when the edge is
+ * too small to read, and the caller leaves the floor alone. */
+static int other_u(const RoadSample *a, int x, int y, int z, int *ok) {
+    int vx = (a->rx - a->lx) >> 4;
+    int vy = (a->ry - a->ly) >> 4;
+    int vz = (a->rz - a->lz) >> 4;
+    int dx = (x - a->lx) >> 4;
+    int dy = (y - a->ly) >> 4;
+    int dz = (z - a->lz) >> 4;
+    int vv = vx * vx + vy * vy + vz * vz;
+    int num;
+    if (vv < 8 || a->w < 8) {
+        *ok = 0;
+        return 0;
+    }
+    num = dx * vx + dy * vy + dz * vz;
+    *ok = 1;
+    return a->ul + num * a->w / vv;
+}
+
+/* How far past this edge the floor can go before it meets another road.
+ * A missing curb is the seam, where the decks already touch. */
+static int measure_room(const RoadSample *a, int side) {
+    int n = path_branches();
+    int k, room = 8000, edge;
+    if (n <= 0)
+        return room;
+    if (side < 0) {
+        if (!a->kl)
+            return 0;
+        edge = a->ul;
+    } else {
+        if (!a->kr)
+            return 0;
+        edge = a->ul + a->w;
+    }
+    for (k = 0; k < n; k++) {
+        int s0, s1, ul, ur, lx, ly, lz, rx, ry, rz;
+        int u0, u1, ok0, ok1, near, gap;
+        if (!path_branch(k, a->s, &s0, &s1) || a->s < s0 || a->s >= s1)
+            continue;
+        path_swap(k);
+        path_edges(a->s, &ul, &ur);
+        path_cam_lr(a->s, ul, ur, 0, &lx, &ly, &lz, &rx, &ry, &rz);
+        path_swap(k);
+        if (lz < 32 && rz < 32)
+            continue;
+        u0 = other_u(a, lx, ly, lz, &ok0);
+        u1 = other_u(a, rx, ry, rz, &ok1);
+        if (!ok0 || !ok1)
+            continue;
+        near = side < 0 ? (u0 > u1 ? u0 : u1) : (u0 < u1 ? u0 : u1);
+        if (side < 0) {
+            if (near >= edge)
+                continue;
+            gap = edge - near - 48;
+        } else {
+            if (near <= edge)
+                continue;
+            gap = near - edge - 48;
+        }
+        if (gap < room)
+            room = gap;
+    }
+    if (room < 0)
+        room = 0;
+    return room;
+}
+
+static void fill_room(RoadSample *a) {
+    a->room_l = 8000;
+    a->room_r = 8000;
+    if (path_branches() <= 0 || !style || (!style->ground && !style->shoulder))
+        return;
+    a->room_l = measure_room(a, -1);
+    a->room_r = measure_room(a, 1);
+}
+
 static int sample_at(RoadSample *out, int s);
 
 static int sample_side(RoadSample *out, int s, int end) {
@@ -492,6 +586,7 @@ static int sample_at(RoadSample *out, int s) {
     out->rz = rz;
     out->s = s;
     out->gap = 0;
+    fill_room(out);
     return (lz + rz) / 2;
 }
 
@@ -543,6 +638,248 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
 #ifdef RUNNER_PROFILE
     prof_ticks[PF_R_GANTRY] += (prof_now() - prof_t0_) & 0xFFFF;
 #endif
+}
+
+/* Scenery stops while this much of the primitive buffer is still free, so
+ * the speed lines and the HUD have somewhere to land. */
+#define SCENE_SLACK (10 * 1024)
+
+static int scene_room(void) {
+    return world_bytes_used() + SCENE_SLACK <= BUFFER_LENGTH;
+}
+
+/* 1 when a sheet `out` past this edge stays off the other road. */
+static int clear_of_fork(int s, int side, int out) {
+    RoadSample a;
+    int room;
+    if (out <= 0 || path_branches() <= 0)
+        return 1;
+    sample_at(&a, s);
+    if (style && (style->ground || style->shoulder))
+        room = side < 0 ? a.room_l : a.room_r;
+    else
+        room = measure_room(&a, side);
+    return room >= out;
+}
+
+static int paint_span(int x0, int y0, int z0, int x1, int y1, int z1,
+                      int x2, int y2, int z2, int x3, int y3, int z3,
+                      int r, int g, int b) {
+    int nz, fz, nr, ng, nb, fr, fg, fb, sort;
+    int cn[3], cf[3];
+    XY p0, p1, p2, p3;
+    if (z0 < 16 || z1 < 16 || z2 < 16 || z3 < 16)
+        return 1;
+    nz = (z0 + z1) / 2;
+    fz = (z2 + z3) / 2;
+    sort = fz;
+    if (sort < CLIP)
+        sort = CLIP;
+    if (sort >= VIEW_Z)
+        return 1;
+    nr = fr = r;
+    ng = fg = g;
+    nb = fb = b;
+    haze_air(&nr, &ng, &nb, nz);
+    haze_air(&fr, &fg, &fb, fz);
+    cn[0] = nr;
+    cn[1] = ng;
+    cn[2] = nb;
+    cf[0] = fr;
+    cf[1] = fg;
+    cf[2] = fb;
+    project(x0, y0, z0, &p0);
+    project(x1, y1, z1, &p1);
+    project(x2, y2, z2, &p2);
+    project(x3, y3, z3, &p3);
+    emit_piece(p0, p1, p2, p3, view_bucket(sort), cn, cf, 0);
+    return 1;
+}
+
+static void cloth_u(int s, int side, int out, int *u) {
+    int ul, ur;
+    if (!side) {
+        *u = out;
+        return;
+    }
+    path_edges(s, &ul, &ur);
+    *u = side < 0 ? ul - out : ur + out;
+}
+
+int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
+               int r, int g, int b) {
+    int u0, u1, reach;
+    int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
+    if (!scene_room())
+        return 0;
+    if (s1 < s0 + 8)
+        return 1;
+    reach = out0 > out1 ? out0 : out1;
+    if (side && (!clear_of_fork(s0, side, reach) || !clear_of_fork(s1, side, reach)))
+        return 1;
+    cloth_u(s0, side, out0, &u0);
+    cloth_u(s0, side, out1, &u1);
+    path_cam(s0, u0, v0, &x0, &y0, &z0);
+    path_cam(s0, u1, v1, &x1, &y1, &z1);
+    cloth_u(s1, side, out0, &u0);
+    cloth_u(s1, side, out1, &u1);
+    path_cam(s1, u0, v0, &x2, &y2, &z2);
+    path_cam(s1, u1, v1, &x3, &y3, &z3);
+    return paint_span(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b);
+}
+
+int road_lintel(int s0, int s1, int out, int v, int r, int g, int b) {
+    int ul, ur;
+    int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
+    if (!scene_room())
+        return 0;
+    if (s1 < s0 + 8)
+        return 1;
+    path_edges(s0, &ul, &ur);
+    path_cam(s0, ul - out, v, &x0, &y0, &z0);
+    path_cam(s0, ur + out, v, &x1, &y1, &z1);
+    path_edges(s1, &ul, &ur);
+    path_cam(s1, ul - out, v, &x2, &y2, &z2);
+    path_cam(s1, ur + out, v, &x3, &y3, &z3);
+    return paint_span(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b);
+}
+
+int road_marker(int s, int u, int half, int v0, int v1, int r, int g, int b) {
+    int ul, ur, side, inner, out;
+    if (!scene_room())
+        return 0;
+    if (half < 1)
+        half = 1;
+    path_edges(s, &ul, &ur);
+    if (u + half > ul + 8 && u - half < ur - 8)
+        return 1;
+    side = (u + half < ul) ? -1 : 1;
+    inner = side < 0 ? ul - (u + half) : (u - half) - ur;
+    if (inner < 24)
+        return 1;
+    out = side < 0 ? ul - (u - half) : (u + half) - ur;
+    if (!clear_of_fork(s, side, out))
+        return 1;
+    road_panel(s, u - half, u + half, v0, v1, r, g, b);
+    return 1;
+}
+
+/* Averaged with the scene, so the line stays see-through. */
+static void glow_line(XY a, XY b, int bucket, int r, int g, int bl) {
+    LINE_F2 *line;
+    DR_TPAGE *mode;
+    if (!xy_ok(&a) || !xy_ok(&b) || !edge_ok(a, b))
+        return;
+    if (world_bytes_used() + sizeof(LINE_F2) + sizeof(DR_TPAGE) > BUFFER_LENGTH)
+        return;
+    line = alloc_prim(bucket, sizeof(LINE_F2));
+    if (!line)
+        return;
+    setLineF2(line);
+    setSemiTrans(line, 1);
+    setRGB0(line, clamp(r, 0, 255), clamp(g, 0, 255), clamp(bl, 0, 255));
+    setXY2(line, a.x, a.y, b.x, b.y);
+    mode = alloc_prim(bucket, sizeof(DR_TPAGE));
+    if (mode)
+        setDrawTPage(mode, 0, 1, getTPage(0, BLEND_AVG, 0, 0));
+}
+
+static const int8_t k_sin[64] = {
+    0, 12, 25, 37, 49, 60, 71, 81, 90, 98, 106, 112, 117, 122, 125, 126,
+    127, 126, 125, 122, 117, 112, 106, 98, 90, 81, 71, 60, 49, 37, 25, 12,
+    0, -12, -25, -37, -49, -60, -71, -81, -90, -98, -106, -112, -117, -122, -125, -126,
+    -127, -126, -125, -122, -117, -112, -106, -98, -90, -81, -71, -60, -49, -37, -25, -12
+};
+
+static int sn64(int a) { return k_sin[a & 63]; }
+static int cs64(int a) { return k_sin[(a + 16) & 63]; }
+
+static uint32_t mix32(uint32_t h) {
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    h *= 0x846CA68Bu;
+    h ^= h >> 16;
+    return h;
+}
+
+#define STREAKS 48
+#define TUBE_R 460
+#define TUBE_CROWN (CAM_H + HORIZON_Y * CHAR_Z / (SCREEN_W / 2))
+
+/* Carry the lower end to just past the bottom of the screen. The two
+ * projected ends already give the line's direction. */
+static void extend_bottom(XY *far, XY *near) {
+    int dy, dx, reach, nx, ny, span;
+    if (near->y < 0 || near->y >= SCREEN_H || far->y >= near->y)
+        return;
+    dy = near->y - far->y;
+    if (dy < 1)
+        return;
+    dx = near->x - far->x;
+    if (dx > 2000)
+        dx = 2000;
+    if (dx < -2000)
+        dx = -2000;
+    reach = SCREEN_H + 12 - near->y;
+    nx = near->x + dx * reach / dy;
+    ny = SCREEN_H + 12;
+    span = iabs(nx - far->x);
+    if (iabs(ny - far->y) > span)
+        span = iabs(ny - far->y);
+    if (span > 480) {
+        nx = far->x + (nx - far->x) * 480 / span;
+        ny = far->y + (ny - far->y) * 480 / span;
+    }
+    if (nx < -1000)
+        nx = -1000;
+    if (nx > 1000)
+        nx = 1000;
+    near->x = nx;
+    near->y = ny;
+}
+
+void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown) {
+    int picture = f->time >> 1;
+    int tube = radius > 0 ? radius : TUBE_R;
+    int top = crown > 0 ? crown : TUBE_CROWN;
+    int i;
+    r = r / 2 + 40;
+    g = g / 2 + 40;
+    b = b / 2 + 40;
+    if (f->speed <= 0)
+        return;
+    for (i = 0; i < STREAKS; i++) {
+        uint32_t slot = mix32((uint32_t)i * 0x9E3779B9u);
+        int span = 480;
+        int cycle = span * 5;
+        int speed = 128 + (int)((slot >> 8) & 63);
+        uint32_t clock = (uint32_t)picture * (uint32_t)speed + (slot >> 16);
+        int travel = (int)(clock % (uint32_t)cycle);
+        int a = (int)(mix32(slot ^ (clock / (uint32_t)cycle)) & 63);
+        int ahead = CHAR_Z + span - travel % span;
+        int step = 48 + (int)((slot >> 24) & 63);
+        int cax = cs64(a), sax = sn64(a);
+        int u = f->x + tube * cax / 127;
+        int h = top * (sax + 127) / 254;
+        int bucket;
+        XY far, near;
+        int zf, zn;
+        if (travel >= span)
+            continue;
+        zf = path_project(f->scroll + ahead + step, u, h, &far);
+        zn = path_project(f->scroll + ahead, u, h, &near);
+        if (zf < 48 || zn < 48)
+            continue;
+        if (far.y < 0 || near.y < 0)
+            continue;
+        if (radius <= 0)
+            extend_bottom(&far, &near);
+        bucket = ahead >> OT_SHIFT;
+        if (bucket < (CHAR_Z >> OT_SHIFT))
+            bucket = CHAR_Z >> OT_SHIFT;
+        glow_line(far, near, bucket, r, g, b);
+    }
 }
 
 /* The deck at u across a sample, in camera space: path_cam_lr is linear

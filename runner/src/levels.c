@@ -2,6 +2,12 @@
 
 extern const Level level_city;
 extern const Level level_lumenwild;
+extern const Level level_vesper;
+extern const Level level_shatter;
+extern const Level level_reach;
+extern const Level level_sine;
+extern const Level level_meridian;
+extern const Level level_cathedral;
 extern const Level level_oval;
 extern const Level level_hill;
 extern const Level level_bank;
@@ -12,6 +18,12 @@ extern const Level level_maxip;
  * with story set; Arcade Mode offers the rest, in this order. */
 const Level *const levels[] = {
     &level_lumenwild,
+    &level_vesper,
+    &level_shatter,
+    &level_reach,
+    &level_sine,
+    &level_meridian,
+    &level_cathedral,
     &level_city,
     &level_oval,
     &level_hill,

@@ -57,4 +57,6 @@ const Level level_oval = {
     oval_draw,
     &k_light,
     0,
+    0,
+    0,
 };

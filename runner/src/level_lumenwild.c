@@ -1234,6 +1234,12 @@ static void lumen_draw(const LevelFrame *f) {
     PROF(PF_STREAKS, speed_streaks());
 }
 
+static const Stage k_stages[] = {
+    {"THE TRAIL", "lumenwild.trail", 0, STAGE_FINISH},
+    {"THE RISE", "lumenwild.rise", 0, STAGE_FINISH},
+    {"THE PINCH", "lumenwild.pinch", 0, STAGE_FINISH},
+};
+
 const Level level_lumenwild = {
     "LUMENWILD",
     "lumenwild.trail",
@@ -1241,4 +1247,6 @@ const Level level_lumenwild = {
     lumen_draw,
     &lw_light,
     1,
+    k_stages,
+    3,
 };

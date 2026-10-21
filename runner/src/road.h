@@ -42,3 +42,23 @@ void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]);
 /* That bar over the start line of a closed track, once a lap. Nothing on
  * a track that does not close. Call after road_draw. */
 void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3]);
+
+/* Motion lines around the runner. radius and crown are the tube's
+ * half-width and height; 0 is the open-road size. A set radius keeps the
+ * lines inside a cave or a crack. Call after road_draw. The tint is
+ * pulled toward a glassy mid color. */
+void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown);
+
+/* A quad along the road from s0 to s1. side -1 stands off the left edge,
+ * +1 off the right, and 0 uses out0 and out1 as centerline u. out is how
+ * far past that edge. The quad runs from (out0, v0) to (out1, v1). A side
+ * that would cross another road is skipped. Returns 0 when the frame has
+ * no room left for scenery. Call after road_draw, so a deck already in
+ * the bucket stays in front of the quad. */
+int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
+               int r, int g, int b);
+/* Ceiling from one edge to the other, `out` past each edge, at height v. */
+int road_lintel(int s0, int s1, int out, int v, int r, int g, int b);
+/* A card facing along the road, centered at u, `half` wide. Skipped when
+ * it would sit on the deck or on the other road of a fork. */
+int road_marker(int s, int u, int half, int v0, int v1, int r, int g, int b);

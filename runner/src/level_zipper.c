@@ -58,4 +58,6 @@ const Level level_zipper = {
     zipper_draw,
     &k_light,
     0,
+    0,
+    0,
 };

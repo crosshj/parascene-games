@@ -510,6 +510,4623 @@
       ]
     },
     {
+      "id": "vesper.sweep",
+      "name": "Vesper sweep",
+      "status": "runnable",
+      "summary": "Story stage 1. A long banked sweep on a wide road, then a level run to the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 24576,
+          "next": "turn-in",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            },
+            {
+              "at": 23680,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "turn-in",
+          "length": 4096,
+          "yaw": 45,
+          "bank": 33.75,
+          "next": "sweep",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "sweep",
+          "length": 32768,
+          "yaw": 90,
+          "next": "turn-out",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            },
+            {
+              "at": 23680,
+              "lane": 1
+            },
+            {
+              "at": 25728,
+              "lane": -1
+            },
+            {
+              "at": 27776,
+              "lane": 0
+            },
+            {
+              "at": 29824,
+              "lane": 1
+            },
+            {
+              "at": 31872,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "turn-out",
+          "length": 4096,
+          "yaw": 45,
+          "bank": -33.75,
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 40960,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            },
+            {
+              "at": 23680,
+              "lane": 1
+            },
+            {
+              "at": 25728,
+              "lane": -1
+            },
+            {
+              "at": 27776,
+              "lane": 0
+            },
+            {
+              "at": 29824,
+              "lane": 1
+            },
+            {
+              "at": 31872,
+              "lane": -1
+            },
+            {
+              "at": 33920,
+              "lane": 0
+            },
+            {
+              "at": 35968,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 40064,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "vesper.esse",
+      "name": "Vesper S",
+      "status": "runnable",
+      "summary": "Story stage 2. An S that banks left, rolls through level into a right bank, then a long run. The road ends.",
+      "capabilities": [
+        "yaw",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 40960,
+          "next": "lean-left",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            },
+            {
+              "at": 23680,
+              "lane": 1
+            },
+            {
+              "at": 25728,
+              "lane": -1
+            },
+            {
+              "at": 27776,
+              "lane": 0
+            },
+            {
+              "at": 29824,
+              "lane": 1
+            },
+            {
+              "at": 31872,
+              "lane": -1
+            },
+            {
+              "at": 33920,
+              "lane": 0
+            },
+            {
+              "at": 35968,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 40064,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "lean-left",
+          "length": 2048,
+          "yaw": -14.0625,
+          "bank": -22.5,
+          "next": "carve-left"
+        },
+        {
+          "id": "carve-left",
+          "length": 1792,
+          "yaw": -14.0625,
+          "obstacles": [
+            {
+              "at": 896,
+              "lane": -1
+            }
+          ],
+          "next": "flip"
+        },
+        {
+          "id": "flip",
+          "length": 2048,
+          "bank": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "carve-right"
+        },
+        {
+          "id": "carve-right",
+          "length": 1792,
+          "yaw": 14.0625,
+          "obstacles": [
+            {
+              "at": 896,
+              "lane": 1
+            }
+          ],
+          "next": "lean-right"
+        },
+        {
+          "id": "lean-right",
+          "length": 2048,
+          "yaw": 14.0625,
+          "bank": -22.5,
+          "next": "settle"
+        },
+        {
+          "id": "settle",
+          "length": 2048,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            }
+          ],
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 53760,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            },
+            {
+              "at": 23680,
+              "lane": 1
+            },
+            {
+              "at": 25728,
+              "lane": -1
+            },
+            {
+              "at": 27776,
+              "lane": 0
+            },
+            {
+              "at": 29824,
+              "lane": 1
+            },
+            {
+              "at": 31872,
+              "lane": -1
+            },
+            {
+              "at": 33920,
+              "lane": 0
+            },
+            {
+              "at": 35968,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 40064,
+              "lane": 0
+            },
+            {
+              "at": 42112,
+              "lane": 1
+            },
+            {
+              "at": 44160,
+              "lane": -1
+            },
+            {
+              "at": 46208,
+              "lane": 0
+            },
+            {
+              "at": 48256,
+              "lane": 1
+            },
+            {
+              "at": 50304,
+              "lane": -1
+            },
+            {
+              "at": 52352,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "vesper.hook",
+      "name": "Vesper hook",
+      "status": "runnable",
+      "summary": "Story stage 3. A banked bend, a long run, and a tighter banked bend into the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 22528,
+          "next": "turn-in",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "turn-in",
+          "length": 4096,
+          "yaw": 45,
+          "bank": 33.75,
+          "next": "turn",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "turn",
+          "length": 12288,
+          "yaw": 90,
+          "next": "turn-out",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "turn-out",
+          "length": 4096,
+          "yaw": 45,
+          "bank": -33.75,
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 51200,
+          "next": "hook-in",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            },
+            {
+              "at": 9344,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 15488,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 21632,
+              "lane": 0
+            },
+            {
+              "at": 23680,
+              "lane": 1
+            },
+            {
+              "at": 25728,
+              "lane": -1
+            },
+            {
+              "at": 27776,
+              "lane": 0
+            },
+            {
+              "at": 29824,
+              "lane": 1
+            },
+            {
+              "at": 31872,
+              "lane": -1
+            },
+            {
+              "at": 33920,
+              "lane": 0
+            },
+            {
+              "at": 35968,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 40064,
+              "lane": 0
+            },
+            {
+              "at": 42112,
+              "lane": 1
+            },
+            {
+              "at": 44160,
+              "lane": -1
+            },
+            {
+              "at": 46208,
+              "lane": 0
+            },
+            {
+              "at": 48256,
+              "lane": 1
+            },
+            {
+              "at": 50304,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "hook-in",
+          "length": 2048,
+          "yaw": 45,
+          "bank": 33.75,
+          "next": "hook"
+        },
+        {
+          "id": "hook",
+          "length": 8192,
+          "yaw": 90,
+          "next": "hook-out",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 7296,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "hook-out",
+          "length": 2048,
+          "yaw": 45,
+          "bank": -33.75,
+          "next": "home"
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "shatter.split",
+      "name": "Shatterglass split",
+      "status": "runnable",
+      "summary": "Story stage 1. One fork. Three lanes split into two and one and meet again, then the road runs to the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "lanes",
+        "fork",
+        "join"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 40960,
+          "next": "split",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "split",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off",
+          "next": "two-off"
+        },
+        {
+          "id": "two-off",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level"
+        },
+        {
+          "id": "two-level",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-hold"
+        },
+        {
+          "id": "two-hold",
+          "length": 4096,
+          "lanes": 2,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -0.5
+            }
+          ],
+          "next": "two-return"
+        },
+        {
+          "id": "two-return",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "two-back"
+        },
+        {
+          "id": "two-back",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "joined"
+        },
+        {
+          "id": "joined",
+          "length": 2048,
+          "shift": -0.5,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 45056,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 41088,
+              "lane": 0
+            },
+            {
+              "at": 44160,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        },
+        {
+          "id": "one-off",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level"
+        },
+        {
+          "id": "one-level",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-hold"
+        },
+        {
+          "id": "one-hold",
+          "length": 4096,
+          "lanes": 1,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "one-return"
+        },
+        {
+          "id": "one-return",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "next": "one-back"
+        },
+        {
+          "id": "one-back",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "joined"
+        }
+      ]
+    },
+    {
+      "id": "shatter.switch",
+      "name": "Shatterglass switch",
+      "status": "runnable",
+      "summary": "Story stage 2. A switchback, then a fork, then the run to the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "lanes",
+        "fork",
+        "join"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 16384,
+          "next": "bend",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "bend",
+          "length": 12288,
+          "yaw": 90,
+          "next": "back",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "back",
+          "length": 12288,
+          "yaw": -90,
+          "next": "split",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "split",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off",
+          "next": "two-off"
+        },
+        {
+          "id": "two-off",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level"
+        },
+        {
+          "id": "two-level",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-hold"
+        },
+        {
+          "id": "two-hold",
+          "length": 4096,
+          "lanes": 2,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -0.5
+            }
+          ],
+          "next": "two-return"
+        },
+        {
+          "id": "two-return",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "two-back"
+        },
+        {
+          "id": "two-back",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "joined"
+        },
+        {
+          "id": "joined",
+          "length": 2048,
+          "shift": -0.5,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 45056,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 41088,
+              "lane": 0
+            },
+            {
+              "at": 44160,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        },
+        {
+          "id": "one-off",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level"
+        },
+        {
+          "id": "one-level",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-hold"
+        },
+        {
+          "id": "one-hold",
+          "length": 4096,
+          "lanes": 1,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "one-return"
+        },
+        {
+          "id": "one-return",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "next": "one-back"
+        },
+        {
+          "id": "one-back",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "joined"
+        }
+      ]
+    },
+    {
+      "id": "shatter.join",
+      "name": "Shatterglass join",
+      "status": "runnable",
+      "summary": "Story stage 3. A fork that swaps its lanes, a turn, and a second fork into the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "lanes",
+        "fork",
+        "join"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 16384,
+          "next": "split",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "split",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off",
+          "next": "two-off"
+        },
+        {
+          "id": "two-off",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level"
+        },
+        {
+          "id": "two-level",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-to-one"
+        },
+        {
+          "id": "two-to-one",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 1,
+          "anchor": "right",
+          "next": "two-return"
+        },
+        {
+          "id": "two-return",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "two-back"
+        },
+        {
+          "id": "two-back",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "joined"
+        },
+        {
+          "id": "joined",
+          "length": 2048,
+          "shift": -1,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "link"
+        },
+        {
+          "id": "link",
+          "length": 8192,
+          "yaw": 90,
+          "next": "split-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "split-b",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off-b",
+          "next": "two-off-b"
+        },
+        {
+          "id": "two-off-b",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level-b"
+        },
+        {
+          "id": "two-level-b",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-hold-b"
+        },
+        {
+          "id": "two-hold-b",
+          "length": 4096,
+          "lanes": 2,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -0.5
+            }
+          ],
+          "next": "two-return-b"
+        },
+        {
+          "id": "two-return-b",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "two-back-b"
+        },
+        {
+          "id": "two-back-b",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "joined-b"
+        },
+        {
+          "id": "joined-b",
+          "length": 2048,
+          "shift": -0.5,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 40960,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        },
+        {
+          "id": "one-off",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level"
+        },
+        {
+          "id": "one-level",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-to-two"
+        },
+        {
+          "id": "one-to-two",
+          "length": 4096,
+          "lanes": 1,
+          "lanesTo": 2,
+          "anchor": "left",
+          "next": "one-return"
+        },
+        {
+          "id": "one-return",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            }
+          ],
+          "next": "one-back"
+        },
+        {
+          "id": "one-back",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "joined"
+        },
+        {
+          "id": "one-off-b",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level-b"
+        },
+        {
+          "id": "one-level-b",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-hold-b"
+        },
+        {
+          "id": "one-hold-b",
+          "length": 4096,
+          "lanes": 1,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "one-return-b"
+        },
+        {
+          "id": "one-return-b",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "next": "one-back-b"
+        },
+        {
+          "id": "one-back-b",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "joined-b"
+        }
+      ]
+    },
+    {
+      "id": "reach.ridge",
+      "name": "Reach ridge",
+      "status": "runnable",
+      "summary": "Story stage 1. Two climbs and two descents on a wide road, then the run to the finish. The road ends.",
+      "capabilities": [
+        "grade"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 20480,
+          "next": "climb",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "climb",
+          "length": 8192,
+          "grade": 22.5,
+          "next": "crest",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "crest",
+          "length": 8192,
+          "next": "drop",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "drop",
+          "length": 8192,
+          "grade": -22.5,
+          "next": "valley",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "valley",
+          "length": 8192,
+          "next": "climb-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "climb-b",
+          "length": 8192,
+          "grade": 22.5,
+          "next": "crest-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "crest-b",
+          "length": 8192,
+          "next": "drop-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "drop-b",
+          "length": 8192,
+          "grade": -22.5,
+          "next": "run",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "run",
+          "length": 28672,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "reach.climb",
+      "name": "Reach climb",
+      "status": "runnable",
+      "summary": "Story stage 2. The climb is banked, the road turns while it is up, then it descends and rolls level. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 16384,
+          "next": "lean",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "lean",
+          "length": 4096,
+          "yaw": 22.5,
+          "bank": 22.5,
+          "grade": 22.5,
+          "next": "climb"
+        },
+        {
+          "id": "climb",
+          "length": 16384,
+          "yaw": 45,
+          "next": "crest",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "crest",
+          "length": 8192,
+          "next": "fall",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "fall",
+          "length": 16384,
+          "grade": -22.5,
+          "next": "unroll",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "unroll",
+          "length": 4096,
+          "yaw": 22.5,
+          "bank": -22.5,
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 40960,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "reach.drop",
+      "name": "Reach drop",
+      "status": "runnable",
+      "summary": "Story stage 3. A rise, a long run, then a steep banked drop that levels into the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 24576,
+          "next": "rise",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "rise",
+          "length": 8192,
+          "grade": 22.5,
+          "next": "run",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "run",
+          "length": 49152,
+          "next": "crest",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 41088,
+              "lane": 0
+            },
+            {
+              "at": 44160,
+              "lane": 1
+            },
+            {
+              "at": 47232,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "crest",
+          "length": 8192,
+          "next": "lip",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "lip",
+          "length": 4096,
+          "yaw": 45,
+          "bank": 33.75,
+          "next": "plunge"
+        },
+        {
+          "id": "plunge",
+          "length": 8192,
+          "yaw": 45,
+          "grade": -45,
+          "next": "level",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "level",
+          "length": 4096,
+          "yaw": 22.5,
+          "bank": -33.75,
+          "grade": 22.5,
+          "next": "home"
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "sine.gate",
+      "name": "Sineworks gate",
+      "status": "runnable",
+      "summary": "Story stage 1. The road narrows to two lanes, holds, and opens again before the finish. The road ends.",
+      "capabilities": [
+        "lanes"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 32768,
+          "lanes": 3,
+          "next": "to-two",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "to-two",
+          "length": 4096,
+          "lanes": 3,
+          "lanesTo": 2,
+          "anchor": "center",
+          "next": "hold"
+        },
+        {
+          "id": "hold",
+          "length": 24576,
+          "lanes": 2,
+          "next": "to-three",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            },
+            {
+              "at": 4224,
+              "lane": 0.5
+            },
+            {
+              "at": 7296,
+              "lane": -0.5
+            },
+            {
+              "at": 10368,
+              "lane": 0.5
+            },
+            {
+              "at": 13440,
+              "lane": -0.5
+            },
+            {
+              "at": 16512,
+              "lane": 0.5
+            },
+            {
+              "at": 19584,
+              "lane": -0.5
+            },
+            {
+              "at": 22656,
+              "lane": 0.5
+            }
+          ]
+        },
+        {
+          "id": "to-three",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 3,
+          "anchor": "center",
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 40960,
+          "lanes": 3,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "sine.beat",
+      "name": "Sineworks beat",
+      "status": "runnable",
+      "summary": "Story stage 2. Lane changes come close together, down to one lane and back to three. The road ends.",
+      "capabilities": [
+        "lanes"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 16384,
+          "lanes": 3,
+          "next": "to-two",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "to-two",
+          "length": 4096,
+          "lanes": 3,
+          "lanesTo": 2,
+          "anchor": "center",
+          "next": "hold"
+        },
+        {
+          "id": "hold",
+          "length": 8192,
+          "lanes": 2,
+          "next": "to-three",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            },
+            {
+              "at": 4224,
+              "lane": 0.5
+            },
+            {
+              "at": 7296,
+              "lane": -0.5
+            }
+          ]
+        },
+        {
+          "id": "to-three",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 3,
+          "anchor": "center",
+          "next": "hold-b"
+        },
+        {
+          "id": "hold-b",
+          "length": 8192,
+          "lanes": 3,
+          "next": "to-two-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "to-two-b",
+          "length": 4096,
+          "lanes": 3,
+          "lanesTo": 2,
+          "anchor": "center",
+          "next": "hold-c"
+        },
+        {
+          "id": "hold-c",
+          "length": 8192,
+          "lanes": 2,
+          "next": "to-one",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            },
+            {
+              "at": 4224,
+              "lane": 0.5
+            },
+            {
+              "at": 7296,
+              "lane": -0.5
+            }
+          ]
+        },
+        {
+          "id": "to-one",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 1,
+          "anchor": "center",
+          "next": "hold-d"
+        },
+        {
+          "id": "hold-d",
+          "length": 8192,
+          "lanes": 1,
+          "next": "to-two-c",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "to-two-c",
+          "length": 4096,
+          "lanes": 1,
+          "lanesTo": 2,
+          "anchor": "center",
+          "next": "hold-e"
+        },
+        {
+          "id": "hold-e",
+          "length": 8192,
+          "lanes": 2,
+          "next": "to-three-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            },
+            {
+              "at": 4224,
+              "lane": 0.5
+            },
+            {
+              "at": 7296,
+              "lane": -0.5
+            }
+          ]
+        },
+        {
+          "id": "to-three-b",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 3,
+          "anchor": "center",
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 24576,
+          "lanes": 3,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "sine.crush",
+      "name": "Sineworks crush",
+      "status": "runnable",
+      "summary": "Story stage 3. The road closes to one lane, holds there, and opens again before the finish. The road ends.",
+      "capabilities": [
+        "lanes"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 24576,
+          "lanes": 3,
+          "next": "to-two",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "to-two",
+          "length": 4096,
+          "lanes": 3,
+          "lanesTo": 2,
+          "anchor": "center",
+          "next": "hold"
+        },
+        {
+          "id": "hold",
+          "length": 8192,
+          "lanes": 2,
+          "next": "to-one",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            },
+            {
+              "at": 4224,
+              "lane": 0.5
+            },
+            {
+              "at": 7296,
+              "lane": -0.5
+            }
+          ]
+        },
+        {
+          "id": "to-one",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 1,
+          "anchor": "center",
+          "next": "hold-b"
+        },
+        {
+          "id": "hold-b",
+          "length": 24576,
+          "lanes": 1,
+          "next": "to-two-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 0
+            },
+            {
+              "at": 10368,
+              "lane": 0
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 0
+            },
+            {
+              "at": 19584,
+              "lane": 0
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "to-two-b",
+          "length": 4096,
+          "lanes": 1,
+          "lanesTo": 2,
+          "anchor": "center",
+          "next": "hold-c"
+        },
+        {
+          "id": "hold-c",
+          "length": 8192,
+          "lanes": 2,
+          "next": "to-three",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            },
+            {
+              "at": 4224,
+              "lane": 0.5
+            },
+            {
+              "at": 7296,
+              "lane": -0.5
+            }
+          ]
+        },
+        {
+          "id": "to-three",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 3,
+          "anchor": "center",
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 24576,
+          "lanes": 3,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "meridian.drift",
+      "name": "Meridian drift",
+      "status": "runnable",
+      "summary": "Story stage 1. A long S that drops into a level ice crack and climbs back out. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 16384,
+          "next": "right",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "right",
+          "length": 20480,
+          "yaw": 90,
+          "next": "left-a",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "left-a",
+          "length": 6144,
+          "yaw": -45,
+          "next": "dip",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "dip",
+          "length": 4096,
+          "grade": -22.5,
+          "next": "settle",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "settle",
+          "length": 4096,
+          "grade": 22.5,
+          "next": "floor",
+          "obstacles": [
+            {
+              "at": 128,
+              "lane": -1
+            },
+            {
+              "at": 3200,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "floor",
+          "length": 4096,
+          "next": "rise",
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "rise",
+          "length": 4096,
+          "grade": 22.5,
+          "next": "crest",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "crest",
+          "length": 4096,
+          "grade": -22.5,
+          "next": "left-mid",
+          "obstacles": [
+            {
+              "at": 128,
+              "lane": 0
+            },
+            {
+              "at": 3200,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "left-mid",
+          "length": 6144,
+          "yaw": -45,
+          "next": "right-b",
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -1
+            },
+            {
+              "at": 5248,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "right-b",
+          "length": 20480,
+          "yaw": 90,
+          "next": "left-b",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "left-b",
+          "length": 14336,
+          "yaw": -90,
+          "next": "run",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "run",
+          "length": 2048,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "meridian.fork",
+      "name": "Meridian fork",
+      "status": "runnable",
+      "summary": "Story stage 2. An S into a fork, then a drop into a level ice crack and a climb back out. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade",
+        "lanes",
+        "fork",
+        "join"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 12288,
+          "next": "bend",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "bend",
+          "length": 16384,
+          "yaw": 90,
+          "next": "back",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "back",
+          "length": 16384,
+          "yaw": -90,
+          "next": "split",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "split",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off",
+          "next": "two-off"
+        },
+        {
+          "id": "two-off",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level"
+        },
+        {
+          "id": "two-level",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-hold"
+        },
+        {
+          "id": "two-hold",
+          "length": 4096,
+          "lanes": 2,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -0.5
+            }
+          ],
+          "next": "two-return"
+        },
+        {
+          "id": "two-return",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "two-back"
+        },
+        {
+          "id": "two-back",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "joined"
+        },
+        {
+          "id": "joined",
+          "length": 2048,
+          "shift": -0.5,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "dip"
+        },
+        {
+          "id": "dip",
+          "length": 4096,
+          "grade": -22.5,
+          "next": "settle",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "settle",
+          "length": 4096,
+          "grade": 22.5,
+          "next": "floor",
+          "obstacles": [
+            {
+              "at": 128,
+              "lane": 0
+            },
+            {
+              "at": 3200,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "floor",
+          "length": 4096,
+          "next": "rise",
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "rise",
+          "length": 4096,
+          "grade": 22.5,
+          "next": "crest",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "crest",
+          "length": 4096,
+          "grade": -22.5,
+          "next": "run",
+          "obstacles": [
+            {
+              "at": 128,
+              "lane": 1
+            },
+            {
+              "at": 3200,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "run",
+          "length": 20480,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            },
+            {
+              "at": 5248,
+              "lane": 1
+            },
+            {
+              "at": 8320,
+              "lane": -1
+            },
+            {
+              "at": 11392,
+              "lane": 0
+            },
+            {
+              "at": 14464,
+              "lane": 1
+            },
+            {
+              "at": 17536,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        },
+        {
+          "id": "one-off",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level"
+        },
+        {
+          "id": "one-level",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-hold"
+        },
+        {
+          "id": "one-hold",
+          "length": 4096,
+          "lanes": 1,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "one-return"
+        },
+        {
+          "id": "one-return",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "next": "one-back"
+        },
+        {
+          "id": "one-back",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "joined"
+        }
+      ]
+    },
+    {
+      "id": "meridian.verge",
+      "name": "Meridian verge",
+      "status": "runnable",
+      "summary": "Story stage 3. A drop into a level ice crack, a fork whose branches swap lanes while the road is still down, then the climb out. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade",
+        "lanes",
+        "fork",
+        "join"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 8192,
+          "next": "dip",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "dip",
+          "length": 4096,
+          "grade": -22.5,
+          "next": "settle",
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "settle",
+          "length": 4096,
+          "grade": 22.5,
+          "next": "floor",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "floor",
+          "length": 20480,
+          "next": "split",
+          "obstacles": [
+            {
+              "at": 128,
+              "lane": 1
+            },
+            {
+              "at": 3200,
+              "lane": -1
+            },
+            {
+              "at": 5248,
+              "lane": -1
+            },
+            {
+              "at": 8320,
+              "lane": 0
+            },
+            {
+              "at": 11392,
+              "lane": 1
+            },
+            {
+              "at": 13440,
+              "lane": -1
+            },
+            {
+              "at": 16512,
+              "lane": 0
+            },
+            {
+              "at": 19584,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "split",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off",
+          "next": "two-off"
+        },
+        {
+          "id": "two-off",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level"
+        },
+        {
+          "id": "two-level",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-to-one"
+        },
+        {
+          "id": "two-to-one",
+          "length": 4096,
+          "lanes": 2,
+          "lanesTo": 1,
+          "anchor": "right",
+          "next": "two-return"
+        },
+        {
+          "id": "two-return",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "two-back"
+        },
+        {
+          "id": "two-back",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "joined"
+        },
+        {
+          "id": "joined",
+          "length": 2048,
+          "shift": -1,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "rise"
+        },
+        {
+          "id": "rise",
+          "length": 4096,
+          "grade": 22.5,
+          "next": "crest",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "crest",
+          "length": 4096,
+          "grade": -22.5,
+          "next": "run",
+          "obstacles": [
+            {
+              "at": 128,
+              "lane": 0
+            },
+            {
+              "at": 3200,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "run",
+          "length": 40960,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -1
+            },
+            {
+              "at": 5248,
+              "lane": 0
+            },
+            {
+              "at": 8320,
+              "lane": 1
+            },
+            {
+              "at": 11392,
+              "lane": -1
+            },
+            {
+              "at": 14464,
+              "lane": 0
+            },
+            {
+              "at": 17536,
+              "lane": 1
+            },
+            {
+              "at": 20608,
+              "lane": -1
+            },
+            {
+              "at": 23680,
+              "lane": 0
+            },
+            {
+              "at": 26752,
+              "lane": 1
+            },
+            {
+              "at": 29824,
+              "lane": -1
+            },
+            {
+              "at": 32896,
+              "lane": 0
+            },
+            {
+              "at": 35968,
+              "lane": 1
+            },
+            {
+              "at": 39040,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        },
+        {
+          "id": "one-off",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level"
+        },
+        {
+          "id": "one-level",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-to-two"
+        },
+        {
+          "id": "one-to-two",
+          "length": 4096,
+          "lanes": 1,
+          "lanesTo": 2,
+          "anchor": "left",
+          "next": "one-return"
+        },
+        {
+          "id": "one-return",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -0.5
+            }
+          ],
+          "next": "one-back"
+        },
+        {
+          "id": "one-back",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "joined"
+        }
+      ]
+    },
+    {
+      "id": "cathedral.ribbon",
+      "name": "Cathedral ribbon",
+      "status": "runnable",
+      "summary": "Story stage 1. One gentle banked sweep, then a level run. The road ends.",
+      "capabilities": [
+        "yaw",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 32768,
+          "next": "turn-in",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "turn-in",
+          "length": 8192,
+          "yaw": 45,
+          "bank": 22.5,
+          "next": "sweep",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "sweep",
+          "length": 24576,
+          "yaw": 90,
+          "next": "turn-out",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "turn-out",
+          "length": 8192,
+          "yaw": 45,
+          "bank": -22.5,
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 32768,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "cathedral.vault",
+      "name": "Cathedral vault",
+      "status": "runnable",
+      "summary": "Story stage 2. A rise into a banked turn, then a descent back to level. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade",
+        "bank"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 16384,
+          "next": "rise",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "rise",
+          "length": 8192,
+          "grade": 22.5,
+          "next": "bank-in",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "bank-in",
+          "length": 4096,
+          "yaw": 45,
+          "bank": 33.75,
+          "next": "turn"
+        },
+        {
+          "id": "turn",
+          "length": 16384,
+          "yaw": 90,
+          "next": "bank-out",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            }
+          ]
+        },
+        {
+          "id": "bank-out",
+          "length": 4096,
+          "yaw": 45,
+          "bank": -33.75,
+          "next": "fall"
+        },
+        {
+          "id": "fall",
+          "length": 8192,
+          "grade": -22.5,
+          "next": "run",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "run",
+          "length": 49152,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            },
+            {
+              "at": 41088,
+              "lane": 0
+            },
+            {
+              "at": 44160,
+              "lane": 1
+            },
+            {
+              "at": 47232,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        }
+      ]
+    },
+    {
+      "id": "cathedral.choir",
+      "name": "Cathedral choir",
+      "status": "runnable",
+      "summary": "Story stage 3. A banked climb that returns to level, then a fork, then the finish. The road ends.",
+      "capabilities": [
+        "yaw",
+        "grade",
+        "bank",
+        "lanes",
+        "fork",
+        "join"
+      ],
+      "start": "open",
+      "pieces": [
+        {
+          "id": "open",
+          "length": 12288,
+          "next": "rise",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "rise",
+          "length": 8192,
+          "grade": 22.5,
+          "next": "bank-in",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "bank-in",
+          "length": 4096,
+          "yaw": 45,
+          "bank": 33.75,
+          "next": "turn"
+        },
+        {
+          "id": "turn",
+          "length": 8192,
+          "yaw": 90,
+          "next": "bank-out",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "bank-out",
+          "length": 4096,
+          "yaw": 45,
+          "bank": -33.75,
+          "next": "fall"
+        },
+        {
+          "id": "fall",
+          "length": 8192,
+          "grade": -22.5,
+          "next": "split",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            }
+          ]
+        },
+        {
+          "id": "split",
+          "length": 2048,
+          "lanes": 3,
+          "fork": "one-off",
+          "next": "two-off"
+        },
+        {
+          "id": "two-off",
+          "length": 4096,
+          "shift": 0.5,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "two-level"
+        },
+        {
+          "id": "two-level",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0.5
+            }
+          ],
+          "next": "two-hold"
+        },
+        {
+          "id": "two-hold",
+          "length": 4096,
+          "lanes": 2,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": -0.5
+            }
+          ],
+          "next": "two-return"
+        },
+        {
+          "id": "two-return",
+          "length": 2048,
+          "lanes": 2,
+          "yaw": -45,
+          "next": "two-back"
+        },
+        {
+          "id": "two-back",
+          "length": 4096,
+          "lanes": 2,
+          "yaw": 45,
+          "next": "joined"
+        },
+        {
+          "id": "joined",
+          "length": 2048,
+          "shift": -0.5,
+          "lanes": 3,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 1
+            }
+          ],
+          "next": "run"
+        },
+        {
+          "id": "run",
+          "length": 40960,
+          "next": "home",
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": -1
+            },
+            {
+              "at": 4224,
+              "lane": 0
+            },
+            {
+              "at": 7296,
+              "lane": 1
+            },
+            {
+              "at": 10368,
+              "lane": -1
+            },
+            {
+              "at": 13440,
+              "lane": 0
+            },
+            {
+              "at": 16512,
+              "lane": 1
+            },
+            {
+              "at": 19584,
+              "lane": -1
+            },
+            {
+              "at": 22656,
+              "lane": 0
+            },
+            {
+              "at": 25728,
+              "lane": 1
+            },
+            {
+              "at": 28800,
+              "lane": -1
+            },
+            {
+              "at": 31872,
+              "lane": 0
+            },
+            {
+              "at": 34944,
+              "lane": 1
+            },
+            {
+              "at": 38016,
+              "lane": -1
+            }
+          ]
+        },
+        {
+          "id": "home",
+          "length": 2048,
+          "lanes": 3,
+          "next": "beyond"
+        },
+        {
+          "id": "beyond",
+          "length": 8192,
+          "lanes": 3
+        },
+        {
+          "id": "one-off",
+          "length": 4096,
+          "shift": -1,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "one-level"
+        },
+        {
+          "id": "one-level",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "obstacles": [
+            {
+              "at": 1152,
+              "lane": 0
+            }
+          ],
+          "next": "one-hold"
+        },
+        {
+          "id": "one-hold",
+          "length": 4096,
+          "lanes": 1,
+          "obstacles": [
+            {
+              "at": 2176,
+              "lane": 0
+            }
+          ],
+          "next": "one-return"
+        },
+        {
+          "id": "one-return",
+          "length": 2048,
+          "lanes": 1,
+          "yaw": 45,
+          "next": "one-back"
+        },
+        {
+          "id": "one-back",
+          "length": 4096,
+          "lanes": 1,
+          "yaw": -45,
+          "next": "joined"
+        }
+      ]
+    },
+    {
       "id": "gap.drop",
       "name": "Gap",
       "status": "view",

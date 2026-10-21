@@ -62,4 +62,6 @@ const Level level_maxip = {
     maxip_draw,
     &k_light,
     0,
+    0,
+    0,
 };
