@@ -99,12 +99,16 @@ static void reach_clear(const LevelFrame *f, int *r, int *g, int *b) {
 }
 
 static void drop(const LevelFrame *f) {
-    int s, base;
-    base = f->scroll / 896 * 896;
-    for (s = base; s < f->scroll + 5400; s += 896) {
-        if (!road_cloth(s, s + 820, -1, 360, -24, 980, -760, 16, 8, 28))
+    int step = 768;
+    int reach = ROAD_HALF + 980;
+    int s = f->scroll / step * step;
+    int s1, draw, base;
+    for (; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+        if (draw == 2)
+            continue;
+        if (!road_cloth(s, s1, -1, 360, -24, 980, -760, 16, 8, 28))
             return;
-        if (!road_cloth(s, s + 820, 1, 360, -24, 980, -760, 16, 8, 28))
+        if (!road_cloth(s, s1, 1, 360, -24, 980, -760, 16, 8, 28))
             return;
     }
     base = f->scroll / 2688 * 2688;

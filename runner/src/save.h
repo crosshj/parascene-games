@@ -4,15 +4,16 @@
  * An older file is replaced the next time progress is stored. A newer
  * file stays on the card, unread and unwritten.
  *
- * DuckStation stores the card itself. The browser build writes the same
- * file into the emulated card; the page keeps that card image. */
+ * DuckStation stores the card itself. The browser core has no PlayStation
+ * BIOS, so that build reads and writes the emulated slot-1 image directly.
+ * The page keeps that image. */
 #pragma once
 
 #define SAVE_VERSION 1
 
 void save_init(void);
-/* 1 once the card has been probed. *reach is 0 when this version has
- * nothing to resume. */
+/* 1 once slot 1 has answered. *reach is 0 when this version has nothing
+ * to resume. 0 while the card is still being probed. */
 int save_poll(int *reach);
 void save_store(int reach);
 /* 0 until a write has finished this session, then 1–255. The web row

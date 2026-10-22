@@ -20,6 +20,7 @@
 #include "screen_art.h"
 #include "sound_bank.h"
 #include "save.h"
+#include "flow.h"
 #ifndef RUNNER_NO_MUSIC
 #include "music_tracks.h"
 #endif
@@ -31,7 +32,8 @@ enum {
     ST_BOOT,
     ST_TITLE,
     ST_SELECT,
-    ST_STAGE,
+    ST_FLOW,
+    ST_CARD,
     ST_RUN,
     ST_PAUSE,
     ST_HIT,
@@ -73,6 +75,10 @@ static int story_run;
 static int story_reach = 1;
 static int save_applied;
 static int stage_index;
+static int flow_focus;
+static int flow_pos;
+static int flow_glow;
+static int flow_glow_at = -1;
 static int jumps, hits;
 /* How far the runner has run ahead of the camera after a finish. */
 static int runner_ahead;
@@ -89,7 +95,6 @@ static int stick_at;
 #define PTS_HIT 100
 /* Ten more jumps than hits. A basic bar, not a tuned one. */
 #define CLEAR_SCORE 1000
-extern const Level level_lumenwild;
 static const uint8_t k_goal_post[3] = {210, 220, 240};
 static const uint8_t k_goal_beam[3] = {255, 214, 64};
 
@@ -101,16 +106,10 @@ static int stage_n(void) {
     return levels[level_index]->stage_count;
 }
 
-/* The save counts Lumenwild stages. The other worlds stay open so their
- * roads can be run without spending that count. */
-static int lumen_world(void) {
-    return levels[level_index] == &level_lumenwild;
-}
-
-static int stage_open(int index) {
-    if (!lumen_world())
-        return 1;
-    return index < story_reach;
+/* reach counts unlocked stages in world order. A stage is open while its
+ * global index is below that, and cleared while it is below reach - 1. */
+static int stage_unlocked(int slot, int index) {
+    return flow_base(slot) + index < story_reach;
 }
 
 static int stage_end(int index) {
@@ -136,6 +135,8 @@ static uint16_t held, prev;
 #ifndef RUNNER_NO_MUSIC
 static int cd_on, cd_started;
 static int music_level = MUSIC_FULL;
+static int music_on;
+static int music_fade;
 #endif
 static uint16_t art_tpage[ART_COUNT];
 static uint16_t art_clutid[ART_COUNT];
@@ -546,22 +547,6 @@ static void draw_select(void) {
     hud_center(204, "X SELECT   O BACK");
 }
 
-static void draw_stages(void) {
-    int i, n = stage_n();
-    panel(3, 40, 48, 240, 150);
-    hud_center(64, levels[level_index]->name);
-    for (i = 0; i < n; i++) {
-        char line[40];
-        int y = 96 + i * 16;
-        snprintf(line, sizeof line, pick == i ? "> %s <" : "  %s  ", stages()[i].name);
-        if (stage_open(i))
-            hud_center(y, line);
-        else
-            hud_center_rgb(y, line, 48, 40, 64);
-    }
-    hud_center(160, "X SELECT   O BACK");
-}
-
 static void draw_tally(void) {
     char line[48];
     int score = stage_score();
@@ -584,7 +569,7 @@ static void draw_tally(void) {
         snprintf(line, sizeof line, "NEED %d", CLEAR_SCORE);
         hud_center(136, line);
     }
-    hud_center(160, "X  STAGE LIST");
+    hud_center(160, "X  WORLDS");
 }
 
 static const char *const k_pause_items[] = { "CONTINUE", "QUIT TO TITLE" };
@@ -669,18 +654,35 @@ static void judge_boxes(int step) {
     }
 }
 
+static void play_sound(int id);
+static void music_start(void);
+static void music_volume(int level);
+static void music_begin(void);
+static void music_hush(void);
+static void music_service(void);
+
 static void open_tally(void) {
+    int global = flow_base(story_slot) + stage_index;
+    int total = flow_total();
+    int next;
     state = ST_TALLY;
     tick = 0;
-    if (lumen_world() && stage_score() >= CLEAR_SCORE && stage_index + 1 >= story_reach) {
-        int was = story_reach;
-        int n = stage_n();
-        story_reach = stage_index + 2;
-        if (story_reach > n)
-            story_reach = n;
-        if (story_reach != was)
+    flow_glow = 0;
+    flow_glow_at = -1;
+    if (stage_score() >= CLEAR_SCORE && global + 1 >= story_reach) {
+        next = global + 2;
+        if (next > total + 1)
+            next = total + 1;
+        if (next != story_reach) {
+            story_reach = next;
             save_store(story_reach);
+            if (global + 1 < total) {
+                flow_glow_at = global + 1;
+                flow_glow = FLOW_GLOW;
+            }
+        }
     }
+    music_hush();
 }
 
 static void collide(void) {
@@ -709,10 +711,6 @@ static void collide(void) {
     }
 }
 
-static void play_sound(int id);
-static void music_start(void);
-static void music_volume(int level);
-
 static void go(int next) {
     state = next;
     tick = 0;
@@ -723,6 +721,7 @@ static void go(int next) {
 /* Back to the mode menu, with the cursor on the mode that was playing. */
 static void to_title(void) {
     int keep = mode;
+    music_hush();
     go(ST_TITLE);
     pick = keep;
 }
@@ -747,35 +746,97 @@ static void start_run(void) {
     jump_wind = 0;
     land_hold = 0;
     distance = 0;
+    music_begin();
 }
 
-static void start_stage(int index) {
+static void lay_stage(int index) {
     stage_index = index;
-    start_run();
-    story_run = 1;
     jumps = 0;
     hits = 0;
     runner_ahead = 0;
     course_boxes_reset(stages()[index].start / STEP);
     course_quiet(stage_end(index) - FINISH_CLEAR, 0x7fffffff);
+    story_run = 1;
     if (!path_open(stages()[index].track))
         path_open("straight.run");
+    path_reset();
     scroll = stages()[index].start;
     lane_u = 0;
     player_x = 0;
+    player_y = 0;
+    player_vy = 0;
+    jump_wind = 0;
+    land_hold = 0;
+    distance = 0;
     path_follow(scroll + CHAR_Z, 0);
 }
 
-/* Stage list, cursor on the furthest stage reached. */
-static void open_stages(void) {
-    int at = story_reach - 1;
-    go(ST_STAGE);
-    if (at < 0)
-        at = 0;
-    if (at >= stage_n())
-        at = stage_n() - 1;
-    pick = at;
-    scroll = stages()[pick].start;
+static void start_stage(int index) {
+    lay_stage(index);
+    go(ST_RUN);
+    music_begin();
+}
+
+static void open_card(int index) {
+    lay_stage(index);
+    go(ST_CARD);
+}
+
+static int flow_frontier(int slot) {
+    int base = flow_base(slot);
+    int n = flow_stages(slot);
+    int g = story_reach - 1;
+    if (n < 1)
+        return 0;
+    if (g < base)
+        return 0;
+    if (g >= base + n)
+        return n - 1;
+    return g - base;
+}
+
+/* focus is FLOW_WORLDS or FLOW_STAGES. celebrate lands on a stage that
+ * just opened and plays its unlock. */
+static void open_flow(int focus, int celebrate) {
+    go(ST_FLOW);
+    if (celebrate && flow_glow_at >= 0) {
+        int slot = flow_slot_for(flow_glow_at);
+        int moved = slot != story_slot;
+        story_slot = slot;
+        level_index = mode_level(1, story_slot);
+        pick = flow_glow_at - flow_base(slot);
+        if (pick < 0)
+            pick = 0;
+        if (pick >= flow_stages(slot))
+            pick = flow_stages(slot) - 1;
+        flow_focus = FLOW_STAGES;
+        if (moved)
+            play_sound(SND_WOOSH);
+        play_sound(SND_CLINK);
+    } else {
+        flow_glow = 0;
+        flow_glow_at = -1;
+        level_index = mode_level(1, story_slot);
+        flow_focus = focus;
+        pick = focus == FLOW_STAGES ? stage_index : 0;
+    }
+    music_hush();
+}
+
+static void flow_ease(void) {
+    int target = story_slot << 8;
+    int d = target - flow_pos;
+    int step;
+    if (d == 0)
+        return;
+    step = d / 3;
+    if (step == 0)
+        step = d > 0 ? 1 : -1;
+    if (step > 16)
+        step = 16;
+    if (step < -16)
+        step = -16;
+    flow_pos += step;
 }
 
 static int confirm(void) {
@@ -822,15 +883,17 @@ static int update_screens(void) {
     case ST_BOOT:
         if (tick < BOOT_HOLD && tick > BOOT_SHOWN && confirm())
             tick = BOOT_HOLD;
-        if (tick >= BOOT_END) {
+        if (tick >= BOOT_END)
             to_title();
-            music_start();
-        }
         return 0;
     case ST_TITLE:
         if (leaving > 0) {
-            if (--leaving == 0)
-                go(ST_SELECT);
+            if (--leaving == 0) {
+                if (mode == MODE_STORY)
+                    open_flow(FLOW_WORLDS, 0);
+                else
+                    go(ST_SELECT);
+            }
         } else if (tick >= FADE) {
             menu_move(2);
             if (confirm()) {
@@ -846,22 +909,16 @@ static int update_screens(void) {
         scroll += 8;
         return 0;
     case ST_SELECT:
-        menu_move(mode_count(mode == MODE_STORY) > 1 ? ROW_COUNT : 1);
+        menu_move(mode_count(0) > 1 ? ROW_COUNT : 1);
         if (pick == ROW_RUNNER)
             character = cycle(character, SPR_CHAR_COUNT);
-        else if (mode == MODE_STORY) {
-            story_slot = cycle(story_slot, mode_count(1));
-            level_index = mode_level(1, story_slot);
-        } else {
+        else {
             arcade_slot = cycle(arcade_slot, mode_count(0));
             level_index = mode_level(0, arcade_slot);
         }
         if (confirm()) {
             play_sound(SND_SELECT);
-            if (mode == MODE_STORY && stage_n() > 0)
-                open_stages();
-            else
-                start_run();
+            start_run();
         } else if (back()) {
             play_sound(SND_BACK);
             to_title();
@@ -869,26 +926,116 @@ static int update_screens(void) {
         scroll += 8;
         anim_tick++;
         return 0;
-    case ST_STAGE:
-        menu_move(stage_n());
+    case ST_FLOW: {
+        int worlds = flow_world_count();
+        int n;
+        int moved = 0;
+        flow_ease();
+        if (flow_glow > 0 && --flow_glow == 0)
+            flow_glow_at = -1;
+        anim_tick++;
+        if (edge(PAD_SQUARE)) {
+            character = (character + 1) % SPR_CHAR_COUNT;
+            play_sound(SND_CLINK);
+        }
+        if (edge(PAD_LEFT) && !edge(PAD_RIGHT)) {
+            if (story_slot > 0) {
+                story_slot--;
+                moved = 1;
+                play_sound(SND_WOOSH);
+            } else {
+                play_sound(SND_LOCK);
+            }
+        }
+        if (edge(PAD_RIGHT) && !edge(PAD_LEFT)) {
+            if (story_slot + 1 < worlds) {
+                story_slot++;
+                moved = 1;
+                play_sound(SND_WOOSH);
+            } else {
+                play_sound(SND_LOCK);
+            }
+        }
+        level_index = mode_level(1, story_slot);
+        n = flow_stages(story_slot);
+        if (n < 1)
+            n = 1;
+        if (moved && flow_focus == FLOW_STAGES)
+            pick = flow_frontier(story_slot);
+        if (edge(PAD_UP) && !edge(PAD_DOWN)) {
+            if (flow_focus != FLOW_STAGES) {
+                if (!stage_unlocked(story_slot, 0))
+                    play_sound(SND_LOCK);
+                else {
+                    play_sound(SND_CLINK);
+                    flow_focus = FLOW_STAGES;
+                    pick = flow_frontier(story_slot);
+                }
+            } else {
+                pick = (pick + n - 1) % n;
+                play_sound(SND_CLINK);
+            }
+        }
+        if (edge(PAD_DOWN) && !edge(PAD_UP)) {
+            if (flow_focus != FLOW_STAGES) {
+                if (!stage_unlocked(story_slot, 0))
+                    play_sound(SND_LOCK);
+                else {
+                    play_sound(SND_CLINK);
+                    flow_focus = FLOW_STAGES;
+                    pick = flow_frontier(story_slot);
+                }
+            } else {
+                pick = (pick + 1) % n;
+                play_sound(SND_CLINK);
+            }
+        }
         if (pick < 0)
             pick = 0;
-        if (pick >= stage_n())
-            pick = stage_n() - 1;
-        scroll = stages()[pick].start;
-        if (confirm() && stage_open(pick)) {
-            play_sound(SND_SELECT);
-            start_stage(pick);
+        if (pick >= n)
+            pick = n - 1;
+        if (confirm()) {
+            if (flow_focus != FLOW_STAGES) {
+                if (!stage_unlocked(story_slot, 0))
+                    play_sound(SND_LOCK);
+                else {
+                    play_sound(SND_CLINK);
+                    flow_focus = FLOW_STAGES;
+                    pick = flow_frontier(story_slot);
+                }
+            } else if (!stage_unlocked(story_slot, pick)) {
+                play_sound(SND_LOCK);
+            } else {
+                play_sound(SND_SELECT);
+                open_card(pick);
+            }
         } else if (back()) {
             play_sound(SND_BACK);
-            go(ST_SELECT);
+            if (flow_focus == FLOW_STAGES)
+                flow_focus = FLOW_WORLDS;
+            else
+                to_title();
         }
-        anim_tick++;
+        return 0;
+    }
+    case ST_CARD:
+        if (tick == CARD_HOLD)
+            music_begin();
+        if (!card_black(tick))
+            anim_tick++;
+        if (confirm() || card_finished(tick)) {
+            if (confirm())
+                play_sound(SND_SELECT);
+            state = ST_RUN;
+            tick = 0;
+            music_begin();
+        }
         return 0;
     case ST_TALLY:
         if (confirm() || back()) {
-            play_sound(confirm() ? SND_SELECT : SND_BACK);
-            open_stages();
+            if (flow_glow_at < 0)
+                play_sound(confirm() ? SND_SELECT : SND_BACK);
+            open_flow(FLOW_STAGES, 1);
         }
         return 0;
     case ST_PAUSE:
@@ -899,7 +1046,6 @@ static int update_screens(void) {
             state = ST_RUN;
         } else if (edge(PAD_CROSS)) {
             play_sound(SND_SELECT);
-            music_volume(MUSIC_FULL);
             to_title();
         }
         return 0;
@@ -912,9 +1058,12 @@ static int update_screens(void) {
                     start_stage(stage_index);
                 else
                     start_run();
-            } else if (pick == 1)
-                go(ST_SELECT);
-            else
+            } else if (pick == 1) {
+                if (story_run)
+                    open_flow(FLOW_WORLDS, 0);
+                else
+                    go(ST_SELECT);
+            } else
                 to_title();
         } else if (back()) {
             play_sound(SND_BACK);
@@ -961,7 +1110,7 @@ static void save_service(void) {
     if (!done || save_applied)
         return;
     save_applied = 1;
-    if (loaded > story_reach && loaded <= level_lumenwild.stage_count)
+    if (loaded > story_reach && loaded <= flow_total() + 1)
         story_reach = loaded;
     else if (story_reach > loaded && story_reach > 1)
         save_store(story_reach);
@@ -976,6 +1125,7 @@ static void update(void) {
     tick++;
     save_service();
     if (!update_screens()) {
+        music_service();
         prev = held;
         return;
     }
@@ -1020,6 +1170,7 @@ static void update(void) {
         if (hit_timer > 0)
             hit_timer--;
         else {
+            music_hush();
             go(ST_OVER);
             jump_wind = 0;
             land_hold = 0;
@@ -1054,6 +1205,7 @@ static void update(void) {
     }
     if (state == ST_AWAY && runner_ahead >= ZOOM_AHEAD)
         open_tally();
+    music_service();
     prev = held;
 }
 
@@ -1137,6 +1289,12 @@ static void music_start(void) {}
 static void music_volume(int level) {
     (void)level;
 }
+
+static void music_begin(void) {}
+
+static void music_hush(void) {}
+
+static void music_service(void) {}
 #else
 static void music_shuffle(int avoid) {
     int i, j, t;
@@ -1234,7 +1392,7 @@ static int music_setup(void) {
 }
 #elif defined(RUNNER_WEB)
 static void web_publish(void) {
-    int playing = cd_started && music_cur >= 0;
+    int playing = music_on && music_cur >= 0;
     web_row_frame(web_bytes, playing, web_seq, music_cur, music_level, save_generation());
     web_row_pixels(web_bytes, web_px);
 }
@@ -1371,6 +1529,64 @@ static void music_volume(int level) {
     CdMix(&mix);
 #endif
 }
+
+/* Drop the track after the mix has reached silence. The page's silence
+ * command releases the element once its own fade finishes. */
+static void music_cut(void) {
+    music_on = 0;
+    music_fade = 0;
+    music_level = 0;
+    if (!cd_on || !cd_started)
+        return;
+#ifdef RUNNER_WEB
+    web_publish();
+#else
+    CdControlF(CdlPause, 0);
+#endif
+}
+
+static void music_begin(void) {
+    int restart;
+    if (!cd_on)
+        return;
+    restart = !music_on;
+    music_fade = 0;
+    music_on = 1;
+    music_level = MUSIC_FULL;
+    if (!cd_started) {
+        music_start();
+        return;
+    }
+    if (restart && music_cur >= 0 && music_play_track(music_cur)) {
+#if defined(RUNNER_WEB)
+        web_seq = web_seq >= 255 ? 1 : web_seq + 1;
+        cd_wait = music_web_frames[music_cur];
+#elif !defined(RUNNER_XA_MUSIC)
+        cd_wait = music_cd_frames[music_cur];
+#endif
+    }
+    music_volume(MUSIC_FULL);
+}
+
+static void music_hush(void) {
+    if (!music_on)
+        return;
+    music_fade = 1;
+}
+
+static void music_service(void) {
+    if (!music_fade)
+        return;
+    if (music_level > 0) {
+        music_level -= 2;
+        if (music_level < 0)
+            music_level = 0;
+        music_volume(music_level);
+        if (music_level > 0)
+            return;
+    }
+    music_cut();
+}
 #endif
 
 int main(int argc, const char **argv) {
@@ -1452,24 +1668,24 @@ int main(int argc, const char **argv) {
         frame.speed = scroll > last_scroll ? scroll - last_scroll : 0;
         frame.time = anim_tick;
         frame.x = player_x;
-        /* The stage list shows the stage under the cursor. A run keeps the
-         * stage that is playing, including its tally. */
+        /* A run keeps the stage that is playing, including its card and tally. */
         frame.stage = 0;
-        if (mode == MODE_STORY && state == ST_STAGE)
-            frame.stage = pick;
-        else if (mode == MODE_STORY && story_run)
+        if (mode == MODE_STORY && story_run)
             frame.stage = stage_index;
         last_scroll = scroll;
         if (state == ST_BOOT) {
             draw_boot();
         } else if (state == ST_TITLE) {
             draw_title();
+        } else if (state == ST_FLOW) {
+            flow_draw(story_slot, flow_pos, flow_focus, pick, story_reach,
+                      flow_glow, flow_glow_at, anim_tick);
+        } else if (state == ST_CARD && card_black(tick)) {
+            card_overlay(levels[level_index]->name, stages()[stage_index].name, tick);
         } else {
             const Level *lv = levels[level_index];
             const char *track = lv->track;
-            if (mode == MODE_STORY && state == ST_STAGE)
-                track = stages()[pick].track;
-            else if (story_run)
+            if (story_run)
                 track = stages()[stage_index].track;
             if (!path_open(track))
                 path_open("straight.run");
@@ -1485,8 +1701,10 @@ int main(int argc, const char **argv) {
             }
             if (state == ST_SELECT) {
                 draw_select();
-            } else if (state == ST_STAGE) {
-                draw_stages();
+            } else if (state == ST_CARD) {
+                draw_runner();
+                draw_shadow();
+                card_overlay(levels[level_index]->name, stages()[stage_index].name, tick);
             } else if (state == ST_TALLY) {
                 PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_tally()));
             } else {

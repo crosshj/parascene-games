@@ -188,6 +188,142 @@ void text_rgb(int x, int y, const char *s, int r, int g, int b) {
 #endif
 }
 
+void text_scale(int x, int y, const char *s, int r, int g, int b, int scale) {
+#ifdef RUNNER_PREVIEW
+    (void)r;
+    (void)g;
+    (void)b;
+    (void)scale;
+    text(x, y, s);
+#else
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    POLY_FT4 *poly;
+    const char *p;
+    int sx = x;
+    int n = text_glyphs(s);
+    if (scale < 1)
+        scale = 1;
+    if (scale > 4)
+        scale = 4;
+    /* A sprite's width is how many texels it samples, so a bigger sprite
+     * reads a block of the font sheet. A quad stretches one 8x8 glyph. */
+    if (ctx.next + n * sizeof(POLY_FT4) > buf->buffer + BUFFER_LENGTH)
+        return;
+    poly = (POLY_FT4 *)ctx.next;
+    for (p = s; *p; p++) {
+        int c = *p;
+        int i;
+        int u, v;
+        if (c == '\n') {
+            sx = x;
+            y += 8 * scale;
+            continue;
+        }
+        if (c >= 'a' && c <= 'z')
+            c -= 32;
+        i = c - ' ';
+        if (i > 0) {
+            i--;
+            u = (i % 16) * 8;
+            v = (i / 16) * 8;
+            setPolyFT4(poly);
+            /* Raw texels. A tinted stretch dithers, and the digit stops reading. */
+            setShadeTex(poly, 1);
+            setRGB0(poly, r, g, b);
+            setXYWH(poly, sx, y, 8 * scale, 8 * scale);
+            setUVWH(poly, u, v, 7, 7);
+            poly->tpage = _font_tpage;
+            poly->clut = _font_clut;
+            addPrim(&buf->ot[0], poly);
+            poly++;
+        }
+        sx += 8 * scale;
+    }
+    ctx.next = (uint8_t *)poly;
+#endif
+}
+
+void fill_rect(int x, int y, int w, int h, int r, int g, int b) {
+#ifndef RUNNER_PREVIEW
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    TILE *tile;
+    if (w < 1 || h < 1)
+        return;
+    if (ctx.next + sizeof(TILE) > buf->buffer + BUFFER_LENGTH)
+        return;
+    tile = (TILE *)ctx.next;
+    setTile(tile);
+    setXY0(tile, x, y);
+    setWH(tile, w, h);
+    setRGB0(tile, clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255));
+    addPrim(&buf->ot[0], tile);
+    ctx.next += sizeof(TILE);
+#else
+    (void)x; (void)y; (void)w; (void)h; (void)r; (void)g; (void)b;
+#endif
+}
+
+void front_plain(void) {
+#ifndef RUNNER_PREVIEW
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    DR_TPAGE *mode;
+    if (ctx.next + sizeof(DR_TPAGE) > buf->buffer + BUFFER_LENGTH)
+        return;
+    mode = (DR_TPAGE *)ctx.next;
+    setDrawTPage(mode, 0, 0, getTPage(0, 0, 0, 0));
+    addPrim(&buf->ot[0], mode);
+    ctx.next += sizeof(DR_TPAGE);
+#endif
+}
+
+void tex_quad(int x, int y, int w, int h, int u, int v, int uw, int uh,
+              int r, int g, int b, uint16_t tpage, uint16_t clut) {
+#ifndef RUNNER_PREVIEW
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    POLY_FT4 *poly;
+    if (w < 1 || h < 1)
+        return;
+    if (ctx.next + sizeof(POLY_FT4) > buf->buffer + BUFFER_LENGTH)
+        return;
+    poly = (POLY_FT4 *)ctx.next;
+    setPolyFT4(poly);
+    setShadeTex(poly, 0);
+    setRGB0(poly, clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255));
+    setXYWH(poly, x, y, w, h);
+    setUVWH(poly, u, v, uw, uh);
+    poly->tpage = tpage;
+    poly->clut = clut;
+    addPrim(&buf->ot[0], poly);
+    ctx.next += sizeof(POLY_FT4);
+#else
+    (void)x; (void)y; (void)w; (void)h; (void)u; (void)v; (void)uw; (void)uh;
+    (void)r; (void)g; (void)b; (void)tpage; (void)clut;
+#endif
+}
+
+void screen_cover(int r, int g, int b, int blend) {
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    POLY_F4 *poly;
+    size_t need = sizeof(POLY_F4);
+    if (blend != BLEND_NONE)
+        need += sizeof(DR_TPAGE);
+    if (ctx.next + need > buf->buffer + BUFFER_LENGTH)
+        return;
+    poly = (POLY_F4 *)ctx.next;
+    setPolyF4(poly);
+    setRGB0(poly, clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255));
+    setXY4(poly, 0, 0, SCREEN_W, 0, 0, SCREEN_H, SCREEN_W, SCREEN_H);
+    addPrim(&buf->ot[0], poly);
+    ctx.next += sizeof(POLY_F4);
+    if (blend != BLEND_NONE) {
+        DR_TPAGE *mode = (DR_TPAGE *)ctx.next;
+        setDrawTPage(mode, 0, DITHER, getTPage(0, blend, 0, 0));
+        setSemiTrans(poly, 1);
+        addPrim(&buf->ot[0], mode);
+        ctx.next += sizeof(DR_TPAGE);
+    }
+}
+
 int project(int x, int y, int z, XY *out) {
     SVECTOR v __attribute__((aligned(4)));
     int sz = 0;

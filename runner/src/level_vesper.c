@@ -1,7 +1,8 @@
 /* Vesper City: a night highway. The first stage is a skyline on the
- * horizon. The last stage packs towers against both sides of the road,
- * tall enough to leave the top of the screen. The light steps from dusk,
- * to night, to a wetter dark. */
+ * horizon. The last stage is a solid wall of towers on each side, tall
+ * enough to leave the top of the screen. The floor stops at that wall,
+ * and the skyline is only the slot of street between the walls. The light
+ * steps from dusk, to night, to a wetter dark. */
 
 #include "world.h"
 #include "course.h"
@@ -12,6 +13,7 @@
 #define EDGE_END 2400
 #define SHOULDER_W 200
 #define GROUND_W 1800
+#define CANYON_OUT 64
 
 typedef struct {
     uint8_t sky[3], haze[3], tint[3], shadow[3], top[3];
@@ -79,8 +81,8 @@ static void apply(int stage) {
     road.light = &live;
     road.obstacle = &k_obstacle;
     road.edge_end = EDGE_END;
-    road.shoulder = SHOULDER_W;
-    road.ground = GROUND_W;
+    road.shoulder = stage >= 2 ? 40 : SHOULDER_W;
+    road.ground = stage >= 2 ? CANYON_OUT : GROUND_W;
     rgb(road.ridge_far, L->ridge_far);
     rgb(road.ridge_near, L->ridge_near);
     rgb(road.road, L->asphalt);
@@ -170,7 +172,7 @@ static void block(int x, int w, int top, int foot, int r, int g, int b) {
 }
 
 static void blit_row(const Block *row, int n, int shift, int foot,
-                     int r, int g, int b, int windows) {
+                     int r, int g, int b, int windows, int x0, int x1) {
     int i;
     for (i = 0; i < n; i++) {
         int x = row[i].x - shift;
@@ -178,6 +180,8 @@ static void blit_row(const Block *row, int n, int shift, int foot,
         int k;
         for (k = -1; k <= 1; k++) {
             int sx = x + k * SCREEN_W;
+            if (sx >= x1 || sx + row[i].w <= x0)
+                continue;
             if (sx >= SCREEN_W || sx + row[i].w <= 0)
                 continue;
             if (windows && row[i].win && row[i].h > 16) {
@@ -205,9 +209,17 @@ static void skyline(int stage) {
         foot = SCREEN_H - 8;
     if (rows_stage != stage)
         build_rows(stage);
+    /* The last stage's walls cover the sides, so the skyline is only the
+     * slot down the street. */
+    if (stage >= 2) {
+        int x0 = SCREEN_W / 2 - 36;
+        int x1 = SCREEN_W / 2 + 36;
+        blit_row(far_row, far_n, wrap_shift(yaw, 2048), foot + 2, 8, 4, 18, 0, x0, x1);
+        return;
+    }
     /* Near row first, so it shows in front of the far row. */
-    blit_row(near_row, near_n, wrap_shift(yaw, 1024), foot, 16, 8, 32, 1);
-    blit_row(far_row, far_n, wrap_shift(yaw, 2048), foot + 2, 8, 4, 18, 0);
+    blit_row(near_row, near_n, wrap_shift(yaw, 1024), foot, 16, 8, 32, 1, 0, SCREEN_W);
+    blit_row(far_row, far_n, wrap_shift(yaw, 2048), foot + 2, 8, 4, 18, 0, 0, SCREEN_W);
 }
 
 static void lights(const LevelFrame *f) {
@@ -242,33 +254,43 @@ static void lights(const LevelFrame *f) {
     }
 }
 
-/* Last stage: a wall of towers on both sides, close to the road. The
- * right-hand row is staggered so the two sides are not a row of gates. */
+/* Last stage: one solid wall on each side, at a fixed distance, so the
+ * sheets meet and the street is a slot. Height still changes along the
+ * wall. Windows and the crown sit on the wall; they are not openings. */
 static void canyon(const LevelFrame *f) {
-    int step = 400;
-    int s, base;
+    int step = 384;
+    int reach = ROAD_HALF + CANYON_OUT;
+    int s, s1, draw, base;
     if (f->stage < 2)
         return;
     base = f->scroll / step * step;
-    for (s = base; s < f->scroll + 4400; s += step) {
+    /* Crown and windows link before the mass, so they show on it.
+     * They stay near the camera. */
+    for (s = base; s < f->scroll + 4608; s += step) {
         int side;
         for (side = -1; side <= 1; side += 2) {
-            int at = s + (side > 0 ? step / 2 : 0);
-            int n = (int)(mixb((uint32_t)at * 0x9E3779B9u) & 1023);
-            int wide = 300 + (n & 63);
-            int tall = 860 + (n % 480);
-            int out = 44 + ((n >> 6) & 15);
-            int amber = n & 1;
+            uint32_t n = mixb((uint32_t)(s + (side > 0 ? 409 : 0)) * 0x9E3779B9u);
+            int tall = 820 + (int)(n % 520u);
+            int amber = n & 1u;
             int wr = amber ? 255 : 64;
             int wg = amber ? 186 : 220;
             int wb = amber ? 72 : 255;
-            /* Crown and a window band link before the mass, so they show on it. */
-            if (!road_cloth(at + wide / 3, at + wide * 2 / 3, side, out - 6,
-                            tall / 2, out - 6, tall / 2 + 28, wr, wg, wb))
+            if (!road_cloth(s + step / 5, s + step * 3 / 5, side, CANYON_OUT - 6,
+                            tall / 2, CANYON_OUT - 6, tall / 2 + 36, wr, wg, wb))
                 return;
-            if (!road_cloth(at, at + wide, side, out - 4, tall - 28, out - 4, tall, wr, wg, wb))
+            if (!road_cloth(s, s + step, side, CANYON_OUT - 4, tall - 32,
+                            CANYON_OUT - 4, tall, wr, wg, wb))
                 return;
-            if (!road_cloth(at, at + wide, side, out, 0, out, tall, 12, 14, 28))
+        }
+    }
+    for (s = base; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+        int side;
+        if (draw == 2)
+            continue;
+        for (side = -1; side <= 1; side += 2) {
+            uint32_t n = mixb((uint32_t)(s + (side > 0 ? 409 : 0)) * 0x9E3779B9u);
+            int tall = 820 + (int)(n % 520u);
+            if (!road_cloth(s, s1, side, CANYON_OUT, 0, CANYON_OUT, tall, 12, 14, 28))
                 return;
         }
     }
@@ -289,7 +311,8 @@ static void vesper_draw(const LevelFrame *f) {
     road_draw(&road, f);
     lights(f);
     canyon(f);
-    road_streaks(f, road.edge[0], road.edge[1], road.edge[2], 0, 0);
+    road_streaks(f, road.edge[0], road.edge[1], road.edge[2],
+                 f->stage >= 2 ? 80 : 0, 0);
 }
 
 static const Stage k_stages[] = {

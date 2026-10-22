@@ -62,7 +62,31 @@ SOUNDS = {
             tone(2637, 0.22, 0.30, decay=4.0))),
     "PAUSE": lambda: mix(tone(988, 0.06, 0.42, decay=3.0), tone(740, 0.06, 0.42, decay=3.0),
                          tone(988, 0.12, 0.42, decay=4.0)),
+    "WOOSH": lambda: woosh(),
+    "CLINK": lambda: clink(),
+    "LOCK": lambda: tone(146, 0.09, 0.5, decay=8.0, harmonics=(1.0, 0.35, 0.08, 0.0, 0.0)),
 }
+
+
+def woosh():
+    n = int(RATE * 0.18)
+    out = []
+    phase = 0.0
+    for i in range(n):
+        t = i / n
+        f = 1600 + (220 - 1600) * t
+        phase += 2 * math.pi * f / RATE
+        s = math.sin(phase) + 0.55 * math.sin(phase * 2.41) + 0.25 * math.sin(phase * 5.17)
+        env = math.sin(t * math.pi) ** 0.55
+        out.append(s * env * 0.34)
+    return out
+
+
+def clink():
+    return mix(
+        tone(2349, 0.045, 0.32, decay=11.0, harmonics=(1.0, 0.12, 0.45, 0.0, 0.18)),
+        tone(3520, 0.07, 0.2, decay=13.0, harmonics=(1.0, 0.0, 0.4, 0.0, 0.0)),
+    )
 
 
 def to_pcm(samples):

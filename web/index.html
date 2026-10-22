@@ -627,9 +627,11 @@
       };
       window.EJS_player = "#game";
       window.EJS_core = "psx";
-      /* This id is the emulated memory card's name. The game writes
-         bu00:UUUVVV-RUNNER onto that card. A new record version stays
-         inside the same card; renaming the id would orphan it. */
+      /* This id is the emulated memory card's name. The browser core has
+         no PlayStation BIOS, so there is no card browser on screen. Slot 1
+         is still the save image: the game writes bu00:UUUVVV-RUNNER there.
+         A new record version stays inside the same card; renaming the id
+         would orphan it. */
       window.EJS_gameName = game.id;
       window.EJS_fixedSaveInterval = 5000;
       window.EJS_gameUrl = new URL(game.bin, document.baseURI).href;

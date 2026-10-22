@@ -65,6 +65,19 @@ int world_buffer(void);
 void text(int x, int y, const char *s);
 /* The same font, tinted. 128 is full white, so a lower color is dimmer. */
 void text_rgb(int x, int y, const char *s, int r, int g, int b);
+/* The same font, scale times as wide. 1 is the 8-pixel font. */
+void text_scale(int x, int y, const char *s, int r, int g, int b, int scale);
+/* One textured quad on the front layer. uw and uh are the texel size, as
+ * setUVWH wants it: one less than the number of texels. */
+void tex_quad(int x, int y, int w, int h, int u, int v, int uw, int uh,
+              int r, int g, int b, uint16_t tpage, uint16_t clut);
+/* A flat rectangle on the front layer. Used for the menu font. */
+void fill_rect(int x, int y, int w, int h, int r, int g, int b);
+/* Dither off for the front layer, so those rectangles stay solid. */
+void front_plain(void);
+/* A fullscreen quad in front of the scene and behind text drawn before it.
+ * Call it after that text. blend is BLEND_NONE or one of the blend modes. */
+void screen_cover(int r, int g, int b, int blend);
 
 int project(int x, int y, int z, XY *out);
 void dim(int *r, int *g, int *b, int z);

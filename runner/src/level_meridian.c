@@ -1,8 +1,8 @@
 /* Pale Meridian: an ice crack under an open sky. There is no ridge. The
- * lip is short and the walls stand just outside it, so the floor never
- * runs off into a sheet that could cover a fork. The walls grow where the
- * road has dropped, and stay low on the lip. Stage 2 pulls a green haze
- * across the ice. Stage 3 lets it go dark. */
+ * floor meets the wall, and the wall sheets meet each other, so the crack
+ * is closed. The walls grow where the road has dropped, and stay low on
+ * the lip. A fork still clips the floor short of the other road. Stage 2
+ * pulls a green haze across the ice. Stage 3 lets it go dark. */
 
 #include "world.h"
 #include "course.h"
@@ -12,7 +12,8 @@
 
 #define EDGE_END 2200
 #define SHOULDER_W 40
-#define GROUND_W 96
+#define WALL_OUT 108
+#define GROUND_W WALL_OUT
 
 typedef struct {
     uint8_t sky[3], haze[3], tint[3], shadow[3], top[3];
@@ -116,15 +117,21 @@ static int crack_h(int s, int lip) {
 static void ice(const LevelFrame *f) {
     const PathSeg *lip = path_at(0);
     int top = lip ? lip->y : 0;
-    int s, base = f->scroll / 768 * 768;
-    for (s = base; s < f->scroll + 6400; s += 768) {
-        int h = crack_h(s + 384, top);
-        int r = road.shoulder_c[0];
-        int g = road.shoulder_c[1];
-        int b = road.shoulder_c[2];
-        if (!road_cloth(s, s + 700, -1, 108, 0, 108, h, r, g, b))
+    int step = 512;
+    int reach = ROAD_HALF + WALL_OUT;
+    int s = f->scroll / step * step;
+    int s1, draw;
+    for (; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+        int h, r, g, b;
+        if (draw == 2)
+            continue;
+        h = crack_h((s + s1) / 2, top);
+        r = road.shoulder_c[0];
+        g = road.shoulder_c[1];
+        b = road.shoulder_c[2];
+        if (!road_cloth(s, s1, -1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
             return;
-        if (!road_cloth(s, s + 700, 1, 108, 0, 108, h, r, g, b))
+        if (!road_cloth(s, s1, 1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
             return;
     }
 }

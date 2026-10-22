@@ -329,6 +329,84 @@ static void edge_out(const RoadSample *a, int side, int extra, int *x, int *y, i
     *z = sz + (sz - oz) * extra / w;
 }
 
+/* A corner is drawable when it is in front of the camera and inside the
+ * guard band. Past that, the GPU drops the whole quad, which opens a hole
+ * in a wall. */
+static int on_guard(int x, int y, int z) {
+    int lim;
+    if (z < 28)
+        return 0;
+    lim = z * 5;
+    return x <= lim && x >= -lim && y <= lim && y >= -lim;
+}
+
+static int lerp4096(int a, int b, int t) {
+    int d = b - a;
+    return a + d / 4096 * t + (d % 4096) * t / 4096;
+}
+
+/* Slide a corner along the edge toward one that is already drawable,
+ * stopping on the guard so the visible part of the sheet remains. */
+static void pull_guard(int *x, int *y, int *z, int x1, int y1, int z1) {
+    int x0, y0, z0, lo, hi, n;
+    if (on_guard(*x, *y, *z) || !on_guard(x1, y1, z1))
+        return;
+    x0 = *x;
+    y0 = *y;
+    z0 = *z;
+    lo = 0;
+    hi = 4096;
+    for (n = 0; n < 8; n++) {
+        int t = (lo + hi) >> 1;
+        if (on_guard(lerp4096(x0, x1, t), lerp4096(y0, y1, t), lerp4096(z0, z1, t)))
+            hi = t;
+        else
+            lo = t;
+    }
+    *x = lerp4096(x0, x1, hi);
+    *y = lerp4096(y0, y1, hi);
+    *z = lerp4096(z0, z1, hi);
+}
+
+static int scr128(int v, int z) {
+    return v / z * 128 + (v % z) * 128 / z;
+}
+
+/* 1 when this edge would be too long on screen to draw in one quad. */
+static int span_long(int x0, int y0, int z0, int x1, int y1, int z1) {
+    int dx, dy;
+    if (z0 < 28 || z1 < 28)
+        return 1;
+    dx = scr128(x0, z0) - scr128(x1, z1);
+    dy = scr128(y0, z0) - scr128(y1, z1);
+    if (dx < 0)
+        dx = -dx;
+    if (dy < 0)
+        dy = -dy;
+    return (dx > dy ? dx : dy) > 240;
+}
+
+/* 1 when a sheet from s0 to s1 should be cut in half. Pieces share the
+ * cut, so the sheet stays closed. */
+static int cloth_coarse(int s0, int s1,
+                        int x0, int y0, int z0, int x1, int y1, int z1,
+                        int x2, int y2, int z2, int x3, int y3, int z3) {
+    if (s1 - s0 <= 24)
+        return 0;
+    if (z0 < 28 && z1 < 28 && z2 < 28 && z3 < 28)
+        return 0;
+    if (z0 < 28 || z1 < 28 || z2 < 28 || z3 < 28)
+        return 1;
+    if (!on_guard(x0, y0, z0) || !on_guard(x1, y1, z1) ||
+        !on_guard(x2, y2, z2) || !on_guard(x3, y3, z3))
+        return 1;
+    if (span_long(x0, y0, z0, x2, y2, z2) || span_long(x1, y1, z1, x3, y3, z3))
+        return 1;
+    if (span_long(x0, y0, z0, x1, y1, z1) || span_long(x2, y2, z2, x3, y3, z3))
+        return 1;
+    return 0;
+}
+
 /* One band beside the deck, from `inner` to `outer` u past the curb. */
 static void verge_band(const RoadSample *a, const RoadSample *b, int side,
                        int inner, int outer, const uint8_t *rgb) {
@@ -341,7 +419,12 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
     edge_out(a, side, outer, &x1, &y1, &z1);
     edge_out(b, side, inner, &x2, &y2, &z2);
     edge_out(b, side, outer, &x3, &y3, &z3);
-    if (z0 < 8 || z1 < 8 || z2 < 8 || z3 < 8)
+    pull_guard(&x0, &y0, &z0, x2, y2, z2);
+    pull_guard(&x1, &y1, &z1, x3, y3, z3);
+    pull_guard(&x2, &y2, &z2, x0, y0, z0);
+    pull_guard(&x3, &y3, &z3, x1, y1, z1);
+    if (!on_guard(x0, y0, z0) || !on_guard(x1, y1, z1) ||
+        !on_guard(x2, y2, z2) || !on_guard(x3, y3, z3))
         return;
     za = (z0 + z1) / 2;
     zb = (z2 + z3) / 2;
@@ -668,7 +751,12 @@ static int paint_span(int x0, int y0, int z0, int x1, int y1, int z1,
     int nz, fz, nr, ng, nb, fr, fg, fb, sort;
     int cn[3], cf[3];
     XY p0, p1, p2, p3;
-    if (z0 < 16 || z1 < 16 || z2 < 16 || z3 < 16)
+    pull_guard(&x0, &y0, &z0, x2, y2, z2);
+    pull_guard(&x1, &y1, &z1, x3, y3, z3);
+    pull_guard(&x2, &y2, &z2, x0, y0, z0);
+    pull_guard(&x3, &y3, &z3, x1, y1, z1);
+    if (!on_guard(x0, y0, z0) || !on_guard(x1, y1, z1) ||
+        !on_guard(x2, y2, z2) || !on_guard(x3, y3, z3))
         return 1;
     nz = (z0 + z1) / 2;
     fz = (z2 + z3) / 2;
@@ -725,6 +813,12 @@ int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
     cloth_u(s1, side, out1, &u1);
     path_cam(s1, u0, v0, &x2, &y2, &z2);
     path_cam(s1, u1, v1, &x3, &y3, &z3);
+    if (cloth_coarse(s0, s1, x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)) {
+        int mid = (s0 + s1) / 2;
+        if (!road_cloth(s0, mid, side, out0, v0, out1, v1, r, g, b))
+            return 0;
+        return road_cloth(mid, s1, side, out0, v0, out1, v1, r, g, b);
+    }
     return paint_span(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b);
 }
 
@@ -741,6 +835,12 @@ int road_lintel(int s0, int s1, int out, int v, int r, int g, int b) {
     path_edges(s1, &ul, &ur);
     path_cam(s1, ul - out, v, &x2, &y2, &z2);
     path_cam(s1, ur + out, v, &x3, &y3, &z3);
+    if (cloth_coarse(s0, s1, x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)) {
+        int mid = (s0 + s1) / 2;
+        if (!road_lintel(s0, mid, out, v, r, g, b))
+            return 0;
+        return road_lintel(mid, s1, out, v, r, g, b);
+    }
     return paint_span(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b);
 }
 
@@ -1094,11 +1194,77 @@ static int far_step(int s, const RoadSample *p, int cz, int per) {
     return ds;
 }
 
-/* Past the widest deck and its curb, with room to spare. */
-#define OFF_MARGIN 400
-
 /* Longest hop over road out of view, so next_s walks few bands. */
 #define SKIP_MAX (STEP * 32)
+
+/* How far a sheet beside the road runs. Same stop as the far deck:
+ * VIEW_S of track, short of a lap, and not past VIEW_Z. Steps stay
+ * `step` beside the camera and grow with depth, so a wall meets the
+ * road at the horizon without a quad per near-sized slice. */
+int road_span(int s0, int scroll, int step, int reach, int *s1) {
+    int lap, end, x, y, z, ds, clear, jump;
+    const PathSeg *seg;
+    if (step < 8)
+        step = 8;
+    if (reach < 0)
+        reach = 0;
+    lap = path_lap();
+    end = scroll + VIEW_S;
+    if (lap && lap - STEP < VIEW_S)
+        end = scroll + lap - STEP;
+    if (s0 >= end)
+        return 0;
+    path_cam(s0, 0, 0, &x, &y, &z);
+    /* Beside the camera, including a sheet that starts just behind it.
+     * Skipping here would drop the wall next to the runner. */
+    if (z < FAR) {
+        ds = step;
+        if (s0 + ds > end)
+            ds = end - s0;
+        if (ds < 8)
+            return 0;
+        *s1 = s0 + ds;
+        return 1;
+    }
+    if (z >= VIEW_Z)
+        return 0;
+    clear = path_view_clear(s0, reach, VIEW_Z);
+    if (clear > 0) {
+        jump = clear < step ? step : clear;
+        if (jump > SKIP_MAX)
+            jump = SKIP_MAX;
+        if (s0 + jump > end)
+            jump = end - s0;
+        if (jump >= 8 && (clear >= jump || path_view_clear(s0 + jump, reach, VIEW_Z) > 0)) {
+            *s1 = s0 + jump;
+            return 2;
+        }
+    }
+    ds = z / 5;
+    if (ds < step)
+        ds = step;
+    if (ds > step * 8)
+        ds = step * 8;
+    if (VIEW_Z - z < ds)
+        ds = VIEW_Z - z;
+    seg = path_at(s0);
+    if (seg) {
+        int guard = 0;
+        while (ds > step && too_bent(seg, s0 + ds, z) && guard < 6) {
+            ds /= 2;
+            guard++;
+        }
+    }
+    if (s0 + ds > end)
+        ds = end - s0;
+    if (ds < 8)
+        return 0;
+    *s1 = s0 + ds;
+    return 1;
+}
+
+/* Past the widest deck and its curb, with room to spare. */
+#define OFF_MARGIN 400
 
 /* From s, out of view: hop on while the road stays out of view, and return
  * where it may come into view, or a jump. A hop within the road's

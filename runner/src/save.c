@@ -10,7 +10,8 @@
  *   0x204 version
  *   0x205 record size
  *   0x206 checksum, 16-bit, little-endian, over the record
- *   0x208 record. Byte 0 is how many story stages are unlocked.
+ *   0x208 record. Byte 0 counts unlocked story stages in world order.
+ *   One past the last stage means that stage has been cleared.
  * A write covers the header and the record, 0x280 bytes, five sectors. */
 #define SAVE_PATH "bu00:UUUVVV-RUNNER"
 #define SAVE_BYTES 0x280
@@ -18,39 +19,45 @@
 #define SAVE_RECORD 1
 
 #define CARD_PORT 0
+/* The BIOS accepts read or write, not both, in the low bits. */
 #define MODE_READ 1
 #define MODE_WRITE 2
 #define MODE_CREATE (1 << 9)
 #define MODE_BLOCKS(n) ((n) << 16)
 
 enum {
+    SV_BOOT,
     SV_INFO,
     SV_CLEAR,
     SV_DIR,
+    SV_WAIT,
     SV_LOAD,
-    SV_READY,
-    SV_NONE
+    SV_READY
 };
 
 static uint8_t buf[SAVE_BYTES] __attribute__((aligned(4)));
-static int ev_sw[4];
-static int ev_hw[4];
-static int state = SV_NONE;
-static int wait_left;
-static int new_tries;
+static int state = SV_BOOT;
+static int read_tries;
 static int has_file;
 static int write_lock;
 static int want_write;
-static int write_tries;
+static int write_cool;
 static int pending = 1;
 static int loaded;
 static int generation;
+#ifndef RUNNER_WEB
+static int ev_sw[4];
+static int ev_hw[4];
+static int wait_left;
+static int new_tries;
+#endif
 
 static void put16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)v;
     p[1] = (uint8_t)(v >> 8);
 }
 
+#ifndef RUNNER_WEB
 static void events_eat(void) {
     int i;
     for (i = 0; i < 4; i++) {
@@ -94,6 +101,13 @@ static void open_events(void) {
         EnableEvent(ev_hw[i]);
     }
 }
+
+static void kick(int next, int frames) {
+    events_eat();
+    wait_left = frames;
+    state = next;
+}
+#endif
 
 /* "UUUVVV RUNNER" as fullwidth Shift-JIS, the encoding the card browser uses. */
 static void write_title(uint8_t *p) {
@@ -161,17 +175,50 @@ static void parse_buf(void) {
         loaded = rec[0];
 }
 
-static int open_file(int create) {
-    int mode = MODE_READ | MODE_WRITE;
-    if (create)
-        mode |= MODE_CREATE | MODE_BLOCKS(1);
-    return open(SAVE_PATH, mode);
+/* The browser BIOS stand-in only serves a card that already has an "MC"
+ * header. A fresh image is all zeroes, which the file calls treat as no
+ * card. Write the blank header the stand-in itself uses. */
+#ifdef RUNNER_WEB
+static void ensure_header(void) {
+    static int checked;
+    uint8_t sec[128];
+    int s;
+    if (checked)
+        return;
+    checked = 1;
+    _card_read(CARD_PORT, 0, sec);
+    if (sec[0] == 'M' && sec[1] == 'C')
+        return;
+    memset(sec, 0, sizeof sec);
+    sec[0] = 'M';
+    sec[1] = 'C';
+    sec[127] = 0x0e;
+    _card_write(CARD_PORT, 0, sec);
+    memset(sec, 0, sizeof sec);
+    sec[0] = 0xa0;
+    sec[8] = 0xff;
+    sec[9] = 0xff;
+    sec[127] = 0xa0;
+    for (s = 1; s <= 15; s++)
+        _card_write(CARD_PORT, s, sec);
 }
+#endif
 
 static void do_read(void) {
-    int fd = open(SAVE_PATH, MODE_READ);
+    int fd;
     int n;
+#ifdef RUNNER_WEB
+    ensure_header();
+#endif
+    fd = open(SAVE_PATH, MODE_READ);
     if (fd < 0) {
+#ifdef RUNNER_WEB
+        /* A missing file and a card that is still waking up look the same
+         * for a moment. An existing file opens, so this wait is only the
+         * empty-card case. */
+        if (++read_tries < 20)
+            return;
+#endif
         has_file = 0;
         loaded = 0;
         state = SV_READY;
@@ -179,53 +226,75 @@ static void do_read(void) {
     }
     n = read(fd, buf, SAVE_BYTES);
     close(fd);
-    has_file = 1;
-    if (n == SAVE_BYTES)
-        parse_buf();
-    else
+    if (n != SAVE_BYTES) {
+        if (++read_tries < 60)
+            return;
+        has_file = 1;
         loaded = 0;
+        write_lock = 1;
+        state = SV_READY;
+        return;
+    }
+    has_file = 1;
+    parse_buf();
     state = SV_READY;
 }
 
 static void do_write(void) {
     int fd;
     int n;
+    int mode;
+    if (write_cool > 0) {
+        write_cool--;
+        return;
+    }
+    /* A load that arrived after an earlier unlock wins when it is ahead. */
+    if (pending < loaded)
+        pending = loaded;
+    if (has_file && pending == loaded) {
+        want_write = 0;
+        return;
+    }
     fill_buf(pending);
+#ifndef RUNNER_WEB
     events_eat();
-    fd = open_file(!has_file);
+#endif
+    mode = MODE_WRITE;
+    if (!has_file)
+        mode |= MODE_CREATE | MODE_BLOCKS(1);
+    fd = open(SAVE_PATH, mode);
     if (fd < 0)
-        fd = open_file(has_file);
+        fd = open(SAVE_PATH, has_file ? MODE_WRITE | MODE_CREATE | MODE_BLOCKS(1) : MODE_WRITE);
     if (fd < 0) {
-        if (++write_tries >= 4)
-            want_write = 0;
+        write_cool = 16;
         return;
     }
     n = write(fd, buf, SAVE_BYTES);
     close(fd);
     if (n != SAVE_BYTES) {
-        if (++write_tries >= 4)
-            want_write = 0;
+        write_cool = 16;
         return;
     }
     has_file = 1;
-    write_tries = 0;
+    loaded = pending;
     want_write = 0;
     generation = generation >= 255 ? 1 : generation + 1;
 }
 
-static void kick(int next, int frames) {
-    events_eat();
-    wait_left = frames;
-    state = next;
-}
-
 void save_init(void) {
+    int was = EnterCriticalSection();
     InitCARD(1);
     StartCARD();
     _bu_init();
+    if (was)
+        ExitCriticalSection();
+#ifdef RUNNER_WEB
+    /* No BIOS events. Slot 1 is the image the page saves. */
+    state = SV_LOAD;
+#else
     open_events();
-    kick(SV_INFO, 120);
-    _card_info(CARD_PORT);
+    state = SV_BOOT;
+#endif
 }
 
 void save_store(int reach) {
@@ -236,7 +305,7 @@ void save_store(int reach) {
     if (reach > 255)
         reach = 255;
     pending = reach;
-    write_tries = 0;
+    write_cool = 0;
     want_write = 1;
 }
 
@@ -245,37 +314,59 @@ int save_generation(void) {
 }
 
 int save_poll(int *reach) {
+#ifdef RUNNER_WEB
+    if (state == SV_LOAD)
+        do_read();
+    else if (state == SV_READY && want_write && !write_lock)
+        do_write();
+#else
     int r;
-    if (state == SV_INFO) {
+    /* The pad driver shares this bus. The probe starts on the first poll,
+     * which is after ChangeClearPAD(0). Starting it inside save_init
+     * cancels the transfer and the card never answers. A miss used to
+     * stick: the card was never asked again. */
+    if (state == SV_BOOT) {
+        kick(SV_INFO, 180);
+        _card_info(CARD_PORT);
+    } else if (state == SV_INFO) {
         r = wait_result();
         if (r == 2 && new_tries < 3) {
             new_tries++;
             kick(SV_CLEAR, 120);
             _card_clear(CARD_PORT);
         } else if (r == 1) {
+            new_tries = 0;
             kick(SV_DIR, 240);
             _card_load(CARD_PORT);
         } else if (r == 0 || r == 2) {
-            state = SV_NONE;
+            new_tries = 0;
+            kick(SV_WAIT, 90);
         }
     } else if (state == SV_CLEAR) {
         r = wait_result();
-        if (r >= 0) {
-            kick(SV_INFO, 120);
+        if (r == 1) {
+            kick(SV_INFO, 180);
             _card_info(CARD_PORT);
-        }
+        } else if (r == 0 || r == 2)
+            kick(SV_WAIT, 90);
     } else if (state == SV_DIR) {
         r = wait_result();
         if (r == 1)
             state = SV_LOAD;
-        else if (r == 0)
-            state = SV_NONE;
+        else if (r == 0 || r == 2)
+            kick(SV_WAIT, 90);
+    } else if (state == SV_WAIT) {
+        if (--wait_left <= 0) {
+            kick(SV_INFO, 180);
+            _card_info(CARD_PORT);
+        }
     } else if (state == SV_LOAD) {
         do_read();
     } else if (state == SV_READY && want_write && !write_lock) {
         do_write();
     }
+#endif
     if (reach)
         *reach = state == SV_READY ? loaded : 0;
-    return state == SV_READY || state == SV_NONE;
+    return state == SV_READY;
 }

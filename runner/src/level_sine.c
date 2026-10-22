@@ -11,7 +11,8 @@
 
 #define EDGE_END 2400
 #define SHOULDER_W 16
-#define GROUND_W 36
+#define TUBE_OUT 36
+#define GROUND_W TUBE_OUT
 
 typedef struct {
     uint8_t sky[3], haze[3], tint[3], shadow[3], top[3];
@@ -98,43 +99,38 @@ static void sine_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = live.sky[2];
 }
 
+/* Walls and ceiling share their edges, so the tube is closed and the
+ * clear color shows only at the far mouth. The sheets run as far as the
+ * road's far deck. Ribs stay near the camera. */
 static void tube(const LevelFrame *f) {
     int step = 640;
-    int s = (f->scroll + 160) / step * step;
-    int last = f->scroll + 4200;
-    for (; s < last; s += step) {
-        int rib = ((s / step) & 3) == ((f->time >> 3) & 3);
-        int wr = rib ? (int)road.edge[0] : 8;
-        int wg = rib ? (int)road.edge[1] : 18;
-        int wb = rib ? (int)road.edge[2] : 22;
-        if (!road_cloth(s, s + step - 20, -1, 36, 0, 36, 420, 6, 12, 14))
+    int reach = ROAD_HALF + TUBE_OUT;
+    int s = f->scroll / step * step;
+    int s1, draw;
+    int ribs = f->scroll + 7040;
+    for (; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+        if (draw == 2)
+            continue;
+        if (!road_cloth(s, s1, -1, TUBE_OUT, 0, TUBE_OUT, 420, 6, 12, 14))
             return;
-        if (!road_cloth(s, s + step - 20, 1, 36, 0, 36, 420, 6, 12, 14))
+        if (!road_cloth(s, s1, 1, TUBE_OUT, 0, TUBE_OUT, 420, 6, 12, 14))
             return;
-        if (!road_cloth(s, s + 36, -1, 22, 0, 22, 440, wr, wg, wb))
+        if (!road_lintel(s, s1, TUBE_OUT, 408, 5, 10, 12))
             return;
-        if (!road_cloth(s, s + 36, 1, 22, 0, 22, 440, wr, wg, wb))
-            return;
-        if (s > f->scroll + 420) {
-            if (!road_lintel(s, s + step - 20, 36, 408, 5, 10, 12))
-                return;
-            if (rib && !road_lintel(s, s + 36, 22, 432, wr, wg, wb))
-                return;
-        }
     }
-    step = 1024;
-    s = (f->scroll + 4200) / step * step;
-    if (s < f->scroll + 4200)
-        s += step;
-    for (; s < f->scroll + 8600; s += step) {
-        int wr = road.edge[0] / 2;
-        int wg = road.edge[1] / 2;
-        int wb = road.edge[2] / 2;
-        if (!road_cloth(s, s + 36, -1, 28, 0, 28, 400, wr, wg, wb))
+    for (s = f->scroll / step * step; s < ribs; s += step) {
+        int rib = ((s / step) & 3) == ((f->time >> 3) & 3);
+        int wr, wg, wb;
+        if (!rib)
+            continue;
+        wr = road.edge[0];
+        wg = road.edge[1];
+        wb = road.edge[2];
+        if (!road_cloth(s, s + 40, -1, 22, 0, 22, 440, wr, wg, wb))
             return;
-        if (!road_cloth(s, s + 36, 1, 28, 0, 28, 400, wr, wg, wb))
+        if (!road_cloth(s, s + 40, 1, 22, 0, 22, 440, wr, wg, wb))
             return;
-        if (!road_lintel(s, s + 36, 28, 388, wr, wg, wb))
+        if (!road_lintel(s, s + 40, 22, 432, wr, wg, wb))
             return;
     }
 }
