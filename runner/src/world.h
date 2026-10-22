@@ -127,3 +127,7 @@ void flat(int xa, int z0, int xb, int z1, int y, int r, int g, int b);
 void lid(int xa, int z0, int xb, int z1, int y, int r, int g, int b);
 void wall(int xa, int xb, int z, int ya, int yb, int r, int g, int b);
 void side(int x, int z0, int z1, int ya, int yb, int r, int g, int b);
+
+/* Affine textured scenery quad; UVs follow each projected corner. */
+void poly_tex4(const XY *p, const XY *uv, int bucket, int shade,
+               uint16_t tpage, uint16_t clut);

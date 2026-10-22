@@ -613,3 +613,24 @@ void side(int x, int z0, int z1, int ya, int yb, int r, int g, int b) {
         z = z2;
     }
 }
+
+void poly_tex4(const XY *p, const XY *uv, int bucket, int shade,
+               uint16_t tpage, uint16_t clut) {
+    int i, x0=p[0].x, x1=x0, y0=p[0].y, y1=y0;
+    POLY_FT4 *q;
+    for (i=0;i<4;i++) {
+        if (p[i].x<x0) x0=p[i].x;
+        if (p[i].x>x1) x1=p[i].x;
+        if (p[i].y<y0) y0=p[i].y;
+        if (p[i].y>y1) y1=p[i].y;
+    }
+    if (x1<=0 || x0>=SCREEN_W || y1<=0 || y0>=SCREEN_H ||
+        x1-x0>=1024 || y1-y0>=512) return;
+    q=alloc_prim(bucket,sizeof *q);
+    if (!q) return;
+    setPolyFT4(q);
+    setRGB0(q,shade,shade,shade);
+    setXY4(q,p[0].x,p[0].y,p[1].x,p[1].y,p[2].x,p[2].y,p[3].x,p[3].y);
+    setUV4(q,uv[0].x,uv[0].y,uv[1].x,uv[1].y,uv[2].x,uv[2].y,uv[3].x,uv[3].y);
+    q->tpage=tpage; q->clut=clut;
+}

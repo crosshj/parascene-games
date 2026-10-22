@@ -76,3 +76,7 @@ int road_marker(int s, int u, int half, int v0, int v1, int r, int g, int b);
  * s0..*s1, 2 to advance without drawing (the stretch is outside the
  * view), or 0 when the run is finished. */
 int road_span(int s0, int scroll, int step, int reach, int *s1);
+
+/* Baked opaque facade, with UVs preserved through adaptive subdivision. */
+void road_facade(int s0, int s1, int side, int out, int height,
+                 int u, int v, int size, uint16_t tpage, uint16_t clut);

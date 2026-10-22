@@ -62,6 +62,12 @@ add_custom_command(
 	VERBATIM
 )
 
+set(VESPER_H "${CMAKE_CURRENT_BINARY_DIR}/vesper_facades.h")
+add_custom_command(OUTPUT "${VESPER_H}"
+    COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_vesper.py" "${VESPER_H}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_vesper.py" VERBATIM)
+set_source_files_properties(src/level_vesper.c PROPERTIES OBJECT_DEPENDS "${VESPER_H}")
+
 file(GLOB AUDIO_MP3S CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/audio/*.mp3")
 list(SORT AUDIO_MP3S)
 list(LENGTH AUDIO_MP3S MUSIC_TRACK_COUNT)
@@ -164,6 +170,7 @@ add_custom_command(
 	VERBATIM
 )
 add_custom_target(check_worlds
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_bake_vesper.py"
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_bake_worlds.py"
 	COMMAND "${WORLD_HOST_CC}" -std=gnu99 -O2 -DRUNNER_PREVIEW
 		-I "${CMAKE_CURRENT_SOURCE_DIR}/src" -I "${CMAKE_CURRENT_BINARY_DIR}"
@@ -216,7 +223,7 @@ set_source_files_properties(src/level_lumenwild.c PROPERTIES
 	OBJECT_DEPENDS "${LUMEN_SKY_H}")
 set_source_files_properties(src/path.c PROPERTIES
 	OBJECT_DEPENDS "${TRACK_H}")
-add_custom_target(sprite_sheet DEPENDS "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}" "${LUMEN_SKY_H}")
+add_custom_target(sprite_sheet DEPENDS "${VESPER_H}" "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}" "${LUMEN_SKY_H}")
 add_dependencies(runner sprite_sheet)
 
 psn00bsdk_add_cd_image(

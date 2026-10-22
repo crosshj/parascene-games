@@ -105,9 +105,12 @@ void ResetGraph(int mode) { (void)mode; }
 void InitGeom(void) {}
 void ClearOTagR(uint32_t *ot, size_t length) { (void)ot; (void)length; }
 int DrawSync(int mode) { (void)mode; return 0; }
+static uint16_t vram[512][1024];
 int LoadImage(const RECT *rect, const uint32_t *data) {
-    (void)rect;
-    (void)data;
+    const uint16_t *src=(const uint16_t *)data;
+    int x,y;
+    for (y=0;y<rect->h;y++) for(x=0;x<rect->w;x++)
+        vram[(rect->y+y)&511][(rect->x+x)&1023]=src[y*rect->w+x];
     return 0;
 }
 int VSync(int mode) { (void)mode; return 0; }
@@ -185,6 +188,21 @@ static void plot(int x, int y, int r, int g, int b, int semi) {
 }
 
 typedef struct { int x, y, r, g, b; } Vtx;
+static int texture_on, texture_page, texture_clut, texture_raw;
+/* Textured triangles use r/g for affine U/V and b for monochrome modulation. */
+static void tex_plot(int x,int y,int u,int v,int shade,int semi) {
+    int mode=(texture_page>>7)&3, tx=(texture_page&15)*64, ty=(texture_page&16)*16;
+    int word, index; uint16_t c;
+    u &=255; v &=255;
+    word=vram[(ty+v)&511][(tx+(u>>(2-mode)))&1023];
+    index=mode==0 ? (word>>((u&3)*4))&15 : (word>>((u&1)*8))&255;
+    c=mode==2 ? word : vram[(texture_clut>>6)&511][((texture_clut&63)*16+index)&1023];
+    if (!c) return;
+    if (texture_raw) shade=128;
+    plot(x,y,clamp(((c&31)<<3)*shade/128,0,255),
+        clamp((((c>>5)&31)<<3)*shade/128,0,255),
+        clamp((((c>>10)&31)<<3)*shade/128,0,255),semi && (c&0x8000));
+}
 
 static long edge_fn(const Vtx *a, const Vtx *b, int x, int y) {
     return (long)(b->x - a->x) * (y - a->y) - (long)(b->y - a->y) * (x - a->x);
@@ -222,7 +240,11 @@ static void tri(Vtx a, Vtx b, Vtx c, int semi) {
                 (!w0 && !top_left(&b,&c)) || (!w1 && !top_left(&c,&a)) ||
                 (!w2 && !top_left(&a,&b)))
                 continue;
-            plot(x, y,
+            if (texture_on) tex_plot(x,y,
+                 (int)((a.r * w0 + b.r * w1 + c.r * w2) / area),
+                 (int)((a.g * w0 + b.g * w1 + c.g * w2) / area),
+                 (int)((a.b * w0 + b.b * w1 + c.b * w2) / area), semi);
+            else plot(x, y,
                  (int)((a.r * w0 + b.r * w1 + c.r * w2) / area),
                  (int)((a.g * w0 + b.g * w1 + c.g * w2) / area),
                  (int)((a.b * w0 + b.b * w1 + c.b * w2) / area), semi);
@@ -271,6 +293,15 @@ static Counts render(int cr, int cg, int cb) {
             abr = (int)((((uint32_t *)links[i].prim)[1] >> 5) & 3);
             dither_on = (int)((((uint32_t *)links[i].prim)[1] >> 9) & 1);
             n.tpage++;
+        } else if ((code & 0xFC) == 0x2C) {
+            POLY_FT4 *p=links[i].prim;
+            Vtx a={p->x0,p->y0,p->u0,p->v0,p->r0}, b={p->x1,p->y1,p->u1,p->v1,p->r0};
+            Vtx c={p->x2,p->y2,p->u2,p->v2,p->r0}, d={p->x3,p->y3,p->u3,p->v3,p->r0};
+            texture_on=1; texture_page=p->tpage; texture_clut=p->clut; texture_raw=code&1;
+            abr=(p->tpage>>5)&3;
+            prim_dither=dither_on && !texture_raw;
+            tri(a,b,c,semi); tri(b,c,d,semi);
+            texture_on=0; prim_dither=0; n.f4++;
         } else if ((code & 0xFC) == 0x28) {
             POLY_F4 *p = links[i].prim;
             Vtx v0 = {p->x0, p->y0, p->r0, p->g0, p->b0};
@@ -564,6 +595,56 @@ static int compare_world(const char *dir, int strict) {
     return strict && failures != 0;
 }
 
+extern void vesper_preview_skyline(void);
+static int vesper_motion_check(void) {
+    static uint8_t previous[SCREEN_H][SCREEN_W][3];
+    int s,frames=0,failures=0,prev_shift=0,prev_yaw=0,changed=0;
+    path_open("vesper.sweep");
+    for(s=24576;s<=65536;s+=20) {
+        int yaw,shift,delta,x,y,c;
+        path_begin(s);
+        yaw=path_yaw(); shift=yaw*SCREEN_W/2048;
+        vesper_preview_skyline();
+        render(0,0,0);
+        if(frames) {
+            failures += yaw<prev_yaw || path_horizon()!=HORIZON_Y;
+            delta=shift-prev_shift;
+            for(y=0;y<100;y++) for(x=0;x<SCREEN_W-delta;x++) {
+                int bad=0;
+                for(c=0;c<3;c++)
+                    bad |= iabs(fb[y][x][c]-previous[y][x+delta][c])>8;
+                changed+=bad;
+            }
+        }
+        memcpy(previous,fb,sizeof previous);
+        prev_shift=shift; prev_yaw=yaw; frames++;
+        world_flip();
+    }
+    printf("Vesper motion: %d frames, %d heading/horizon failures, %d pixels move independently of skyline\n",
+           frames,failures,changed);
+    return failures!=0 || changed!=0;
+}
+
+static int texture_self_test(void) {
+    /* Verify packed nibbles, palette addressing, opacity and UV orientation
+     * through the same uploaded VRAM and primitive path as the console. */
+    uint16_t pixels[2] __attribute__((aligned(4)))={0x3210,0x1230};
+    uint16_t palette[16] __attribute__((aligned(4)))={0,31,31<<5,31<<10};
+    RECT rect; XY p[4]={{0,0},{4,0},{0,2},{4,2}}, uv[4]={{0,128},{4,128},{0,130},{4,130}};
+    int failures=0;
+    setRECT(&rect,960,128,1,2); LoadImage(&rect,(const uint32_t *)pixels);
+    setRECT(&rect,0,483,16,1); LoadImage(&rect,(const uint32_t *)palette);
+    poly_tex4(p,uv,4,128,getTPage(0,0,960,0),getClut(0,483));
+    /* Test exact palette decoding independently of optional GPU dithering. */
+    dither_mode(4,0);
+    render(16,16,16);
+    failures += fb[0][0][0]!=16 || fb[0][1][0]!=248 || fb[0][2][1]!=248 || fb[0][3][2]!=248;
+    failures += fb[1][1][2]!=248 || fb[1][2][1]!=248 || fb[1][3][0]!=248;
+    world_flip();
+    printf("texture check: %d failures (4-bit upload, CLUT, UV, transparent zero)\n",failures);
+    return failures!=0;
+}
+
 static int visibility_self_test(void) {
     XY a={0,0},b={8,0},c={0,8},d={8,8};
     int transparent, failures=0;
@@ -758,6 +839,10 @@ int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     int i, j;
     world_init();
+    if (argc > 2 && !strcmp(argv[2],"--vesper-motion-check"))
+        return vesper_motion_check();
+    if (argc > 2 && !strcmp(argv[2],"--texture-self-test"))
+        return texture_self_test();
     if (argc > 2 && !strcmp(argv[2],"--visibility-self-test"))
         return visibility_self_test();
     if (argc > 2 && !strcmp(argv[2],"--visibility"))
@@ -775,7 +860,7 @@ int main(int argc, char **argv) {
         LevelFrame f = {atoi(argv[4]), 20, argc > 5 ? atoi(argv[5]) : 0, 0, atoi(argv[3])};
         char path[512];
         for (i = 0; i < level_count; i++)
-            if (!strcmp(levels[i]->track, "sine.gate")) {
+            if (!strcmp(levels[i]->track, getenv("RUNNER_PREVIEW_TRACK") ? getenv("RUNNER_PREVIEW_TRACK") : "sine.gate")) {
                 snprintf(path, sizeof path, "%s/shot.png", dir);
                 frame(levels[i], &f, 1, 0, path);
                 return 0;

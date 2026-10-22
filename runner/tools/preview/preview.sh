@@ -9,6 +9,7 @@ sdk=${PSN00BSDK:-$HOME/psn00bsdk}
 mkdir -p "$out"
 python3 "$here/../make_lumen_sky.py" "$out/lumen_sky.h" "$out/lumen_sky.png"
 python3 "$here/../bake_tracks.py"
+python3 "$here/../bake_vesper.py" "$out/vesper_facades.h"
 cc -std=gnu99 -O2 -Wall -Wextra -Wno-unused-parameter -DRUNNER_PREVIEW \
     ${RUNNER_PREVIEW_FLAGS:-} \
     -I "$here/host" -idirafter "$sdk/include/libpsn00b" -I "$src" -I "$out" \

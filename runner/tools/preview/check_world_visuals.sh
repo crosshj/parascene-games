@@ -6,6 +6,7 @@ out=${1:-"$here/../../build/world-visuals"}
 result=0
 PSX15=1 RUNNER_PREVIEW_FLAGS= sh "$here/preview.sh" "$out" --compare-review || result=$?
 if [ -x "$out/preview" ]; then
+    PSX15=1 "$out/preview" "$out" --vesper-motion-check || result=$?
     "$out/preview" "$out" --visibility-self-test || result=$?
     PSX15=1 "$out/preview" "$out" --tunnel-check || result=$?
 fi

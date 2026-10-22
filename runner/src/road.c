@@ -367,10 +367,10 @@ static int lerp4096(int a, int b, int t) {
 
 /* Slide a corner along the edge toward one that is already drawable,
  * stopping on the guard so the visible part of the sheet remains. */
-static void pull_guard(int *x, int *y, int *z, int x1, int y1, int z1) {
+static int pull_guard(int *x, int *y, int *z, int x1, int y1, int z1) {
     int x0, y0, z0, lo, hi, n;
     if (on_guard(*x, *y, *z) || !on_guard(x1, y1, z1))
-        return;
+        return 0;
     x0 = *x;
     y0 = *y;
     z0 = *z;
@@ -386,6 +386,7 @@ static void pull_guard(int *x, int *y, int *z, int x1, int y1, int z1) {
     *x = lerp4096(x0, x1, hi);
     *y = lerp4096(y0, y1, hi);
     *z = lerp4096(z0, z1, hi);
+    return hi;
 }
 
 static int scr128(int v, int z) {
@@ -1760,3 +1761,71 @@ void road_bench(const RoadStyle *st) {
     printf("PROF bench acc %d\n", acc);
 }
 #endif
+
+typedef struct { int x,y,z,u,v; } FacadeVertex;
+static FacadeVertex facade_mid(FacadeVertex a,FacadeVertex b) {
+    FacadeVertex m={(a.x+b.x)/2,(a.y+b.y)/2,(a.z+b.z)/2,(a.u+b.u)/2,(a.v+b.v)/2};
+    return m;
+}
+static void facade_emit(FacadeVertex *a,uint16_t page,uint16_t clut,int depth) {
+    int i,t,sort;
+    XY p[4],uv[4];
+    if (!scene_room() || sheet_hidden(a[0].x,a[0].y,a[0].z,a[1].x,a[1].y,a[1].z,
+        a[2].x,a[2].y,a[2].z,a[3].x,a[3].y,a[3].z)) return;
+    for (i=0;i<4;i++) {
+        FacadeVertex *b=&a[i^2];
+        t=pull_guard(&a[i].x,&a[i].y,&a[i].z,b->x,b->y,b->z);
+        a[i].u=lerp4096(a[i].u,b->u,t); a[i].v=lerp4096(a[i].v,b->v,t);
+    }
+    for(i=0;i<4;i++) if(!on_guard(a[i].x,a[i].y,a[i].z)) return;
+    if (depth<10) {
+        int vertical=span_long(a[0].x,a[0].y,a[0].z,a[1].x,a[1].y,a[1].z) ||
+                     span_long(a[2].x,a[2].y,a[2].z,a[3].x,a[3].y,a[3].z);
+        int along=span_long(a[0].x,a[0].y,a[0].z,a[2].x,a[2].y,a[2].z) ||
+                  span_long(a[1].x,a[1].y,a[1].z,a[3].x,a[3].y,a[3].z) ||
+                  a[2].z*4>5*a[0].z || a[0].z*4>5*a[2].z;
+        /* PS1 textures are affine. Tall unsplit quads shear a square window
+         * across their diagonal; bound vertical spans when depth varies. */
+        if (iabs(a[2].z-a[0].z)*16 > a[0].z) {
+            vertical |= iabs(scr128(a[0].y,a[0].z)-scr128(a[1].y,a[1].z))>32 ||
+                        iabs(scr128(a[2].y,a[2].z)-scr128(a[3].y,a[3].z))>32;
+        }
+        if (vertical || along) {
+            FacadeVertex b[4],c[4];
+            if(vertical) {
+                b[0]=a[0]; b[1]=facade_mid(a[0],a[1]); b[2]=a[2]; b[3]=facade_mid(a[2],a[3]);
+                c[0]=b[1]; c[1]=a[1]; c[2]=b[3]; c[3]=a[3];
+            } else {
+                b[0]=a[0]; b[1]=a[1]; b[2]=facade_mid(a[0],a[2]); b[3]=facade_mid(a[1],a[3]);
+                c[0]=b[2]; c[1]=b[3]; c[2]=a[2]; c[3]=a[3];
+            }
+            facade_emit(b,page,clut,depth+1); facade_emit(c,page,clut,depth+1); return;
+        }
+    }
+    for(i=0;i<4;i++) {
+        project(a[i].x,a[i].y,a[i].z,&p[i]);
+        uv[i].x=a[i].u>>6; uv[i].y=a[i].v>>6;
+    }
+    sort=(a[2].z+a[3].z)/2;
+    if(sort>=VIEW_Z) return;
+    poly_tex4(p,uv,view_bucket(sort),128,page,clut);
+}
+void road_facade(int s0,int s1,int side,int out,int height,
+                 int u,int v,int size,uint16_t page,uint16_t clut) {
+    int s,i;
+    if (!clear_of_fork(s0,side,out) || !clear_of_fork(s1,side,out)) return;
+    /* Follow the curved/banked track; subsequent affine subdivision reuses
+     * these camera-space vertices, without any further path sampling. */
+    for(s=s0;s<s1;s+=160) {
+        int end=s+160<s1 ? s+160 : s1;
+        FacadeVertex a[4];
+        for(i=0;i<4;i++) {
+            int at=i<2 ? s : end, lateral;
+            cloth_u(at,side,out,&lateral);
+            path_cam(at,lateral,(i&1)?height:0,&a[i].x,&a[i].y,&a[i].z);
+            a[i].u=(u<<6)+(at-s0)*((size-1)<<6)/(s1-s0);
+            a[i].v=((i&1)?v:v+size-1)<<6;
+        }
+        facade_emit(a,page,clut,0);
+    }
+}

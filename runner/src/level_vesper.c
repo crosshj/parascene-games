@@ -5,7 +5,9 @@
  * slot of street between the walls. The skyline is screen space. The
  * light steps from dusk, to night, to a wetter dark. */
 
+#include <psxgpu.h>
 #include "world.h"
+#include "vesper_facades.h"
 #include "course.h"
 #include "path.h"
 #include "road.h"
@@ -51,6 +53,27 @@ static const Look k_look[3] = {
         {16, 32, 40}, {4, 8, 14}
     },
 };
+
+/* Dedicated free VRAM region: clear of font, sprites, art and Lumen sky. */
+static int facade_ready;
+static uint16_t facade_page, facade_clut;
+static void facade_upload(void) {
+    RECT rect;
+    if (facade_ready) return;
+    setRECT(&rect,960,128,64,64);
+    LoadImage(&rect,(const uint32_t *)vesper_pixels);
+    DrawSync(0);
+    setRECT(&rect,0,483,16,1);
+    LoadImage(&rect,(const uint32_t *)vesper_palette);
+    DrawSync(0);
+    facade_page=getTPage(0,0,960,0);
+    facade_clut=getClut(0,483);
+    facade_ready=1;
+}
+static int facade_u(int variant,int lod) {
+    static const int base[4]={0,128,192,224};
+    return base[lod]+variant*(64>>lod);
+}
 
 static Light live;
 static RoadStyle road;
@@ -147,8 +170,11 @@ static void build_rows(int stage) {
     rows_stage = stage;
 }
 
-static int wrap_shift(int yaw, int denom) {
-    int s = yaw * SCREEN_W / denom;
+static int skyline_shift(int yaw) {
+    /* Rotation moves both distant layers together. Different yaw scales made
+     * overlapping silhouettes slide through each other during a turn.
+     * Two panorama repeats per revolution also keep the 4095->0 seam exact. */
+    int s = yaw * SCREEN_W / 2048;
     s %= SCREEN_W;
     if (s < 0)
         s += SCREEN_W;
@@ -185,22 +211,20 @@ static void blit_row(const Block *row, int n, int shift, int foot,
                 continue;
             if (sx >= SCREEN_W || sx + row[i].w <= 0)
                 continue;
-            if (windows && row[i].win && row[i].h > 16) {
-                int wx = sx + row[i].w / 4;
-                int ww = row[i].w / 5;
-                int amber = row[i].win & 1;
-                if (ww < 2)
-                    ww = 2;
-                block(wx, ww, top + 4, top + row[i].h / 2,
-                      amber ? 255 : 48, amber ? 176 : 210, amber ? 64 : 230);
-            }
-            block(sx, row[i].w, top, foot + 6, r, g, b);
-            if (windows && row[i].h > 18) {
-                int sign = row[i].win & 1;
-                block(sx + 2, row[i].w > 6 ? row[i].w - 4 : row[i].w,
-                      top + row[i].h / 3, top + row[i].h / 3 + 3,
-                      sign ? 255 : 64, sign ? 64 : 220, sign ? 140 : 255);
-            }
+            if (windows) {
+                int lod=row[i].w<24 ? 2 : 1, size=64>>lod;
+                int u=facade_u(row[i].win&1,lod);
+                XY p[4]={{sx,top},{sx+row[i].w,top},{sx,foot+6},{sx+row[i].w,foot+6}};
+                /* Crop the square tile at a uniform texel scale: stretching
+                 * a complete tile onto a tall building elongated windows. */
+                int h=foot+6-top, extent=h>row[i].w ? h : row[i].w;
+                int uw=(size-1)*row[i].w/extent, vh=(size-1)*h/extent;
+                int offset=(int)(mixb((uint32_t)i+91u) % (uint32_t)(size-uw));
+                u+=offset;
+                XY uv[4]={{u,128},{u+uw,128},{u,128+vh},{u+uw,128+vh}};
+                world_asset("vesper_skyline",i+(row==far_row?100:0),"filtered_windows");
+                poly_tex4(p,uv,OT_LENGTH-2,r<=8 ? 72 : 112,facade_page,facade_clut);
+            } else block(sx,row[i].w,top,foot+6,r,g,b);
             if (row[i].h > 28 && (row[i].win & 2))
                 block(sx + row[i].w / 2, 2, top - 12, top, r + 20, g + 16, b + 24);
         }
@@ -209,7 +233,7 @@ static void blit_row(const Block *row, int n, int shift, int foot,
 
 static void skyline(int stage) {
     int foot = path_horizon();
-    int yaw = path_yaw();
+    int shift = skyline_shift(path_yaw());
     if (foot < 8)
         foot = 8;
     if (foot > SCREEN_H - 8)
@@ -221,13 +245,22 @@ static void skyline(int stage) {
     if (stage >= 2) {
         int x0 = SCREEN_W / 2 - 36;
         int x1 = SCREEN_W / 2 + 36;
-        blit_row(far_row, far_n, wrap_shift(yaw, 2048), foot + 2, 8, 4, 18, 0, x0, x1);
+        blit_row(far_row, far_n, shift, foot + 2, 8, 4, 18, 1, x0, x1);
         return;
     }
     /* Near row first, so it shows in front of the far row. */
-    blit_row(near_row, near_n, wrap_shift(yaw, 1024), foot, 16, 8, 32, 1, 0, SCREEN_W);
-    blit_row(far_row, far_n, wrap_shift(yaw, 2048), foot + 2, 8, 4, 18, 0, 0, SCREEN_W);
+    blit_row(near_row, near_n, shift, foot, 16, 8, 32, 1, 0, SCREEN_W);
+    blit_row(far_row, far_n, shift, foot + 2, 8, 4, 18, 1, 0, SCREEN_W);
 }
+
+#ifdef RUNNER_PREVIEW
+/* Exercise the actual skyline in isolation for temporal stability checks. */
+void vesper_preview_skyline(void) {
+    apply(0);
+    facade_upload();
+    skyline(0);
+}
+#endif
 
 static void lights(const LevelFrame *f) {
     int s, base;
@@ -266,9 +299,8 @@ static void barriers(const LevelFrame *f) {
     }
 }
 
-/* Last stage: one solid wall on each side, so the sheets meet and the
- * street is a slot. Height still changes along the wall. Windows and the
- * crown sit on the near wall only; the far wall is the mass. */
+/* Last stage: opaque facade textures replace both the wall and window
+ * strips. Baked filtered tiles preserve average light as detail shrinks. */
 static void canyon(const LevelFrame *f) {
     int step = 640;
     int s = f->scroll / step * step;
@@ -281,23 +313,25 @@ static void canyon(const LevelFrame *f) {
         int side;
         for (side = -1; side <= 1; side += 2) {
             uint32_t n = mixb((uint32_t)(s + (side > 0 ? 409 : 0)) * 0x9E3779B9u);
-            int near = s < f->scroll + 1280;
-            int tall = near ? 480 : 640 + (int)(n % 200u);
-            int amber = n & 1u;
-            if (!road_cloth(s, s + step, side, CANYON_OUT, 0, CANYON_OUT, tall, 12, 14, 28))
-                return;
-            if (!near)
-                continue;
-            if (!road_cloth(s, s + step, side, CANYON_OUT - 4, 150, CANYON_OUT - 4, 186,
-                            amber ? 255 : 64, amber ? 186 : 220, amber ? 72 : 255))
-                return;
+            int distance=s-f->scroll;
+            int variant=n&1u;
+            int tall=640;
+            world_asset("vesper_facade",s*2+(side>0),distance<3200 ? "window_texture" : "average_light");
+            if (distance<3200) {
+                int lod=distance<700 ? 0 : distance<1400 ? 1 : distance<2400 ? 2 : 3;
+                road_facade(s,s+step,side,CANYON_OUT,tall,facade_u(variant,lod),128,
+                            64>>lod,facade_page,facade_clut);
+            } else if (!road_cloth(s,s+step,side,CANYON_OUT,0,CANYON_OUT,tall,
+                                  vesper_mean[variant][0],vesper_mean[variant][1],vesper_mean[variant][2])) return;
         }
     }
 }
 
 static void vesper_draw(const LevelFrame *f) {
+    static const uint8_t glow[3][3]={{40,24,46},{24,18,36},{18,26,36}};
     int hy;
     apply(f->stage);
+    facade_upload();
     hy = path_horizon();
     if (hy < 8)
         hy = 8;
@@ -305,12 +339,14 @@ static void vesper_draw(const LevelFrame *f) {
         hy = SCREEN_H - 8;
     gradient(0, 0, SCREEN_W, hy, OT_LENGTH - 1,
              sky_top[0], sky_top[1], sky_top[2],
-             live.sky[0], live.sky[1], live.sky[2]);
+             glow[shown][0], glow[shown][1], glow[shown][2]);
     skyline(f->stage);
+    world_asset("road",0,"deck");
     road_draw(&road, f);
     lights(f);
     barriers(f);
     canyon(f);
+    world_asset("speed_lines",0,"overlay");
     road_streaks(f, road.edge[0], road.edge[1], road.edge[2],
                  -1, 0);
 }
