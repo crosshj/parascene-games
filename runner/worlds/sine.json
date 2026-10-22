@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tracks": ["sine.gate", "sine.beat", "sine.crush"],
+  "step": 256,
+  "lookahead": 44032,
+  "finish_allowance": 2048,
+  "outside": 36,
+  "wall_height": 420,
+  "ceiling_height": 408,
+  "lod_depths": [1600, 5000, 10000],
+  "lod_strides": [1, 2, 4, 8],
+  "max_error_px": 1.0,
+  "max_schedule_rings": 128,
+  "max_resident_bytes": 163840
+}

@@ -4,6 +4,21 @@
 #include "path.h"
 #include "road.h"
 #include "profile.h"
+#include "world_mesh.h"
+#ifdef RUNNER_PREVIEW
+int world_mesh_preview_legacy;
+int world_mesh_preview_depth;
+
+static void mesh_depth_color(int z, int *near, int *far) {
+    static const int colors[4][3] = {{248,0,0},{248,248,0},{0,248,0},{0,0,248}};
+    int band = z < 1600 ? 0 : z < 5000 ? 1 : z < 10000 ? 2 : 3;
+    int i;
+    if (!world_mesh_preview_depth)
+        return;
+    for (i = 0; i < 3; i++)
+        near[i] = far[i] = colors[band][i];
+}
+#endif
 
 /* Must reach FAR even with fine near steps, or crates appear past the deck. */
 #define RING_MAX 48
@@ -49,6 +64,11 @@ static const RoadStyle *style;
 /* The style's far asphalt as this world's air leaves it; set by road_draw. */
 static uint8_t road_far[3];
 static int road_time;
+static int streak_overlay;
+
+int road_runner_bucket(int depth_bucket) {
+    return streak_overlay ? (CLIP >> OT_SHIFT) - 2 : depth_bucket;
+}
 
 /* Cheap triangle wave in 0..4095 → -4096..4096 for soft ridges. */
 static int tri_wave(int a) {
@@ -780,8 +800,49 @@ static int paint_span(int x0, int y0, int z0, int x1, int y1, int z1,
     project(x1, y1, z1, &p1);
     project(x2, y2, z2, &p2);
     project(x3, y3, z3, &p3);
+#ifdef RUNNER_PREVIEW
+    mesh_depth_color(sort, cn, cf);
+#endif
     emit_piece(p0, p1, p2, p3, view_bucket(sort), cn, cf, 0);
     return 1;
+}
+
+/* Screen position of a camera-space corner, matching project().
+ * 0 when the corner is too near to trust: the sheet may still cut
+ * the view. */
+static int corner_screen(int x, int y, int z, int *sx, int *sy) {
+    int h = SCREEN_W / 2;
+    if (z < 48)
+        return 0;
+    *sx = h + x * h / z;
+    *sy = HORIZON_Y + (CAM_H - y) * h / z;
+    return 1;
+}
+
+/* 1 when all four corners sit on the same side of the screen, far
+ * enough out that the sheet cannot cross it. Those sheets used to be
+ * split and projected anyway. */
+static int sheet_hidden(int x0, int y0, int z0, int x1, int y1, int z1,
+                        int x2, int y2, int z2, int x3, int y3, int z3) {
+    int xs[4], ys[4], zs[4], sx, sy, i;
+    int left = 1, right = 1, above = 1, below = 1;
+    xs[0] = x0; ys[0] = y0; zs[0] = z0;
+    xs[1] = x1; ys[1] = y1; zs[1] = z1;
+    xs[2] = x2; ys[2] = y2; zs[2] = z2;
+    xs[3] = x3; ys[3] = y3; zs[3] = z3;
+    for (i = 0; i < 4; i++) {
+        if (!corner_screen(xs[i], ys[i], zs[i], &sx, &sy))
+            return 0;
+        if (sx > -96)
+            left = 0;
+        if (sx < SCREEN_W + 96)
+            right = 0;
+        if (sy > -96)
+            above = 0;
+        if (sy < SCREEN_H + 96)
+            below = 0;
+    }
+    return left || right || above || below;
 }
 
 static void cloth_u(int s, int side, int out, int *u) {
@@ -813,6 +874,8 @@ int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
     cloth_u(s1, side, out1, &u1);
     path_cam(s1, u0, v0, &x2, &y2, &z2);
     path_cam(s1, u1, v1, &x3, &y3, &z3);
+    if (sheet_hidden(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3))
+        return 1;
     if (cloth_coarse(s0, s1, x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)) {
         int mid = (s0 + s1) / 2;
         if (!road_cloth(s0, mid, side, out0, v0, out1, v1, r, g, b))
@@ -835,6 +898,8 @@ int road_lintel(int s0, int s1, int out, int v, int r, int g, int b) {
     path_edges(s1, &ul, &ur);
     path_cam(s1, ul - out, v, &x2, &y2, &z2);
     path_cam(s1, ur + out, v, &x3, &y3, &z3);
+    if (sheet_hidden(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3))
+        return 1;
     if (cloth_coarse(s0, s1, x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)) {
         int mid = (s0 + s1) / 2;
         if (!road_lintel(s0, mid, out, v, r, g, b))
@@ -941,9 +1006,12 @@ static void extend_bottom(XY *far, XY *near) {
 
 void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown) {
     int picture = f->time >> 1;
+    /* A negative radius keeps the original geometry but draws over scenery. */
+    int overlay = radius < 0;
     int tube = radius > 0 ? radius : TUBE_R;
     int top = crown > 0 ? crown : TUBE_CROWN;
     int i;
+    streak_overlay = overlay;
     r = r / 2 + 40;
     g = g / 2 + 40;
     b = b / 2 + 40;
@@ -978,6 +1046,8 @@ void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crow
         bucket = ahead >> OT_SHIFT;
         if (bucket < (CHAR_Z >> OT_SHIFT))
             bucket = CHAR_Z >> OT_SHIFT;
+        if (overlay)
+            bucket = (CLIP >> OT_SHIFT) - 1;
         glow_line(far, near, bucket, r, g, b);
     }
 }
@@ -1216,9 +1286,27 @@ int road_span(int s0, int scroll, int step, int reach, int *s1) {
         return 0;
     path_cam(s0, 0, 0, &x, &y, &z);
     /* Beside the camera, including a sheet that starts just behind it.
-     * Skipping here would drop the wall next to the runner. */
+     * Skipping here would drop the wall next to the runner. Further
+     * along, the sheet grows. A bend keeps the short step, and a sheet
+     * that fills the screen is still cut by cloth_coarse. */
     if (z < FAR) {
+        const PathSeg *bend;
+        int guard = 0;
         ds = step;
+        if (z > 900) {
+            int grown = z / 2;
+            if (grown > ds)
+                ds = grown;
+            if (ds > step * 4)
+                ds = step * 4;
+            bend = path_at(s0);
+            if (bend) {
+                while (ds > step && too_bent(bend, s0 + ds, z) && guard < 6) {
+                    ds /= 2;
+                    guard++;
+                }
+            }
+        }
         if (s0 + ds > end)
             ds = end - s0;
         if (ds < 8)
@@ -1520,12 +1608,31 @@ static void branches_draw(int scroll) {
 static void route_draw(const RoadStyle *st, const LevelFrame *f);
 
 void road_draw(const RoadStyle *st, const LevelFrame *f) {
+    streak_overlay = 0;
     style = st;
     road_time = f->time;
     through_air(st->light, st->road_far, st->light->density, road_far);
     haze_tables();
     route_draw(st, f);
     PROF(PF_R_BRANCH, branches_draw(f->scroll));
+}
+
+void road_to_vanishing_point(int scroll) {
+    int ul, ur;
+    XY a, b, vp = {SCREEN_W/2,HORIZON_Y}, pixel_end = {SCREEN_W/2+1,HORIZON_Y};
+    const uint8_t *near, *end;
+    if (!path_is_straight()) return;
+    path_edges(scroll+FAR,&ul,&ur);
+    a.x = SCREEN_W/2+ul*(SCREEN_W/2)/FAR;
+    b.x = SCREEN_W/2+ur*(SCREEN_W/2)/FAR;
+    a.y = b.y = HORIZON_Y+CAM_H*(SCREEN_W/2)/FAR;
+    near = haze_at(haze_deck,FAR);
+    end = style->light->haze;
+    /* At subpixel width the continuation becomes one native pixel, rather
+     * than a zero-area tip that the rasterizer cannot cover. */
+    poly_g4(&a,&b,&vp,&pixel_end,OT_LENGTH-3,
+            near[0],near[1],near[2],near[0],near[1],near[2],
+            end[0],end[1],end[2],end[0],end[1],end[2],BLEND_NONE);
 }
 
 static void route_draw(const RoadStyle *st, const LevelFrame *f) {

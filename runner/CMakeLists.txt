@@ -144,6 +144,55 @@ add_custom_command(
 )
 
 file(GLOB RUNNER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
+find_program(WORLD_HOST_CC NAMES cc clang gcc REQUIRED)
+set(WORLD_H "${CMAKE_CURRENT_BINARY_DIR}/world_mesh_data.h")
+set(WORLD_REPORT "${CMAKE_CURRENT_BINARY_DIR}/world_mesh_report.json")
+add_custom_command(
+	OUTPUT "${WORLD_H}" "${WORLD_REPORT}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+		--cc "${WORLD_HOST_CC}" --header "${WORLD_H}" --report "${WORLD_REPORT}"
+	DEPENDS "${TRACK_H}" "${TRACK_JSON}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+		"${CMAKE_CURRENT_SOURCE_DIR}/worlds/sine.json"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/world.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/course.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/profile.h"
+	VERBATIM
+)
+add_custom_target(check_worlds
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_bake_worlds.py"
+	COMMAND "${WORLD_HOST_CC}" -std=gnu99 -O2 -DRUNNER_PREVIEW
+		-I "${CMAKE_CURRENT_SOURCE_DIR}/src" -I "${CMAKE_CURRENT_BINARY_DIR}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/tools/check_world_mesh.c"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" -o "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
+	COMMAND "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
+	DEPENDS "${WORLD_H}" "${TRACK_H}"
+	VERBATIM
+)
+add_custom_target(check_world_visuals
+	COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tools/preview/check_world_visuals.sh"
+		"${CMAKE_CURRENT_BINARY_DIR}/world-visuals"
+	DEPENDS "${WORLD_H}" "${TRACK_H}"
+	VERBATIM
+)
+add_custom_target(world_visibility
+	COMMAND "${CMAKE_COMMAND}" -E env PSX15=1 RUNNER_PREVIEW_FLAGS=
+		sh "${CMAKE_CURRENT_SOURCE_DIR}/tools/preview/preview.sh"
+		"${CMAKE_CURRENT_BINARY_DIR}/visibility" --visibility
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/preview/visibility_report.py"
+		"${CMAKE_CURRENT_BINARY_DIR}/visibility"
+	DEPENDS "${TRACK_H}"
+	VERBATIM
+)
+option(RUNNER_LEGACY_WORLDS "Use procedural scenery for baked-world A/B comparison" OFF)
+if(RUNNER_LEGACY_WORLDS)
+	add_compile_definitions(RUNNER_LEGACY_WORLDS)
+endif()
+
 psn00bsdk_add_executable(runner NOGPREL ${RUNNER_SOURCES})
 target_include_directories(runner PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 # The road's hot path crosses path.c, road.c, and world.c; whole-program
@@ -239,3 +288,16 @@ if(NOT RUNNER_PROFILE)
 		VERBATIM
 	)
 endif()
+
+# The SDK linker permits an 8 MB region; retail hardware has 2 MB. Include BSS
+# and leave a fixed upper-RAM reserve before adding more resident world assets.
+foreach(_ram_target runner runner_nomusic runner_web)
+	if(TARGET ${_ram_target})
+		set_property(TARGET ${_ram_target} APPEND PROPERTY LINK_DEPENDS
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ram.py")
+		add_custom_command(TARGET ${_ram_target} POST_BUILD
+			COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ram.py"
+				"$<TARGET_FILE:${_ram_target}>"
+			VERBATIM)
+	endif()
+endforeach()

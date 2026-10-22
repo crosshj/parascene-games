@@ -18,7 +18,8 @@ uint32_t prof_n[PN_COUNT];
 static uint32_t n_worst[PN_COUNT];
 static const char *const n_names[PN_COUNT] = {
     "samples", "clear probes", "near ring", "far ring", "fork ring",
-    "strips", "strip edges", "far strips", "boxes", "far crates", "fork near", "fork off"
+    "strips", "strip edges", "far strips", "boxes", "far crates", "fork near", "fork off",
+    "transforms", "world rings", "world spans"
 };
 
 static const char *const k_names[PF_COUNT] = {
@@ -33,6 +34,7 @@ static const char *const k_names[PF_COUNT] = {
     "road gantry",
     " far sampling", " far strips", " far crates",
     " fork sampling", " fork strips", " fork dividers", " fork crates",
+    "straight tunnel",
 };
 
 static int frames;

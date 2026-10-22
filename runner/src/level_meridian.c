@@ -1,8 +1,9 @@
 /* Pale Meridian: an ice crack under an open sky. There is no ridge. The
  * floor meets the wall, and the wall sheets meet each other, so the crack
  * is closed. The walls grow where the road has dropped, and stay low on
- * the lip. A fork still clips the floor short of the other road. Stage 2
- * pulls a green haze across the ice. Stage 3 lets it go dark. */
+ * the lip. Curtains of aurora hang in screen space above the crack. A
+ * fork still clips the floor short of the other road. Stage 2 pulls a
+ * green haze across the ice. Stage 3 lets it go dark. */
 
 #include "world.h"
 #include "course.h"
@@ -100,6 +101,59 @@ static void meridian_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = live.sky[2];
 }
 
+static int wrap_shift(int yaw, int denom) {
+    int s = yaw * SCREEN_W / denom;
+    s %= SCREEN_W;
+    if (s < 0)
+        s += SCREEN_W;
+    return s;
+}
+
+static void curtain(int x, int w, int top, int foot, int r, int g, int b) {
+    XY p0, p1, p2, p3;
+    if (w < 2 || top >= foot || x >= SCREEN_W || x + w <= 0)
+        return;
+    p0.x = (int16_t)(x + 1);
+    p0.y = (int16_t)top;
+    p1.x = (int16_t)(x + w - 1);
+    p1.y = (int16_t)top;
+    /* The foot leans, so the veil hangs instead of standing. */
+    p2.x = (int16_t)(x + 5);
+    p2.y = (int16_t)foot;
+    p3.x = (int16_t)(x + w + 5);
+    p3.y = (int16_t)foot;
+    /* Averaged with the sky, so the curtain stays light, not a tower. */
+    poly_f4(&p0, &p1, &p2, &p3, OT_LENGTH - 2, r, g, b, BLEND_AVG);
+}
+
+/* Four curtains in the sky above the crack. They stay over the road,
+ * where the walls do not cover them. Screen space, slid a little by the
+ * heading. The middle stage is the green one. The last stage is dimmer. */
+static void aurora(int stage) {
+    static const int k_x[4] = { 78, 124, 176, 222 };
+    int foot = path_horizon();
+    int shift = wrap_shift(path_yaw(), 4096);
+    int i;
+    int r = stage == 2 ? 20 : 50;
+    int g = stage == 2 ? 90 : stage == 1 ? 195 : 175;
+    int b = stage == 2 ? 70 : 155;
+    if (world_bytes_used() + 8 * 1024 > BUFFER_LENGTH)
+        return;
+    if (foot < 28)
+        return;
+    if (foot > 120)
+        foot = 120;
+    for (i = 0; i < 4; i++) {
+        int w = 11 + (i & 1) * 4;
+        int k;
+        for (k = -1; k <= 0; k++) {
+            int x = k_x[i] - shift + k * SCREEN_W;
+            curtain(x, w, 2, foot - 4, r, g, b);
+            curtain(x + w / 4, w / 2, 2, foot / 2, r + 30, g, b + 20);
+        }
+    }
+}
+
 static int crack_h(int s, int lip) {
     const PathSeg *seg = path_at(s);
     int drop, h;
@@ -147,6 +201,7 @@ static void meridian_draw(const LevelFrame *f) {
     gradient(0, 0, SCREEN_W, hy, OT_LENGTH - 1,
              sky_top[0], sky_top[1], sky_top[2],
              live.sky[0], live.sky[1], live.sky[2]);
+    aurora(f->stage);
     road_draw(&road, f);
     ice(f);
     road_streaks(f, road.edge[0], road.edge[1], road.edge[2], 200, 0);

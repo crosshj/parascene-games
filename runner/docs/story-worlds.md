@@ -9,6 +9,12 @@ the tracks the game runs today.
 
 Each world gets its own identity, terrain, and signature track mechanics.
 
+The horizon of a world (the city, the crystal line, the towers, the aurora,
+the void) is drawn in screen space and slid by the heading. It costs no
+projections. Pieces that stand on the road are few and near the camera.
+A sheet the camera cannot see is not split or projected, and a wall sheet
+grows longer as it recedes.
+
 ## 1. Lumenwild
 
 **The Living Forest.** Glowing vegetation, enormous trees, twisting

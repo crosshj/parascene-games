@@ -62,6 +62,12 @@ void *alloc_prim(int bucket, size_t size);
  * tables at once, so keep a copy per buffer and pick it by world_buffer(). */
 void world_link(int bucket, void *prim);
 int world_buffer(void);
+#ifdef RUNNER_PREVIEW
+/* Stable authoring IDs for offline visibility/LOD simulation. */
+void world_asset(const char *kind, int instance, const char *representation);
+#else
+#define world_asset(kind, instance, representation) ((void)0)
+#endif
 void text(int x, int y, const char *s);
 /* The same font, tinted. 128 is full white, so a lower color is dimmer. */
 void text_rgb(int x, int y, const char *s, int r, int g, int b);

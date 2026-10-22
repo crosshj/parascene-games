@@ -754,6 +754,14 @@ def padded(values, n):
     return vals + [0] * (n - len(vals))
 
 
+def analytic_straight(main, cycle, branches, step):
+    return bool(main) and not cycle and not branches and all(
+        s['yaw'] == 0 and s['pitch'] == 0 and s['roll'] == 0 and
+        s['p'][:2] == [0, 0] and s['p1'][:2] == [0, 0] and
+        int(round(s['p'][2])) == int(s['s']) and
+        int(round(s['p1'][2])) == int(s['s']) + step for s in main)
+
+
 def write_header(path, baked_tracks, step):
     runnable = [t for t in baked_tracks if t["status"] == "runnable"]
     runnable.sort(key=lambda t: 0 if t["id"] == "straight.run" else 1)
@@ -780,6 +788,7 @@ def write_header(path, baked_tracks, step):
         "    int rep_x, rep_y, rep_z;",
         "    const TrackBranch *branch;",
         "    int branches;",
+        "    int straight; /* finite, centered, level: analytic tunnel is safe */",
         "} TrackDef;",
         "",
     ]
@@ -852,12 +861,13 @@ def write_header(path, baked_tracks, step):
                 lines.append("    {%d, %d, %d}," % (band0, band1, alt))
             lines.append("};")
             lines.append("")
-        rows.append((t["id"], name, lead, cycle, len(main), rep, bname, len(branches)))
+        straight = analytic_straight(main, cycle, branches, step)
+        rows.append((t["id"], name, lead, cycle, len(main), rep, bname, len(branches), int(straight)))
         total += len(order)
     lines.append("static const TrackDef track_table[] = {")
-    for tid, name, lead, cycle, count, rep, bname, nb in rows:
-        lines.append('    {"%s", %s, %d, %d, %d, %d, %d, %d, %s, %d},' % (
-            tid, name, lead, cycle, count, rep[0], rep[1], rep[2], bname, nb))
+    for tid, name, lead, cycle, count, rep, bname, nb, straight in rows:
+        lines.append('    {"%s", %s, %d, %d, %d, %d, %d, %d, %s, %d, %d},' % (
+            tid, name, lead, cycle, count, rep[0], rep[1], rep[2], bname, nb, straight))
     lines.append("};")
     lines.append("")
     lines.append("#define TRACK_TABLE_COUNT %d" % len(rows))

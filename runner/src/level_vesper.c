@@ -1,8 +1,9 @@
 /* Vesper City: a night highway. The first stage is a skyline on the
- * horizon. The last stage is a solid wall of towers on each side, tall
- * enough to leave the top of the screen. The floor stops at that wall,
- * and the skyline is only the slot of street between the walls. The light
- * steps from dusk, to night, to a wetter dark. */
+ * horizon and a neon rail beside the curb. The last stage is a solid
+ * wall of towers on each side, tall enough to leave the top of the
+ * screen. The floor stops at that wall, and the skyline is only the
+ * slot of street between the walls. The skyline is screen space. The
+ * light steps from dusk, to night, to a wetter dark. */
 
 #include "world.h"
 #include "course.h"
@@ -194,6 +195,12 @@ static void blit_row(const Block *row, int n, int shift, int foot,
                       amber ? 255 : 48, amber ? 176 : 210, amber ? 64 : 230);
             }
             block(sx, row[i].w, top, foot + 6, r, g, b);
+            if (windows && row[i].h > 18) {
+                int sign = row[i].win & 1;
+                block(sx + 2, row[i].w > 6 ? row[i].w - 4 : row[i].w,
+                      top + row[i].h / 3, top + row[i].h / 3 + 3,
+                      sign ? 255 : 64, sign ? 64 : 220, sign ? 140 : 255);
+            }
             if (row[i].h > 28 && (row[i].win & 2))
                 block(sx + row[i].w / 2, 2, top - 12, top, r + 20, g + 16, b + 24);
         }
@@ -240,57 +247,49 @@ static void lights(const LevelFrame *f) {
         if (s > f->scroll + 240)
             road_gantry(s, road.edge, road.dash);
     }
-    if (f->stage >= 2)
-        return;
-    base = f->scroll / 3072 * 3072;
-    for (s = base; s < f->scroll + 6400; s += 3072) {
-        int side = ((s / 3072) & 1) ? -1 : 1;
-        int u = side * (ROAD_HALF + 640);
-        int h = 160 + (s & 255);
-        if (!road_marker(s, u, 28, 0, h, 14, 10, 26))
-            return;
-        if (!road_marker(s, u, 30, h - 16, h + 8, road.edge[0], road.edge[1], road.edge[2]))
-            return;
-    }
 }
 
-/* Last stage: one solid wall on each side, at a fixed distance, so the
- * sheets meet and the street is a slot. Height still changes along the
- * wall. Windows and the crown sit on the wall; they are not openings. */
-static void canyon(const LevelFrame *f) {
-    int step = 384;
-    int reach = ROAD_HALF + CANYON_OUT;
-    int s, s1, draw, base;
-    if (f->stage < 2)
+/* A low rail just outside the curb, only beside the runner. The skyline
+ * is the rest of the city, and it is not projected. */
+static void barriers(const LevelFrame *f) {
+    int step = 420;
+    int s = f->scroll / step * step;
+    if (f->stage >= 2)
         return;
-    base = f->scroll / step * step;
-    /* Crown and windows link before the mass, so they show on it.
-     * They stay near the camera. */
-    for (s = base; s < f->scroll + 4608; s += step) {
+    for (; s < f->scroll + 1300; s += step) {
         int side;
         for (side = -1; side <= 1; side += 2) {
-            uint32_t n = mixb((uint32_t)(s + (side > 0 ? 409 : 0)) * 0x9E3779B9u);
-            int tall = 820 + (int)(n % 520u);
-            int amber = n & 1u;
-            int wr = amber ? 255 : 64;
-            int wg = amber ? 186 : 220;
-            int wb = amber ? 72 : 255;
-            if (!road_cloth(s + step / 5, s + step * 3 / 5, side, CANYON_OUT - 6,
-                            tall / 2, CANYON_OUT - 6, tall / 2 + 36, wr, wg, wb))
-                return;
-            if (!road_cloth(s, s + step, side, CANYON_OUT - 4, tall - 32,
-                            CANYON_OUT - 4, tall, wr, wg, wb))
+            if (!road_cloth(s, s + step - 24, side, 18, 0, 18, 28,
+                            road.edge[0], road.edge[1], road.edge[2]))
                 return;
         }
     }
-    for (s = base; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+}
+
+/* Last stage: one solid wall on each side, so the sheets meet and the
+ * street is a slot. Height still changes along the wall. Windows and the
+ * crown sit on the near wall only; the far wall is the mass. */
+static void canyon(const LevelFrame *f) {
+    int step = 640;
+    int s = f->scroll / step * step;
+    int limit = f->scroll + 4200;
+    if (f->stage < 2)
+        return;
+    /* Fixed sheets, not the grown span. A tall wall on a long sheet is
+     * cut into dozens of pieces when a corner passes the camera. */
+    for (; s < limit; s += step) {
         int side;
-        if (draw == 2)
-            continue;
         for (side = -1; side <= 1; side += 2) {
             uint32_t n = mixb((uint32_t)(s + (side > 0 ? 409 : 0)) * 0x9E3779B9u);
-            int tall = 820 + (int)(n % 520u);
-            if (!road_cloth(s, s1, side, CANYON_OUT, 0, CANYON_OUT, tall, 12, 14, 28))
+            int near = s < f->scroll + 1280;
+            int tall = near ? 480 : 640 + (int)(n % 200u);
+            int amber = n & 1u;
+            if (!road_cloth(s, s + step, side, CANYON_OUT, 0, CANYON_OUT, tall, 12, 14, 28))
+                return;
+            if (!near)
+                continue;
+            if (!road_cloth(s, s + step, side, CANYON_OUT - 4, 150, CANYON_OUT - 4, 186,
+                            amber ? 255 : 64, amber ? 186 : 220, amber ? 72 : 255))
                 return;
         }
     }
@@ -310,9 +309,10 @@ static void vesper_draw(const LevelFrame *f) {
     skyline(f->stage);
     road_draw(&road, f);
     lights(f);
+    barriers(f);
     canyon(f);
     road_streaks(f, road.edge[0], road.edge[1], road.edge[2],
-                 f->stage >= 2 ? 80 : 0, 0);
+                 -1, 0);
 }
 
 static const Stage k_stages[] = {

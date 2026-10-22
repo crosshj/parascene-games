@@ -366,6 +366,7 @@ static void draw_runner(void) {
         bucket = sz >> OT_SHIFT;
     else
         bucket = (CHAR_Z >> OT_SHIFT) - 1;
+    bucket = road_runner_bucket(bucket);
     if (bucket < 1)
         bucket = 1;
     if (bucket >= OT_LENGTH)

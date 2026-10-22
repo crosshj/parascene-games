@@ -1,7 +1,8 @@
 /* Shatterglass: a glass desert at sunset. The ridge sits close to the sky
  * color, and the ground is a wide pale mirror, so the far road dissolves
- * into the horizon. Crystals and low rises stand on the mirror, outside
- * the deck. The sun drops across the three stages. */
+ * into the horizon. A screen-space line of shards stands on that horizon.
+ * A few near crystals and one low rise stand on the mirror. The sun
+ * drops across the three stages. */
 
 #include "world.h"
 #include "course.h"
@@ -98,24 +99,83 @@ static void shatter_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = live.sky[2];
 }
 
+static int wrap_shift(int yaw, int denom) {
+    int s = yaw * SCREEN_W / denom;
+    s %= SCREEN_W;
+    if (s < 0)
+        s += SCREEN_W;
+    return s;
+}
+
+static void shard(int x, int w, int top, int foot, int r, int g, int b) {
+    XY p0, p1, p2, p3;
+    int tip = w > 4 ? w / 5 : 1;
+    if (w < 2 || top >= foot)
+        return;
+    if (x >= SCREEN_W || x + w <= 0)
+        return;
+    p0.x = (int16_t)(x + w / 2 - tip);
+    p0.y = (int16_t)top;
+    p1.x = (int16_t)(x + w / 2 + tip);
+    p1.y = (int16_t)top;
+    p2.x = (int16_t)x;
+    p2.y = (int16_t)foot;
+    p3.x = (int16_t)(x + w);
+    p3.y = (int16_t)foot;
+    poly_f4(&p0, &p1, &p2, &p3, OT_LENGTH - 2, r, g, b, BLEND_NONE);
+}
+
+/* The field of glass. Screen space, slid by the heading, so the expanse
+ * does not add a projection. Drawn before the ridge so the shards sit
+ * on it. */
+static void horizon(int stage) {
+    static const int k_x[12] = { 8, 36, 58, 92, 120, 148, 176, 204, 228, 256, 284, 308 };
+    int foot = path_horizon();
+    int shift = wrap_shift(path_yaw(), 1536);
+    int r = stage == 2 ? 220 : 255;
+    int g = stage == 0 ? 236 : stage == 1 ? 190 : 150;
+    int b = stage == 2 ? 230 : 200;
+    int i;
+    if (world_bytes_used() + 8 * 1024 > BUFFER_LENGTH)
+        return;
+    if (foot < 16)
+        foot = 16;
+    if (foot > SCREEN_H - 8)
+        foot = SCREEN_H - 8;
+    for (i = 0; i < 12; i++) {
+        int h = 18 + ((i * 17) & 31);
+        int w = 8 + (i & 3) * 3;
+        int k;
+        if (stage > 0)
+            h += 8 * stage;
+        for (k = -1; k <= 0; k++)
+            shard(k_x[i] - shift + k * SCREEN_W, w, foot - h, foot + 4, r, g, b);
+    }
+}
+
+/* Two crystals beside the runner, and one low rise. The horizon row is
+ * the rest of the desert. */
 static void desert(const LevelFrame *f) {
-    int s, base;
-    base = f->scroll / 1408 * 1408;
-    for (s = base; s < f->scroll + 5200; s += 1408) {
-        int side = ((s / 1408) & 1) ? -1 : 1;
-        int h = 220 + ((s >> 4) & 255);
-        int u = side * (ROAD_HALF + 820 + ((s >> 3) & 127));
-        if (!road_marker(s, u, 16, 0, h, 255, 214, 170))
+    int s, n;
+    int base = f->scroll / 2048 * 2048;
+    n = 0;
+    for (s = base; n < 2 && s < f->scroll + 2600; s += 2048, n++) {
+        int side = ((s / 2048) & 1) ? -1 : 1;
+        int h = 260 + ((s >> 4) & 180);
+        int u = side * (ROAD_HALF + 520);
+        int cr = f->stage == 2 ? 230 : 255;
+        int cg = f->stage == 0 ? 220 : 170;
+        int cb = f->stage == 2 ? 210 : 160;
+        if (!road_marker(s, u, 18, 0, h, cr, cg, cb))
             return;
-        if (!road_marker(s, u, 8, h - 36, h + 64, 255, 244, 220))
+        if (!road_marker(s, u, 8, h - 20, h + 70, 255, 250, 236))
             return;
     }
-    base = f->scroll / 2048 * 2048;
-    for (s = base; s < f->scroll + 6200; s += 2048) {
-        int side = ((s / 2048) & 1) ? 1 : -1;
-        if (!road_cloth(s, s + 900, side, 780, 0, 1480, 64,
-                        road.ground_c[0], road.ground_c[1], road.ground_c[2]))
-            return;
+    s = f->scroll / 4096 * 4096 + 1600;
+    if (s > f->scroll + 280 && s < f->scroll + 4200) {
+        int side = ((s / 4096) & 1) ? 1 : -1;
+        road_cloth(s, s + 1100, side, 700, 0, 1500, 48,
+                   road.ground_c[0], road.ground_c[1], road.ground_c[2]);
     }
 }
 
@@ -130,6 +190,7 @@ static void shatter_draw(const LevelFrame *f) {
     gradient(0, 0, SCREEN_W, hy, OT_LENGTH - 1,
              sky_top[0], sky_top[1], sky_top[2],
              live.sky[0], live.sky[1], live.sky[2]);
+    horizon(f->stage);
     road_backdrop(&road);
     road_draw(&road, f);
     desert(f);

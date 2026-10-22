@@ -34,6 +34,8 @@ typedef struct {
 void road_backdrop(const RoadStyle *st);
 /* Deck, curbs, dividers, and the obstacles on the drawn deck. */
 void road_draw(const RoadStyle *st, const LevelFrame *f);
+/* Infinite flat continuation into the same fog endpoint as the scenery. */
+void road_to_vanishing_point(int scroll);
 /* A flat panel across the road at one s, hazed into the air. Call after
  * road_draw in the same frame. */
 void road_panel(int s, int u0, int u1, int v0, int v1, int r, int g, int b);
@@ -47,7 +49,10 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
  * half-width and height; 0 is the open-road size. A set radius keeps the
  * lines inside a cave or a crack. Call after road_draw. The tint is
  * pulled toward a glassy mid color. */
+/* radius < 0: default geometry as a foreground overlay; 0: depth sorted. */
 void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown);
+/* Keep the runner above foreground streaks, otherwise retain its depth. */
+int road_runner_bucket(int depth_bucket);
 
 /* A quad along the road from s0 to s1. side -1 stands off the left edge,
  * +1 off the right, and 0 uses out0 and out1 as centerline u. out is how

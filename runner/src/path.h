@@ -56,6 +56,15 @@ int path_yaw(void);
 /* Screen y of the level horizon for this frame. HORIZON_Y when level. */
 int path_horizon(void);
 void path_cam(int s, int u, int v, int *x, int *y, int *z);
+/* Prepared static scenery uses the same camera/GTE without resampling the path. */
+void path_transform(int wx, int wy, int wz, int *x, int *y, int *z);
+/* Camera rotation only, for a baked mesh's shared basis vectors. */
+void path_rotate(int wx, int wy, int wz, int *x, int *y, int *z);
+const char *path_id(void);
+int path_is_straight(void);
+#ifdef RUNNER_PREVIEW
+extern unsigned long path_preview_samples, path_preview_transforms;
+#endif
 /* One sample: two points across the deck at ul and ur. Cheaper than two
  * path_cam calls. */
 void path_cam_lr(int s, int ul, int ur, int v,

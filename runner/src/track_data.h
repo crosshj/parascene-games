@@ -18,6 +18,7 @@ typedef struct {
     int rep_x, rep_y, rep_z;
     const TrackBranch *branch;
     int branches;
+    int straight; /* finite, centered, level: analytic tunnel is safe */
 } TrackDef;
 
 static const PathSeg span_straight_run[] = {
@@ -11424,33 +11425,33 @@ static const TrackBranch branch_cathedral_choir[] = {
 };
 
 static const TrackDef track_table[] = {
-    {"straight.run", span_straight_run, 8, 24, 32, 0, 0, 6144, 0, 0},
-    {"bend.flat", span_bend_flat, 0, 96, 96, 0, 0, 0, 0, 0},
-    {"hill.loop", span_hill_loop, 0, 256, 256, 0, 0, 0, 0, 0},
-    {"bank.bend", span_bank_bend, 0, 180, 180, 0, 0, 0, 0, 0},
-    {"lanes.count", span_lanes_count, 0, 320, 320, 0, 0, 0, 0, 0},
-    {"fork.lane", span_fork_lane, 0, 256, 256, 0, 0, 0, branch_fork_lane, 2},
-    {"lumenwild.trail", span_lumenwild_trail, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"lumenwild.rise", span_lumenwild_rise, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"lumenwild.pinch", span_lumenwild_pinch, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"vesper.sweep", span_vesper_sweep, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"vesper.esse", span_vesper_esse, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"vesper.hook", span_vesper_hook, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"shatter.split", span_shatter_split, 0, 0, 456, 0, 0, 0, branch_shatter_split, 1},
-    {"shatter.switch", span_shatter_switch, 0, 0, 456, 0, 0, 0, branch_shatter_switch, 1},
-    {"shatter.join", span_shatter_join, 0, 0, 456, 0, 0, 0, branch_shatter_join, 2},
-    {"reach.ridge", span_reach_ridge, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"reach.climb", span_reach_climb, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"reach.drop", span_reach_drop, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"sine.gate", span_sine_gate, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"sine.beat", span_sine_beat, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"sine.crush", span_sine_crush, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"meridian.drift", span_meridian_drift, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"meridian.fork", span_meridian_fork, 0, 0, 456, 0, 0, 0, branch_meridian_fork, 1},
-    {"meridian.verge", span_meridian_verge, 0, 0, 456, 0, 0, 0, branch_meridian_verge, 1},
-    {"cathedral.ribbon", span_cathedral_ribbon, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"cathedral.vault", span_cathedral_vault, 0, 0, 456, 0, 0, 0, 0, 0},
-    {"cathedral.choir", span_cathedral_choir, 0, 0, 456, 0, 0, 0, branch_cathedral_choir, 1},
+    {"straight.run", span_straight_run, 8, 24, 32, 0, 0, 6144, 0, 0, 0},
+    {"bend.flat", span_bend_flat, 0, 96, 96, 0, 0, 0, 0, 0, 0},
+    {"hill.loop", span_hill_loop, 0, 256, 256, 0, 0, 0, 0, 0, 0},
+    {"bank.bend", span_bank_bend, 0, 180, 180, 0, 0, 0, 0, 0, 0},
+    {"lanes.count", span_lanes_count, 0, 320, 320, 0, 0, 0, 0, 0, 0},
+    {"fork.lane", span_fork_lane, 0, 256, 256, 0, 0, 0, branch_fork_lane, 2, 0},
+    {"lumenwild.trail", span_lumenwild_trail, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"lumenwild.rise", span_lumenwild_rise, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"lumenwild.pinch", span_lumenwild_pinch, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"vesper.sweep", span_vesper_sweep, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"vesper.esse", span_vesper_esse, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"vesper.hook", span_vesper_hook, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"shatter.split", span_shatter_split, 0, 0, 456, 0, 0, 0, branch_shatter_split, 1, 0},
+    {"shatter.switch", span_shatter_switch, 0, 0, 456, 0, 0, 0, branch_shatter_switch, 1, 0},
+    {"shatter.join", span_shatter_join, 0, 0, 456, 0, 0, 0, branch_shatter_join, 2, 0},
+    {"reach.ridge", span_reach_ridge, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"reach.climb", span_reach_climb, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"reach.drop", span_reach_drop, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"sine.gate", span_sine_gate, 0, 0, 456, 0, 0, 0, 0, 0, 1},
+    {"sine.beat", span_sine_beat, 0, 0, 456, 0, 0, 0, 0, 0, 1},
+    {"sine.crush", span_sine_crush, 0, 0, 456, 0, 0, 0, 0, 0, 1},
+    {"meridian.drift", span_meridian_drift, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"meridian.fork", span_meridian_fork, 0, 0, 456, 0, 0, 0, branch_meridian_fork, 1, 0},
+    {"meridian.verge", span_meridian_verge, 0, 0, 456, 0, 0, 0, branch_meridian_verge, 1, 0},
+    {"cathedral.ribbon", span_cathedral_ribbon, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"cathedral.vault", span_cathedral_vault, 0, 0, 456, 0, 0, 0, 0, 0, 0},
+    {"cathedral.choir", span_cathedral_choir, 0, 0, 456, 0, 0, 0, branch_cathedral_choir, 1, 0},
 };
 
 #define TRACK_TABLE_COUNT 27

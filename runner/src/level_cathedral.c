@@ -1,7 +1,8 @@
 /* Null Cathedral: a lit ribbon in a black void. No ridge, no shoulder, no
- * floor. A few shards hang off the ribbon, and a rare arch crosses above
- * it. The far deck fades into the clear color, so distance reads as a
- * break in the road. The void gets thicker, and the curb harder, each stage. */
+ * floor. Violet shards stand on the horizon in screen space. A few more
+ * hang off the ribbon, and a rare arch crosses above it. The far deck
+ * fades into the clear color, so distance reads as a break in the road.
+ * The void gets thicker, and the curb harder, each stage. */
 
 #include "world.h"
 #include "course.h"
@@ -96,13 +97,63 @@ static void cathedral_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = live.sky[2];
 }
 
+static int wrap_shift(int yaw, int denom) {
+    int s = yaw * SCREEN_W / denom;
+    s %= SCREEN_W;
+    if (s < 0)
+        s += SCREEN_W;
+    return s;
+}
+
+static void sliver(int x, int w, int top, int foot, int r, int g, int b) {
+    XY p0, p1, p2, p3;
+    if (w < 2 || top >= foot || x >= SCREEN_W || x + w <= 0)
+        return;
+    p0.x = (int16_t)(x + w / 2);
+    p0.y = (int16_t)top;
+    p1.x = (int16_t)(x + w / 2 + 1);
+    p1.y = (int16_t)top;
+    p2.x = (int16_t)x;
+    p2.y = (int16_t)foot;
+    p3.x = (int16_t)(x + w);
+    p3.y = (int16_t)foot;
+    poly_f4(&p0, &p1, &p2, &p3, OT_LENGTH - 2, r, g, b, BLEND_NONE);
+}
+
+/* Distant fragments. Screen space, so the void around the ribbon stays
+ * cheap. The hanging shards below are the ones that are actually near. */
+static void void_line(int stage) {
+    static const int k_x[10] = { 10, 40, 72, 104, 140, 172, 206, 236, 268, 300 };
+    int foot = path_horizon();
+    int shift = wrap_shift(path_yaw(), 900);
+    int n = stage == 2 ? 10 : 7;
+    int i;
+    if (world_bytes_used() + 8 * 1024 > BUFFER_LENGTH)
+        return;
+    if (foot < 16)
+        foot = 16;
+    if (foot > SCREEN_H - 8)
+        foot = SCREEN_H - 8;
+    for (i = 0; i < n; i++) {
+        int h = 26 + ((i * 19) & 36) + stage * 6;
+        int w = 5 + (i & 2);
+        int k;
+        for (k = -1; k <= 0; k++) {
+            int x = k_x[i] - shift + k * SCREEN_W;
+            sliver(x, w, foot - h, foot + 2, 70 + stage * 20, 16, 120);
+            sliver(x + 1, w > 3 ? w - 2 : 2, foot - h, foot - h + h / 3, 210, 90, 255);
+        }
+    }
+}
+
 static void vault(const LevelFrame *f) {
-    int s, base = f->scroll / 2048 * 2048;
-    for (s = base; s < f->scroll + 6400; s += 2048) {
-        int side = ((s / 2048) & 1) ? -1 : 1;
-        int u = side * (ROAD_HALF + 190 + ((s >> 4) & 63));
-        int v = 70 + ((s >> 5) & 127);
-        if (!road_marker(s, u, 14, v, v + 210, road.edge[0], road.edge[1], road.edge[2]))
+    int s, n = 0, base = f->scroll / 1600 * 1600;
+    for (s = base; n < 4 && s < f->scroll + 5200; s += 1600, n++) {
+        int side = ((s / 1600) & 1) ? -1 : 1;
+        int u = side * (ROAD_HALF + 170 + ((s >> 4) & 80));
+        int v = 40 + ((s >> 5) & 160);
+        int h = 160 + ((s >> 3) & 120);
+        if (!road_marker(s, u, 12, v, v + h, road.edge[0], road.edge[1], road.edge[2]))
             return;
     }
     base = f->scroll / 8192 * 8192;
@@ -129,6 +180,7 @@ static void cathedral_draw(const LevelFrame *f) {
     gradient(0, 0, SCREEN_W, hy, OT_LENGTH - 1,
              sky_top[0], sky_top[1], sky_top[2],
              live.sky[0], live.sky[1], live.sky[2]);
+    void_line(f->stage);
     road_draw(&road, f);
     vault(f);
     road_streaks(f, road.edge[0], road.edge[1], road.edge[2], 0, 0);

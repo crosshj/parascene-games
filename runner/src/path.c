@@ -12,6 +12,9 @@
 #include "course.h"
 #include "track_data.h"
 #include "profile.h"
+#ifdef RUNNER_PREVIEW
+unsigned long path_preview_samples, path_preview_transforms;
+#endif
 
 static int path_scroll;
 static const TrackDef *active = &track_table[0];
@@ -120,6 +123,10 @@ static int dot_q(int dx, int dy, int dz, int x, int y, int z) {
  * else lights with it. A vector past 16 bits goes in halved until it fits. */
 static void rotate(int x, int y, int z, int *ox, int *oy, int *oz) {
     int k = 0;
+    PROF_N(PN_TRANSFORM);
+#ifdef RUNNER_PREVIEW
+    path_preview_transforms++;
+#endif
     while (iabs(x) > 32767 || iabs(y) > 32767 || iabs(z) > 32767) {
         x >>= 1;
         y >>= 1;
@@ -251,6 +258,9 @@ static const PathSeg *sample_at_s(int s, int *x, int *y, int *z) {
     int band, local, lap, idx, nidx;
     const PathSeg *a;
     PROF_COUNT_SAMPLE();
+#ifdef RUNNER_PREVIEW
+    path_preview_samples++;
+#endif
     if (s < 0)
         s = 0;
     band = s / STEP;
@@ -592,6 +602,17 @@ void path_cam(int s, int u, int v, int *x, int *y, int *z) {
     deck_at(s, v, &dx, &dy, &dz, &rx, &ry, &rz);
     rotate(dx + mul_q(rx, u), dy + mul_q(ry, u), dz + mul_q(rz, u), x, y, z);
 }
+
+void path_transform(int wx, int wy, int wz, int *x, int *y, int *z) {
+    rotate(wx - cam_x, wy - cam_y, wz - cam_z, x, y, z);
+}
+
+void path_rotate(int wx, int wy, int wz, int *x, int *y, int *z) {
+    rotate(wx, wy, wz, x, y, z);
+}
+
+const char *path_id(void) { return active->id; }
+int path_is_straight(void) { return active->straight; }
 
 void path_cam_lr(int s, int ul, int ur, int v,
                  int *lx, int *ly, int *lz,
