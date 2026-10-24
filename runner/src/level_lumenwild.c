@@ -1143,6 +1143,7 @@ static const Light k_light = {
     {148, 128, 168}, /* tint */
     {70, 48, 96},    /* shadow */
     96,              /* density */
+    {0,0,0}, /* Automatic ambient fill. */
 };
 
 static const RoadStyle k_road = {
@@ -1159,6 +1160,8 @@ static const RoadStyle k_road = {
     {24, 70, 88},
     2400,            /* forest floor */
     {12, 6, 28},
+    0, /* No separately drawn analytic continuation. */
+    0, {0,0,0}, /* Legacy single-color atmosphere. */
 };
 
 static void apply_stage(int stage) {

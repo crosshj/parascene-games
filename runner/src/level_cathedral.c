@@ -158,14 +158,16 @@ static void vault(const LevelFrame *f) {
     }
     base = f->scroll / 8192 * 8192;
     for (s = base; s < f->scroll + 9000; s += 8192) {
-        if (s < f->scroll + 480)
+        if (s < f->scroll + 480 || !road_scenery_gate_allowed(s))
             continue;
+        world_asset("scenery_gate",s,"arch");
         if (!road_cloth(s, s + 40, -1, 18, 48, 18, 310, 90, 24, 150))
             return;
         if (!road_cloth(s, s + 40, 1, 18, 48, 18, 310, 90, 24, 150))
             return;
         if (!road_lintel(s, s + 40, 18, 296, 150, 60, 210))
             return;
+        world_asset("unclassified",0,"mixed");
     }
 }
 

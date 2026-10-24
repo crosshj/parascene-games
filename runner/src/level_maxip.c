@@ -19,6 +19,7 @@ static const Light k_light = {
     {150, 126, 140}, /* tint */
     {128, 72, 120},  /* shadow */
     120,             /* density */
+    {0,0,0}, /* Automatic ambient fill. */
 };
 
 static const RoadStyle k_road = {
@@ -33,6 +34,8 @@ static const RoadStyle k_road = {
     &k_obstacle,
     0, {0, 0, 0},
     0, {0, 0, 0},
+    0, /* No separately drawn analytic continuation. */
+    0, {0,0,0}, /* Legacy single-color atmosphere. */
 };
 
 #ifdef RUNNER_PROFILE
@@ -46,8 +49,8 @@ static void maxip_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = k_light.sky[2];
 }
 
-static const uint8_t k_gantry_post[3] = {244, 224, 236};
-static const uint8_t k_gantry_beam[3] = {222, 160, 206};
+static const uint8_t k_gantry_post[3] = {132, 140, 148};
+static const uint8_t k_gantry_beam[3] = {112, 120, 128};
 
 static void maxip_draw(const LevelFrame *f) {
     road_backdrop(&k_road);

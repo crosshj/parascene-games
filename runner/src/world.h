@@ -49,6 +49,8 @@ void world_init(void);
  * for two scans when the work finishes inside the first one. */
 void world_mark(void);
 void world_flip(void);
+/* Small final raster offset; does not change the camera or baked visibility. */
+void world_set_shake(int x,int y);
 void world_set_clear(int r, int g, int b);
 /* After the buffer about to be shown has been cleared and drawn, copy 320
  * 15-bit pixels onto its bottom row. Used by the web disc's command line. */
@@ -131,3 +133,6 @@ void side(int x, int z0, int z1, int ya, int yb, int r, int g, int b);
 /* Affine textured scenery quad; UVs follow each projected corner. */
 void poly_tex4(const XY *p, const XY *uv, int bucket, int shade,
                uint16_t tpage, uint16_t clut);
+
+/* Native opaque one-pixel GPU tile, for distant emissive detail. */
+void point_f1(XY p,int bucket,int r,int g,int b);

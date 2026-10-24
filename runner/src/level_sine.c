@@ -83,6 +83,7 @@ static void apply(int stage) {
         return;
     shown = stage;
     applied_fast = fast;
+    road.analytic_continuation = fast;
     L = &k_look[stage];
     rgb(live.sky, L->sky);
     rgb(live.haze, L->haze);
@@ -165,7 +166,7 @@ static void straight_tube(const LevelFrame *f) {
         tunnel_face(c,d,vp,vp,color,256,256,0,0,OT_LENGTH-3);
     }
     if (s < f->scroll + CLIP) s += RIB_STEP;
-    for (; s < f->scroll + END; s += RIB_STEP) {
+    for (; s < f->scroll + END && road_scenery_gate_allowed(s); s += RIB_STEP) {
         int z = s-f->scroll, q = (SCREEN_W/2)*4096/z;
         int fade = (END-z)*256/END * 3000/(z+3000);
         int r = (road.edge[0]/2+glow/2)*fade>>8;
@@ -231,7 +232,7 @@ static void tube(const LevelFrame *f) {
     int rib_s = f->scroll / (step * 4) * (step * 4);
     if (rib_s < f->scroll + 280)
         rib_s += step * 4;
-    for (; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+    for (; (draw = road_span(s, f->scroll, step, reach, 440, &s1)) != 0; s = s1) {
         if (draw == 2)
             continue;
         if (!road_cloth(s, s1, -1, TUBE_OUT, 0, TUBE_OUT, 420, 6, 12, 14))
@@ -249,7 +250,8 @@ static void tube(const LevelFrame *f) {
         if (!road_cloth(s, s1, 1, TUBE_OUT - 2, 150, TUBE_OUT - 2, 176, wr, wg, wb))
             return;
     }
-    if (rib_s < f->scroll + DETAIL_Z) {
+    if (rib_s < f->scroll + DETAIL_Z && road_scenery_gate_allowed(rib_s)) {
+        world_asset("rib",rib_s,"mesh");
         if (!road_cloth(rib_s, rib_s + 36, -1, 20, 0, 20, 440, wr, wg, wb))
             return;
         if (!road_cloth(rib_s, rib_s + 36, 1, 20, 0, 20, 440, wr, wg, wb))

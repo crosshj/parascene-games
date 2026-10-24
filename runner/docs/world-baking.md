@@ -1,8 +1,11 @@
 # World baking: inventory, baseline and first prototype
 
-**Historical prototype.** The active Sineworks implementation and current
+**Historical prototype.** The active shared mesh pipeline is documented in
+[compiled-scene-rendering.md](compiled-scene-rendering.md).
+
+**Original prototype notes.** The active Sineworks implementation and current
 measurements are documented in [sineworks-rendering.md](sineworks-rendering.md).
-The sampled mesh approach below is no longer linked into the game. Its host
+The original Sineworks sampled package below is no longer linked into the game. Its host
 compiler remains available for experimentation with genuinely complex geometry.
 
 This implements the first milestone of

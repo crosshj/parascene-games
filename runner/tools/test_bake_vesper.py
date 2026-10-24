@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks that filtered facades retain light and never punch transparent holes."""
 import unittest
-from bake_vesper import bake, PALETTE
+from bake_vesper import bake, PALETTE, straight_runs
+import copy
 
 class Facades(unittest.TestCase):
     def test_opaque_budget_and_filtered_energy(self):
@@ -17,6 +18,15 @@ class Facades(unittest.TestCase):
                 avg=sum(p[c] for p in pixels)/len(pixels)
                 self.assertLess(abs(avg-means[t['variant']][c]), 9,
                                 f"variant {t['variant']} LOD {t['lod']} loses light")
+    def test_straight_runs_stop_at_changes(self):
+        base=dict(yaw=0,pitch=0,roll=0,edge=[-280,280],edge1=[-280,280],
+                  right=[1,0,0],right1=[1,0,0],up=[0,1,0],fwd=[0,0,1],chain='main')
+        segments=[dict(base,s=i*256,p=[0,0,i*256],p1=[0,0,(i+1)*256],next=i+1) for i in range(4)]
+        self.assertEqual(straight_runs(segments),[1024]*4)
+        for field,value in [('yaw',16),('roll',16),('edge',[-200,200]),('chain','fork'),('p',[20,0,512])]:
+            changed=copy.deepcopy(segments); changed[2][field]=value
+            self.assertLessEqual(straight_runs(changed)[0],512)
+
     def test_mip_tiles_do_not_overlap(self):
         _, tiles, _=bake()
         occupied=set()

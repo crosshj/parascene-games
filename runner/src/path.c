@@ -12,11 +12,17 @@
 #include "course.h"
 #include "track_data.h"
 #include "profile.h"
+#include "path_runtime.h"
+#if !defined(RUNNER_BAKE_PATH) && !defined(RUNNER_LEGACY_PATH)
+#include "path_runtime_data.h"
+#define COMPILED_PATH 1
+#endif
 #ifdef RUNNER_PREVIEW
 unsigned long path_preview_samples, path_preview_transforms;
 #endif
 
 static int path_scroll;
+static uint32_t view_revision;
 static const TrackDef *active = &track_table[0];
 
 #define MAX_BRANCHES 4
@@ -24,23 +30,36 @@ static const TrackDef *active = &track_table[0];
 /* 1 where a fork follows its second road. */
 static uint8_t route[MAX_BRANCHES];
 /* The fork each band index belongs to, or -1. */
+#ifdef COMPILED_PATH
+static const int8_t *band_branch;
+static const uint8_t *band_flags, *band_clear, *seg_taper;
+static const uint16_t *seg_frame_index;
+#else
 static int8_t band_branch[BAND_MAX];
+static uint8_t band_flags[BAND_MAX];
+static uint8_t band_clear[BAND_MAX];
+static int16_t seg_frame[1024][6];
+static uint8_t seg_taper[1024];
+#endif
 /* Per band index: some route may jump into it, some road on it holds a crate. */
 #define BAND_MAY_CUT 1
 #define BAND_MAY_CRATE 2
-static uint8_t band_flags[BAND_MAX];
 /* Per band index: how many bands from it on no route can cut, up to the
  * period's end; 0 where one may. */
-static uint8_t band_clear[BAND_MAX];
 static const TrackDef *flagged;
 /* Each segment's deck right and up vectors at its start, so a sample blends
  * two frames instead of building one from angles. */
 #define SEG_MAX 1024
-static int16_t seg_frame[SEG_MAX][6];
 /* Per segment, the curbs that start in it (bits 0-1) or end with it (bits
  * 2-3) where the road runs on, on any route: they taper across it. */
-static uint8_t seg_taper[SEG_MAX];
 static int framed;
+static const int16_t *frame_at(int index) {
+#ifdef COMPILED_PATH
+    return path_frame_rows[seg_frame_index[index]];
+#else
+    return seg_frame[index];
+#endif
+}
 static int cut_at(int band);
 /* Band of the last path_follow and path_begin, to catch a step onto the
  * next band; -1 after a jump in s. */
@@ -244,6 +263,7 @@ static const PathSeg *seg_at(int idx) {
 
 /* A curb this band's road has and the road before or after it lacks, with
  * no cut between: there the curb narrows to a point instead of stopping. */
+#ifndef COMPILED_PATH
 static int taper_bits(int band, const PathSeg *a, const PathSeg *next) {
     int bits = 0;
     if (band > 0 && !cut_at(band))
@@ -252,6 +272,7 @@ static int taper_bits(int band, const PathSeg *a, const PathSeg *next) {
         bits |= (a->curbs & ~next->curbs) << 2;
     return bits;
 }
+#endif
 
 /* The centerline point at s; leaves the band in the cache. */
 static const PathSeg *sample_at_s(int s, int *x, int *y, int *z) {
@@ -335,6 +356,7 @@ static const PathSeg *sample(int s, int *x, int *y, int *z,
     return a;
 }
 
+#ifndef COMPILED_PATH
 static void mark_taper(int band, int idx) {
     const PathSeg *a = seg_at(idx);
     int i = (int)(a - active->seg);
@@ -412,6 +434,7 @@ static void build_frames(void) {
         seg_frame[i][5] = (int16_t)uz;
     }
 }
+#endif
 
 int path_open(const char *id) {
     int i;
@@ -420,6 +443,17 @@ int path_open(const char *id) {
     for (i = 0; i < TRACK_TABLE_COUNT; i++) {
         if (strcmp(track_table[i].id, id) == 0) {
             if (active != &track_table[i] || flagged != active) {
+#ifdef COMPILED_PATH
+                const PathRuntime *baked = &path_runtime[i];
+                active = &track_table[i];
+                band_branch = baked->branches;
+                band_flags = baked->flags;
+                band_clear = baked->clear;
+                seg_taper = baked->taper;
+                seg_frame_index = baked->frames;
+                framed = 1;
+                path_reset();
+#else
                 int k, j;
                 active = &track_table[i];
                 memset(band_branch, -1, sizeof band_branch);
@@ -430,6 +464,7 @@ int path_open(const char *id) {
                 path_reset();
                 flag_bands();
                 build_frames();
+#endif
                 flagged = active;
             }
             return 1;
@@ -439,6 +474,7 @@ int path_open(const char *id) {
 }
 
 void path_reset(void) {
+    view_revision++;
     memset(route, 0, sizeof route);
     cache_band = -1;
     follow_band = -1;
@@ -467,6 +503,7 @@ static int jump_at(int band) {
 }
 
 void path_begin(int scroll) {
+    view_revision++;
     int cyaw, cpitch, croll, band;
     path_scroll = scroll;
     band = scroll < 0 ? 0 : scroll / STEP;
@@ -550,8 +587,8 @@ static const PathSeg *deck_at(int s, int v, int *dx, int *dy, int *dz,
     }
     a = sample_at_s(s, &px, &py, &pz);
     local = sample_local;
-    fa = seg_frame[a - active->seg];
-    fb = seg_frame[cache_b - active->seg];
+    fa = frame_at(a - active->seg);
+    fb = frame_at(cache_b - active->seg);
     *rx = fa[0] + (fb[0] - fa[0]) * local / STEP;
     *ry = fa[1] + (fb[1] - fa[1]) * local / STEP;
     *rz = fa[2] + (fb[2] - fa[2]) * local / STEP;
@@ -603,6 +640,26 @@ void path_cam(int s, int u, int v, int *x, int *y, int *z) {
     rotate(dx + mul_q(rx, u), dy + mul_q(ry, u), dz + mul_q(rz, u), x, y, z);
 }
 
+void path_cam_pair(int s,int u0,int v0,int u1,int v1,
+                   int *x0,int *y0,int *z0,int *x1,int *y1,int *z1) {
+    int dx,dy,dz,rx,ry,rz,ux,uy,uz,t;
+    const int16_t *a,*b;
+    if(!framed) {
+        path_cam(s,u0,v0,x0,y0,z0);
+        path_cam(s,u1,v1,x1,y1,z1);
+        return;
+    }
+    deck_at(s,0,&dx,&dy,&dz,&rx,&ry,&rz);
+    a=frame_at(cache_a-active->seg); b=frame_at(cache_b-active->seg); t=sample_local;
+    ux=a[3]+(b[3]-a[3])*t/STEP;
+    uy=a[4]+(b[4]-a[4])*t/STEP;
+    uz=a[5]+(b[5]-a[5])*t/STEP;
+    rotate(dx+(ux*v0>>12)+mul_q(rx,u0),dy+(uy*v0>>12)+mul_q(ry,u0),
+           dz+(uz*v0>>12)+mul_q(rz,u0),x0,y0,z0);
+    rotate(dx+(ux*v1>>12)+mul_q(rx,u1),dy+(uy*v1>>12)+mul_q(ry,u1),
+           dz+(uz*v1>>12)+mul_q(rz,u1),x1,y1,z1);
+}
+
 void path_transform(int wx, int wy, int wz, int *x, int *y, int *z) {
     rotate(wx - cam_x, wy - cam_y, wz - cam_z, x, y, z);
 }
@@ -612,6 +669,7 @@ void path_rotate(int wx, int wy, int wz, int *x, int *y, int *z) {
 }
 
 const char *path_id(void) { return active->id; }
+uint32_t path_view_revision(void) { return view_revision; }
 int path_is_straight(void) { return active->straight; }
 
 void path_cam_lr(int s, int ul, int ur, int v,
@@ -763,6 +821,7 @@ int path_may_crate(int band) {
 }
 
 void path_end_side(int on) {
+    if(end_side!=on) view_revision++;
     end_side = on;
 }
 
@@ -872,6 +931,7 @@ int path_branch(int k, int s, int *s0, int *s1) {
 }
 
 void path_swap(int k) {
+    view_revision++;
     route[k] ^= 1;
     cache_band = -1;
 }

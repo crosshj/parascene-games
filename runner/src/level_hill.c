@@ -18,6 +18,7 @@ static const Light k_light = {
     {156, 100, 92},  /* tint */
     {72, 108, 100},  /* shadow */
     176,             /* density */
+    {0,0,0}, /* Automatic ambient fill. */
 };
 
 static const RoadStyle k_road = {
@@ -32,6 +33,8 @@ static const RoadStyle k_road = {
     &k_obstacle,
     0, {0, 0, 0},
     0, {0, 0, 0},
+    0, /* No separately drawn analytic continuation. */
+    0, {0,0,0}, /* Legacy single-color atmosphere. */
 };
 
 static void hill_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -42,8 +45,8 @@ static void hill_clear(const LevelFrame *f, int *r, int *g, int *b) {
 }
 
 /* Warm steel, so the bar sits in the dusk instead of reading blue. */
-static const uint8_t k_gantry_post[3] = {168, 150, 144};
-static const uint8_t k_gantry_beam[3] = {138, 118, 116};
+static const uint8_t k_gantry_post[3] = {132, 140, 148};
+static const uint8_t k_gantry_beam[3] = {112, 120, 128};
 
 static void hill_draw(const LevelFrame *f) {
     road_backdrop(&k_road);

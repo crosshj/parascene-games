@@ -19,6 +19,7 @@ static const Light k_light = {
     {150, 126, 124}, /* tint */
     {70, 56, 120},   /* shadow */
     150,             /* density */
+    {0,0,0}, /* Automatic ambient fill. */
 };
 
 static const RoadStyle k_road = {
@@ -33,6 +34,8 @@ static const RoadStyle k_road = {
     &k_obstacle,
     0, {0, 0, 0},
     0, {0, 0, 0},
+    0, /* No separately drawn analytic continuation. */
+    0, {0,0,0}, /* Legacy single-color atmosphere. */
 };
 
 static void zipper_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -42,8 +45,8 @@ static void zipper_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = k_light.sky[2];
 }
 
-static const uint8_t k_gantry_post[3] = {120, 112, 136};
-static const uint8_t k_gantry_beam[3] = {200, 128, 52};
+static const uint8_t k_gantry_post[3] = {132, 140, 148};
+static const uint8_t k_gantry_beam[3] = {112, 120, 128};
 
 static void zipper_draw(const LevelFrame *f) {
     road_backdrop(&k_road);

@@ -776,7 +776,7 @@ static void frame_box(int x, int y, int w, int h, int r, int g, int b) {
     vline(x + w, y + h - 8, y + h, 3, cr, cg, cb);
 }
 
-static void draw_card(int slot, int focus, int stage, int reach, int glow, int glow_at) {
+static void draw_card(int slot, int stage, int reach, int glow, int glow_at) {
     const Level *lv = story_at(slot);
     int base = flow_base(slot);
     int n = lv->stage_count;
@@ -798,7 +798,7 @@ static void draw_card(int slot, int focus, int stage, int reach, int glow, int g
         const char *name = lv->stages[i].name;
         int y = top + 20 + i * 14;
         int open = stage_look(base + i, reach) > 0;
-        int here = focus == FLOW_STAGES && i == stage;
+        int here = i == stage;
         int tw = hud_width(name, 1);
         /* The bar is linked after the name, so the name draws in front of it. */
         gem_of(tab - 12, y + 3, base + i, reach, glow, glow_at, 1);
@@ -811,7 +811,7 @@ static void draw_card(int slot, int focus, int stage, int reach, int glow, int g
     }
 }
 
-void flow_draw(int slot, int pos_q8, int focus, int stage, int reach,
+void flow_draw(int slot, int pos_q8, int stage, int reach,
                int glow, int glow_at, int time) {
     int nworld = flow_world_count();
     if (slot < 0)
@@ -819,7 +819,7 @@ void flow_draw(int slot, int pos_q8, int focus, int stage, int reach,
     if (slot >= nworld)
         slot = nworld - 1;
     draw_row(slot, pos_q8, ROW_Y, reach, glow, glow_at, time);
-    draw_card(slot, focus, stage, reach, glow, glow_at);
+    draw_card(slot, stage, reach, glow, glow_at);
     front_plain();
 }
 
@@ -870,20 +870,6 @@ void card_overlay(const char *world, const char *stage, int tick) {
     if (tick < CARD_ROAD) {
         slide_name(world, 88, tick, 1, 2, 240, 248, 244);
         slide_name(stage, 116, tick, 0, 1, 170, 210, 206);
-    }
-    if (tick >= CARD_ROAD && tick < CARD_GO) {
-        int step = (tick - CARD_ROAD) / CARD_BEAT;
-        int local = (tick - CARD_ROAD) % CARD_BEAT;
-        char num[2];
-        int scale = 4;
-        if (step > 2)
-            step = 2;
-        /* A short gap between digits, then the number holds still. */
-        if (local >= 8) {
-            num[0] = (char)('3' - step);
-            num[1] = 0;
-            text_scale((SCREEN_W - 8 * scale) / 2, 100, num, 240, 248, 244, scale);
-        }
     }
     if (tick >= CARD_HOLD && tick < CARD_ROAD) {
         int u = tick - CARD_HOLD;

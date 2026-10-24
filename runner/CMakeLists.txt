@@ -65,7 +65,8 @@ add_custom_command(
 set(VESPER_H "${CMAKE_CURRENT_BINARY_DIR}/vesper_facades.h")
 add_custom_command(OUTPUT "${VESPER_H}"
     COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_vesper.py" "${VESPER_H}"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_vesper.py" VERBATIM)
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_vesper.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/trackview/baked.json" VERBATIM)
 set_source_files_properties(src/level_vesper.c PROPERTIES OBJECT_DEPENDS "${VESPER_H}")
 
 file(GLOB AUDIO_MP3S CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/audio/*.mp3")
@@ -151,6 +152,19 @@ add_custom_command(
 
 file(GLOB RUNNER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
 find_program(WORLD_HOST_CC NAMES cc clang gcc REQUIRED)
+set(PATH_RUNTIME_H "${CMAKE_CURRENT_BINARY_DIR}/path_runtime_data.h")
+set(PATH_RUNTIME_REPORT "${CMAKE_CURRENT_BINARY_DIR}/path_runtime_report.json")
+add_custom_command(
+    OUTPUT "${PATH_RUNTIME_H}" "${PATH_RUNTIME_REPORT}"
+    COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_path_runtime.py"
+        --cc "${WORLD_HOST_CC}" --header "${PATH_RUNTIME_H}" --report "${PATH_RUNTIME_REPORT}"
+    DEPENDS "${TRACK_H}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_path_runtime.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/compile_path_runtime.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/course.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/profile.h"
+    VERBATIM)
+set_source_files_properties(src/path.c PROPERTIES OBJECT_DEPENDS "${PATH_RUNTIME_H}")
 set(WORLD_H "${CMAKE_CURRENT_BINARY_DIR}/world_mesh_data.h")
 set(WORLD_REPORT "${CMAKE_CURRENT_BINARY_DIR}/world_mesh_report.json")
 add_custom_command(
@@ -169,7 +183,38 @@ add_custom_command(
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/profile.h"
 	VERBATIM
 )
+set(REACH_WORLD_H "${CMAKE_CURRENT_BINARY_DIR}/reach_world_data.h")
+add_custom_command(
+    OUTPUT "${REACH_WORLD_H}" "${CMAKE_CURRENT_BINARY_DIR}/reach_world_report.json"
+    COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/worlds/reach.json"
+        --header "${REACH_WORLD_H}" --report "${CMAKE_CURRENT_BINARY_DIR}/reach_world_report.json"
+    DEPENDS "${TRACK_H}" "${TRACK_JSON}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/worlds/reach.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
+    VERBATIM)
+set(ROAD_WORLD_H "${CMAKE_CURRENT_BINARY_DIR}/road_world_data.h")
+add_custom_command(
+    OUTPUT "${ROAD_WORLD_H}" "${CMAKE_CURRENT_BINARY_DIR}/road_world_report.json"
+    COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/worlds/reach-road.json"
+        --header "${ROAD_WORLD_H}" --report "${CMAKE_CURRENT_BINARY_DIR}/road_world_report.json"
+    DEPENDS "${TRACK_H}" "${TRACK_JSON}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/worlds/reach-road.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
+    VERBATIM)
+set_source_files_properties(src/road.c PROPERTIES OBJECT_DEPENDS "${REACH_WORLD_H};${ROAD_WORLD_H}")
 add_custom_target(check_worlds
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_compiled_worlds.py"
+		--include "${CMAKE_CURRENT_BINARY_DIR}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_path_runtime.py"
+		--include "${CMAKE_CURRENT_BINARY_DIR}"
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_bake_vesper.py"
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_bake_worlds.py"
 	COMMAND "${WORLD_HOST_CC}" -std=gnu99 -O2 -DRUNNER_PREVIEW
@@ -177,7 +222,7 @@ add_custom_target(check_worlds
 		"${CMAKE_CURRENT_SOURCE_DIR}/tools/check_world_mesh.c"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" -o "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
 	COMMAND "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
-	DEPENDS "${WORLD_H}" "${TRACK_H}"
+	DEPENDS "${WORLD_H}" "${TRACK_H}" "${PATH_RUNTIME_H}" "${REACH_WORLD_H}" "${ROAD_WORLD_H}"
 	VERBATIM
 )
 add_custom_target(check_world_visuals
@@ -201,6 +246,10 @@ if(RUNNER_LEGACY_WORLDS)
 endif()
 
 psn00bsdk_add_executable(runner NOGPREL ${RUNNER_SOURCES})
+psn00bsdk_add_executable(runner_rumble_test NOGPREL
+    tools/rumble_test.c src/hit_feedback.c src/save.c)
+target_include_directories(runner_rumble_test PRIVATE src)
+set_target_properties(runner_rumble_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 target_include_directories(runner PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 # The road's hot path crosses path.c, road.c, and world.c; whole-program
 # inlining takes about a sixth off the heaviest frames.
@@ -211,8 +260,23 @@ target_link_options(runner PRIVATE -flto -O2)
 # to the TTY. Configure it in its own folder, such as runner/build/profile;
 # it keeps its disc there instead of copying it to the repository root.
 option(RUNNER_PROFILE "Build the frame-cost profiling disc" OFF)
+option(RUNNER_REFERENCE_RENDERER "Reference path preparation, surfaces and distance range for A/B tests" OFF)
+if(RUNNER_REFERENCE_RENDERER)
+    add_compile_definitions(RUNNER_LEGACY_PATH RUNNER_LEGACY_SURFACES RUNNER_LEGACY_DISTANCE)
+endif()
 if(RUNNER_PROFILE)
 	target_compile_definitions(runner PRIVATE RUNNER_PROFILE)
+    set(RUNNER_PROFILE_LEVEL 3 CACHE STRING "World index for a targeted profile")
+    set(RUNNER_PROFILE_STAGE -1 CACHE STRING "Stage index; -1 walks all worlds")
+    set(RUNNER_PROFILE_FRAMES 900 CACHE STRING "Frames in one profile interval")
+    set(RUNNER_PROFILE_SCROLL 0 CACHE STRING "Initial progress of the profile")
+    set(RUNNER_PROFILE_TAG manual CACHE STRING "Run identity written to the console log")
+    target_compile_definitions(runner PRIVATE PROF_LEVEL=${RUNNER_PROFILE_LEVEL}
+        PROF_FRAMES=${RUNNER_PROFILE_FRAMES} PROF_SCROLL=${RUNNER_PROFILE_SCROLL}
+        PROF_RUN_ID="${RUNNER_PROFILE_TAG}")
+    if(RUNNER_PROFILE_STAGE GREATER_EQUAL 0)
+        target_compile_definitions(runner PRIVATE PROF_STAGE=${RUNNER_PROFILE_STAGE})
+    endif()
 endif()
 if(RUNNER_XA_MUSIC)
 	target_compile_definitions(runner PRIVATE RUNNER_XA_MUSIC)
@@ -222,7 +286,7 @@ set_source_files_properties(src/main.c PROPERTIES
 set_source_files_properties(src/level_lumenwild.c PROPERTIES
 	OBJECT_DEPENDS "${LUMEN_SKY_H}")
 set_source_files_properties(src/path.c PROPERTIES
-	OBJECT_DEPENDS "${TRACK_H}")
+	OBJECT_DEPENDS "${TRACK_H};${PATH_RUNTIME_H}")
 add_custom_target(sprite_sheet DEPENDS "${VESPER_H}" "${SPRITE_H}" "${SCREEN_H}" "${SOUND_H}" "${LUMEN_SKY_H}")
 add_dependencies(runner sprite_sheet)
 

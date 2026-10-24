@@ -1,8 +1,8 @@
 /* Vesper City: a night highway. The first stage is a skyline on the
  * horizon and a neon rail beside the curb. The last stage is a solid
  * wall of towers on each side, tall enough to leave the top of the
- * screen. The floor stops at that wall, and the skyline is only the
- * slot of street between the walls. The skyline is screen space. The
+ * screen. The floor stops at that wall; the last stage has sky between
+ * its towers, without a separate skyline. Earlier skylines are screen space. The
  * light steps from dusk, to night, to a wetter dark. */
 
 #include <psxgpu.h>
@@ -240,14 +240,9 @@ static void skyline(int stage) {
         foot = SCREEN_H - 8;
     if (rows_stage != stage)
         build_rows(stage);
-    /* The last stage's walls cover the sides, so the skyline is only the
-     * slot down the street. */
-    if (stage >= 2) {
-        int x0 = SCREEN_W / 2 - 36;
-        int x1 = SCREEN_W / 2 + 36;
-        blit_row(far_row, far_n, shift, foot + 2, 8, 4, 18, 1, x0, x1);
+    /* The final stage is enclosed by roadside towers; only sky behind them. */
+    if (stage >= 2)
         return;
-    }
     /* Near row first, so it shows in front of the far row. */
     blit_row(near_row, near_n, shift, foot, 16, 8, 32, 1, 0, SCREEN_W);
     blit_row(far_row, far_n, shift, foot + 2, 8, 4, 18, 1, 0, SCREEN_W);
@@ -263,6 +258,8 @@ void vesper_preview_skyline(void) {
 #endif
 
 static void lights(const LevelFrame *f) {
+    static const uint8_t gantry_post[3] = {132, 140, 148};
+    static const uint8_t gantry_beam[3] = {112, 120, 128};
     int s, base;
     if (f->stage < 2) {
         base = f->scroll / 1792 * 1792;
@@ -277,8 +274,10 @@ static void lights(const LevelFrame *f) {
     }
     base = f->scroll / 7168 * 7168;
     for (s = base; s < f->scroll + 8000; s += 7168) {
-        if (s > f->scroll + 240)
-            road_gantry(s, road.edge, road.dash);
+        /* Leave a full view-distance plus one interval clear so the real
+         * finish gantry is the only gate ahead as the stage ends. */
+        if (s > f->scroll + 240 && s < STAGE_FINISH - FAR - 7168)
+            road_gantry(s, gantry_post, gantry_beam);
     }
 }
 
@@ -299,32 +298,10 @@ static void barriers(const LevelFrame *f) {
     }
 }
 
-/* Last stage: opaque facade textures replace both the wall and window
- * strips. Baked filtered tiles preserve average light as detail shrinks. */
+/* Open-top street canyon: shaded enclosure and inexpensive window lights. */
 static void canyon(const LevelFrame *f) {
-    int step = 640;
-    int s = f->scroll / step * step;
-    int limit = f->scroll + 4200;
-    if (f->stage < 2)
-        return;
-    /* Fixed sheets, not the grown span. A tall wall on a long sheet is
-     * cut into dozens of pieces when a corner passes the camera. */
-    for (; s < limit; s += step) {
-        int side;
-        for (side = -1; side <= 1; side += 2) {
-            uint32_t n = mixb((uint32_t)(s + (side > 0 ? 409 : 0)) * 0x9E3779B9u);
-            int distance=s-f->scroll;
-            int variant=n&1u;
-            int tall=640;
-            world_asset("vesper_facade",s*2+(side>0),distance<3200 ? "window_texture" : "average_light");
-            if (distance<3200) {
-                int lod=distance<700 ? 0 : distance<1400 ? 1 : distance<2400 ? 2 : 3;
-                road_facade(s,s+step,side,CANYON_OUT,tall,facade_u(variant,lod),128,
-                            64>>lod,facade_page,facade_clut);
-            } else if (!road_cloth(s,s+step,side,CANYON_OUT,0,CANYON_OUT,tall,
-                                  vesper_mean[variant][0],vesper_mean[variant][1],vesper_mean[variant][2])) return;
-        }
-    }
+    if (f->stage>=2)
+        road_city_canyon(f->scroll,CANYON_OUT,960,vesper_city_runs,VESPER_CITY_RUN_COUNT);
 }
 
 static void vesper_draw(const LevelFrame *f) {

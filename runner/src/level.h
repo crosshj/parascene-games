@@ -38,6 +38,9 @@ typedef struct {
     uint8_t tint[3];   /* the light on the runner and the paint */
     uint8_t shadow[3]; /* the color of what the runner blocks */
     int density;       /* how much of the far world the air swallows */
+    /* Optional authored diffuse fill for the runner's shadow texels (8-bit
+     * RGB, before GPU tint). Zero selects the automatic pale-sky treatment. */
+    uint8_t runner_ambient[3];
 } Light;
 
 /* Untouched light, for a world that names none. */

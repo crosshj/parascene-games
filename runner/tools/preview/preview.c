@@ -12,11 +12,15 @@
 #include <psxgpu.h>
 #include <psxgte.h>
 #include "world.h"
+#include "countdown.h"
+#include "flow.h"
 #include "road.h"
 #include "course.h"
 #include "path.h"
 #include "level.h"
 #include "world_mesh.h"
+#include "sprite_sheet.h"
+#include "runner_lighting.h"
 
 /* The GPU and GTE */
 
@@ -55,6 +59,7 @@ void world_asset(const char *kind, int instance, const char *representation) {
 #define MAX_LINKS 16384
 static Link links[MAX_LINKS];
 static int link_count;
+static int atmosphere_check_enabled, atmosphere_failures, atmosphere_primitives;
 
 void host_add_prim(uint32_t *ot, void *prim) {
     if (link_count < MAX_LINKS) {
@@ -115,7 +120,8 @@ int LoadImage(const RECT *rect, const uint32_t *data) {
 }
 int VSync(int mode) { (void)mode; return 0; }
 void PutDispEnv(const DISPENV *env) { (void)env; }
-int DrawOTagEnv(const uint32_t *ot, DRAWENV *env) { (void)ot; (void)env; return 0; }
+static DRAWENV last_draw_env;
+int DrawOTagEnv(const uint32_t *ot, DRAWENV *env) { (void)ot; last_draw_env=*env; return 0; }
 void FntLoad(int x, int y) { (void)x; (void)y; }
 void *FntSort(uint32_t *ot, void *pri, int x, int y, const char *s) {
     (void)ot; (void)x; (void)y; (void)s;
@@ -189,6 +195,7 @@ static void plot(int x, int y, int r, int g, int b, int semi) {
 
 typedef struct { int x, y, r, g, b; } Vtx;
 static int texture_on, texture_page, texture_clut, texture_raw;
+static int texture_green, texture_blue;
 /* Textured triangles use r/g for affine U/V and b for monochrome modulation. */
 static void tex_plot(int x,int y,int u,int v,int shade,int semi) {
     int mode=(texture_page>>7)&3, tx=(texture_page&15)*64, ty=(texture_page&16)*16;
@@ -200,8 +207,8 @@ static void tex_plot(int x,int y,int u,int v,int shade,int semi) {
     if (!c) return;
     if (texture_raw) shade=128;
     plot(x,y,clamp(((c&31)<<3)*shade/128,0,255),
-        clamp((((c>>5)&31)<<3)*shade/128,0,255),
-        clamp((((c>>10)&31)<<3)*shade/128,0,255),semi && (c&0x8000));
+        clamp((((c>>5)&31)<<3)*(texture_raw?128:texture_green)/128,0,255),
+        clamp((((c>>10)&31)<<3)*(texture_raw?128:texture_blue)/128,0,255),semi && (c&0x8000));
 }
 
 static long edge_fn(const Vtx *a, const Vtx *b, int x, int y) {
@@ -285,6 +292,26 @@ static Counts render(int cr, int cg, int cb) {
         if (render_shell_only && strncmp(frame_assets[links[i].asset].kind,"shell_",6))
             continue;
         uint8_t code = ((P_TAG *)links[i].prim)->code;
+        if (atmosphere_check_enabled && code != 0xE1) {
+            const char *kind=frame_assets[links[i].asset].kind;
+            if (!strcmp(kind,"reach_sky") || !strcmp(kind,"reach_backdrop") || !strcmp(kind,"reach_ruin")) {
+                atmosphere_primitives++;
+                if ((code & 0xFC)!=0x38) atmosphere_failures++;
+                else {
+                    const POLY_G4 *p=links[i].prim;
+                    /* Independent contract: the clear horizon and every
+                     * distant backdrop/ruin base must meet exactly. */
+                    atmosphere_failures += p->r2!=cr || p->g2!=cg || p->b2!=cb ||
+                                           p->r3!=cr || p->g3!=cg || p->b3!=cb;
+                    /* Distant landmarks retain subtle contrast, never the
+                     * unattenuated dark silhouettes of the old backdrop. */
+                    if (strcmp(kind,"reach_sky"))
+                        atmosphere_failures += iabs(p->r0-cr)>16 || iabs(p->g0-cg)>16 ||
+                                               iabs(p->b0-cb)>16 || iabs(p->r1-cr)>16 ||
+                                               iabs(p->g1-cg)>16 || iabs(p->b1-cb)>16;
+                }
+            }
+        }
         int semi = (code & 2) != 0;
         raster_asset = links[i].asset;
         if (visibility_enabled && code != 0xE1)
@@ -297,6 +324,7 @@ static Counts render(int cr, int cg, int cb) {
             POLY_FT4 *p=links[i].prim;
             Vtx a={p->x0,p->y0,p->u0,p->v0,p->r0}, b={p->x1,p->y1,p->u1,p->v1,p->r0};
             Vtx c={p->x2,p->y2,p->u2,p->v2,p->r0}, d={p->x3,p->y3,p->u3,p->v3,p->r0};
+            texture_green=p->g0;texture_blue=p->b0;
             texture_on=1; texture_page=p->tpage; texture_clut=p->clut; texture_raw=code&1;
             abr=(p->tpage>>5)&3;
             prim_dither=dither_on && !texture_raw;
@@ -334,6 +362,11 @@ static Counts render(int cr, int cg, int cb) {
                     plot(xx, yy, p->r0, p->g0, p->b0, semi);
             }
             n.f4++;
+        } else if ((code & 0xFC) == 0x68) {
+            TILE_1 *t=links[i].prim;
+            if(t->x0>=0 && t->y0>=0 && t->x0<SCREEN_W && t->y0<SCREEN_H)
+                plot(t->x0,t->y0,t->r0,t->g0,t->b0,semi);
+            n.tile++;
         } else if ((code & 0xFC) == 0x60) {
             TILE *t = links[i].prim;
             int yy, xx;
@@ -476,6 +509,33 @@ typedef struct {
 } Cost;
 
 /* alt runs the frame on the first fork's other road. */
+static void runner_sprite_preview(const LevelFrame *f,const Light *light,int ambient) {
+    static int uploaded;
+    uint16_t palette[16];RECT rect;XY feet;POLY_FT4 *spr;
+    int i,ax,ay,sz,h,w,bx,by,ux,uy,cell= spr_char_cell[0];
+    if(!uploaded) {
+        for(i=0;i<SPR_PAGE_COUNT;i++) {
+            setRECT(&rect,spr_page_x[i],spr_page_y[i],SPR_PAGE_W/4,spr_page_h[i]);
+            LoadImage(&rect,(const uint32_t *)(spr_tex+spr_page_off[i]));
+        }
+        uploaded=1;
+    }
+    for(i=0;i<16;i++) palette[i]=ambient?runner_lit_texel(spr_clut[0][i],light):spr_clut[0][i];
+    setRECT(&rect,spr_clut_x[0]+16,spr_clut_y[0],16,1);LoadImage(&rect,(const uint32_t *)palette);
+    sz=path_stand(f->scroll+CHAR_Z,0,0,&feet,&ax,&ay);if(sz<8)return;
+    h=78*(SCREEN_W/2)/sz;if(h<8)h=8;
+    w=h*spr_base_fw[spr_char_base[0]]/spr_base_fh[spr_char_base[0]];
+    bx=ax*w/2/4096;by=ay*w/2/4096;ux=ay*h/4096;uy=-ax*h/4096;
+    int bucket=road_runner_bucket((CHAR_Z>>OT_SHIFT)-1);
+    dither_mode(bucket,1);spr=alloc_prim(bucket,sizeof *spr);if(!spr)return;dither_mode(bucket,0);
+    setPolyFT4(spr);setRGB0(spr,light->tint[0],light->tint[1],light->tint[2]);
+    setXY4(spr,feet.x-bx+ux,feet.y-by+uy,feet.x+bx+ux,feet.y+by+uy,
+           feet.x-bx,feet.y-by,feet.x+bx,feet.y+by);
+    setUVWH(spr,spr_cell_u[cell],spr_cell_v[cell],spr_base_fw[spr_char_base[0]]-1,spr_base_fh[spr_char_base[0]]-1);
+    spr->tpage=getTPage(0,0,spr_page_x[spr_cell_page[cell]],spr_page_y[spr_cell_page[cell]]);
+    spr->clut=getClut(spr_clut_x[0]+16,spr_clut_y[0]);
+}
+
 static Cost frame(const Level *lv, const LevelFrame *f, int marker, int alt, const char *png) {
     Cost c;
     int r, g, b;
@@ -497,7 +557,8 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, int alt, con
     lv->draw(f);
     if (marker) {
         world_asset("runner",0,"quad");
-        runner_marker(f->scroll, level_light(lv));
+        if(marker>1) runner_sprite_preview(f,level_light(lv),marker==3);
+        else runner_marker(f->scroll, level_light(lv));
     }
     c.bytes = world_bytes_used();
     c.proj = projections;
@@ -593,6 +654,123 @@ static int compare_world(const char *dir, int strict) {
     if (strict) printf("visual comparison: %d frames exceed the image difference budgets\n", failures);
     else printf("visual review: %d identical-state frame pairs recorded for the redesigned tunnel\n",pairs);
     return strict && failures != 0;
+}
+
+static int countdown_check(const char *dir) {
+    static uint8_t white_mask[SCREEN_H][SCREEN_W];
+    int d,x,y,failures=0,st,lv,stages_checked=0;
+    /* The story card must reveal the road before the one shared countdown;
+     * it no longer owns a second three-number timer. */
+    failures+=CARD_GO!=CARD_ROAD;
+    failures+=countdown_digit(0)!=3 || countdown_digit(59)!=3 ||
+        countdown_digit(60)!=2 || countdown_digit(119)!=2 ||
+        countdown_digit(120)!=1 || countdown_digit(179)!=1 || countdown_digit(180)!=0;
+    for(d=3;d>=1;d--) {
+        int white=0,border=0;char name[512];
+        countdown_draw(d,0);
+        render(48,48,48);
+        for(y=0;y<SCREEN_H;y++) for(x=0;x<SCREEN_W;x++) {
+            white+=fb[y][x][0]==248;
+            if(d==3) white_mask[y][x]=fb[y][x][0]==248;
+            border+=fb[y][x][0]==8;
+        }
+        printf("countdown %d: white %d border %d\n",d,white,border);
+        failures+=white<100 || border<50;
+        snprintf(name,sizeof name,"%s/countdown_%d.png",dir,d);write_png(name);
+        world_flip();
+    }
+    {
+        static const int ages[]={0,12,36,44,52,58,59};
+        int previous=0;
+        for(d=0;d<(int)(sizeof ages/sizeof ages[0]);d++) {
+            int lit=0;char path[512];
+            countdown_draw(3,ages[d]);render(48,48,48);
+            for(y=0;y<SCREEN_H;y++) for(x=0;x<SCREEN_W;x++) lit+=fb[y][x][0]==248;
+            printf("countdown age %d: %d white pixels\n",ages[d],lit);
+            if(ages[d]<=12) failures+=lit<previous;
+            if(ages[d]>=36) failures+=lit>previous;
+            previous=lit;
+            snprintf(path,sizeof path,"%s/countdown_age_%d.png",dir,ages[d]);write_png(path);
+            world_flip();
+        }
+    }
+    for(lv=0;lv<level_count;lv++) {
+        int n=levels[lv]->stage_count;
+        if(n<1) n=1;
+        for(st=0;st<n;st++) {
+            LevelFrame f={levels[lv]->stage_count ? levels[lv]->stages[st].start : 0,0,0,0,st};
+            countdown_draw(3,0);
+            frame(levels[lv],&f,1,0,0);
+            for(y=0;y<SCREEN_H;y++) for(x=0;x<SCREEN_W;x++)
+                failures+=white_mask[y][x] && (fb[y][x][0]!=248 || fb[y][x][1]!=248 || fb[y][x][2]!=248);
+            stages_checked++;
+        }
+    }
+    point_f1((XY){10,10},1,208,0,0);render(0,0,0);
+    d=0;
+    for(y=0;y<SCREEN_H;y++) for(x=0;x<SCREEN_W;x++) d+=fb[y][x][0]!=0;
+    failures+=d!=1 || fb[10][10][0]!=208;
+    world_flip();
+    printf("Countdown/vector and single-pixel checks: %d failures; %d stage openings checked\n",failures,stages_checked);
+    return failures!=0;
+}
+
+static int city_check(const char *dir) {
+    const Level *lv=0; int i,s,failures=0,holes=0,sky=0,poses=0;
+    size_t peak=0; int distant_pixels=0,light_failures=0;
+    for(i=0;i<level_count;i++) if(!strcmp(levels[i]->track,"vesper.sweep")) lv=levels[i];
+    if(!lv) return 1;
+    for(s=0;s<=116736;s+=256) {
+        LevelFrame f={s,20,s/20,0,2};
+        Cost c=frame(lv,&f,1,0,0);
+        if(c.bytes>peak) peak=c.bytes;
+        failures+=c.bytes>BUFFER_LENGTH-2048;
+        poses++;
+    }
+    visibility_enabled=1;render_shell_only=1;
+    for(s=0;s<=3;s++) {
+        static const int at[]={0,5000,15000,48000};
+        LevelFrame f={at[s],20,0,0,2};
+        int x,y,l,r,half;
+        if(s==0 || s==3) {
+            int mid=0,far=0;
+            render_shell_only=0;
+            frame(lv,&f,0,0,0);
+            for(i=0;i<asset_count;i++) if(!strcmp(frame_assets[i].kind,"city_windows")) {
+                if(!strcmp(frame_assets[i].representation,"mid")) mid+=frame_assets[i].visible_pixels;
+                if(!strcmp(frame_assets[i].representation,"far")) far+=frame_assets[i].visible_pixels;
+            }
+            light_failures+=mid==0 || far==0;
+            printf("City lights at %d: mid %d visible pixels, far %d\n",at[s],mid,far);
+            distant_pixels+=mid+far;
+            render_shell_only=1;
+        }
+        frame(lv,&f,0,0,0);
+        for(i=0;i<asset_count;i++)
+            failures+=!strcmp(frame_assets[i].kind,"vesper_skyline");
+        path_edges(at[s],&l,&r);half=r+64;
+        for(x=0;x<100;x++) {
+            int roof=clamp(HORIZON_Y-(767-CAM_H)*(160-x)/half+3,0,SCREEN_H-1);
+            int foot=HORIZON_Y+CAM_H*(160-x)/half-3;
+            for(y=roof;y<foot;y++) {
+                holes+=visible_mask[y][x]==0;
+                holes+=visible_mask[y][319-x]==0;
+            }
+        }
+        for(y=0;y<30;y++) for(x=150;x<170;x++) sky+=visible_mask[y][x]!=0;
+    }
+    visibility_enabled=0;render_shell_only=0;
+    {
+        static const int shots[]={0,15000,22000,24000,30000,43008,47000,92000,96000,104000,112000};
+        for(i=0;i<(int)(sizeof shots/sizeof shots[0]);i++) {
+            char name[512]; LevelFrame f={shots[i],20,shots[i]/20,0,2};
+            snprintf(name,sizeof name,"%s/canyon_%d.png",dir,shots[i]);
+            frame(lv,&f,1,0,name);
+        }
+    }
+    printf("City check: %d route poses, %zu peak command bytes, %d budget failures, %d wall holes, %d blocked sky pixels\n",poses,peak,failures,holes,sky);
+    printf("City mid/far lights: %d visible pixels in straight reference views\n",distant_pixels);
+    return failures || holes || sky || light_failures;
 }
 
 extern void vesper_preview_skyline(void);
@@ -792,12 +970,14 @@ static int distance_world(const char *dir) {
 
 static int visibility_world(const char *dir, int step) {
     const Level *lv = 0;
+    const char *track = getenv("RUNNER_PREVIEW_TRACK");
     char path[512];
     FILE *csv;
     int stage, s, i;
     if (step < 1 || step > 256) return 1;
+    if (!track) track = "sine.gate";
     for (i = 0; i < level_count; i++)
-        if (!strcmp(levels[i]->track,"sine.gate")) lv = levels[i];
+        if (!strcmp(levels[i]->track,track)) lv = levels[i];
     if (!lv) return 1;
     snprintf(path,sizeof path,"%s/visibility.csv",dir);
     csv = fopen(path,"w");
@@ -805,9 +985,10 @@ static int visibility_world(const char *dir, int step) {
     fprintf(csv,"stage,scroll,kind,instance,representation,primitives,raster_pixels,visible_pixels\n");
     visibility_enabled = 1;
     for (stage = 0; stage < 3; stage++) {
-        /* Register even instances never encountered by the camera sweep. */
-        for (s = 0; s <= STAGE_FINISH+20000; s += 2560)
-            fprintf(csv,"%d,-1,rib,%d,catalog,0,0,0\n",stage,s);
+        /* Register Sineworks ribs even when a camera pose never encounters them. */
+        if (!strcmp(track,"sine.gate"))
+            for (s = 0; s <= STAGE_FINISH+20000; s += 2560)
+                fprintf(csv,"%d,-1,rib,%d,catalog,0,0,0\n",stage,s);
         for (s = 0; s <= STAGE_FINISH+2048; s += step) {
             LevelFrame f = {s,20,s/20+37,0,stage};
             frame(lv,&f,1,0,0);
@@ -826,6 +1007,239 @@ static int visibility_world(const char *dir, int step) {
     return 0;
 }
 
+static int finish_gate_check(const char *dir) {
+    static const uint8_t color[3]={240,240,240};
+    int i,j,s,frames=0,failures=0;char name[512];
+    visibility_enabled=1;
+    for(i=level_count-1;i>=0;i--) for(j=levels[i]->stage_count-1;j>=0;j--) {
+        const Level *lv=levels[i];int end=lv->stages[j].finish;
+        for(s=end-8192;s<=end+8192;s+=512) {
+            LevelFrame f={s,20,37,0,j};int k;
+            frame(lv,&f,0,0,0);frames++;
+            for(k=0;k<asset_count;k++) {
+                AssetFrame *a=&frame_assets[k];
+                if((!strcmp(a->kind,"scenery_gate") || !strcmp(a->kind,"rib")) &&
+                   a->primitives && a->instance>=end-FAR) failures++;
+            }
+            /* Rejected gates must allocate no geometry, even after finish. */
+            size_t before=world_bytes_used();
+            road_gantry(end-FAR,color,color);road_gantry(end,color,color);road_gantry(end+2048,color,color);
+            road_finish_gantry(end+1,color,color);
+            failures+=world_bytes_used()!=before;
+        }
+        LevelFrame f={end-1024,20,37,0,j};
+        frame(lv,&f,0,0,0);
+        size_t before=world_bytes_used();
+        road_finish_gantry(end,color,color);
+        failures+=world_bytes_used()<=before;
+        render(0,0,0);world_flip();
+        if(!road_scenery_gate_allowed(end-FAR-1)) failures++;
+    }
+    path_open("hill.loop");failures+=!road_scenery_gate_allowed(STAGE_FINISH+8192);
+    visibility_enabled=0;
+    snprintf(name,sizeof name,"%s/finish-gates.txt",dir);FILE *report=fopen(name,"w");
+    if(!report)return 1;
+    fprintf(report,"%d camera poses; %d failures; all 21 story stages, exact finish gates and arcade reset checked\n",frames,failures);fclose(report);
+    printf("finish gates: %d camera poses, %d failures\n",frames,failures);
+    return failures!=0;
+}
+
+static int runner_lighting_check(const char *dir) {
+    const uint8_t pale[3]={176,214,224},dark[3]={20,10,52},saturated[3]={24,220,255};
+    int c,i,failures=0;char name[512];
+    for(c=0;c<65536;c++) {
+        uint16_t lit=runner_ambient_texel(c,pale);
+        failures+=runner_ambient_texel(c,dark)!=c || runner_ambient_texel(c,saturated)!=c;
+        failures+=(lit&0x8000)!=(c&0x8000) || ((lit==0)!=(c==0));
+    }
+    failures+=runner_ambient_texel(0x7fff,pale)!=0x7fff || runner_ambient_texel(0x8000,pale)==0x8000;
+    int pairs=0;
+    for(i=0;i<level_count;i++) if(!strcmp(levels[i]->track,"meridian.drift") ||
+        !strcmp(levels[i]->track,"shatter.split") || !strcmp(levels[i]->track,"reach.ridge") ||
+        !strcmp(levels[i]->track,"sine.gate")) for(int stage=0;stage<3;stage++) {
+        LevelFrame f={15000,20,37,0,stage};
+        static unsigned char before[sizeof fb];
+        snprintf(name,sizeof name,"%s/runner-%s-%d-before.png",dir,levels[i]->track,stage);
+        frame(levels[i],&f,2,0,name);memcpy(before,fb,sizeof fb);
+        snprintf(name,sizeof name,"%s/runner-%s-%d-after.png",dir,levels[i]->track,stage);
+        frame(levels[i],&f,3,0,name);
+        const Light *light=level_light(levels[i]);
+        int expected=stage<2 && (!strcmp(levels[i]->track,"meridian.drift") || !strcmp(levels[i]->track,"shatter.split"));
+        int changed=memcmp(before,fb,sizeof fb)!=0;
+        failures+=changed!=expected;pairs++;
+        /* Every authored fill preserves transparency, STP and white, and
+         * cannot turn any shadow channel darker. Covers every palette word. */
+        for(c=0;c<65536;c++) {
+            uint16_t lit=runner_lit_texel(c,light);
+            failures+=(lit&0x8000)!=(c&0x8000) || ((lit==0)!=(c==0));
+            for(int ch=0;ch<3;ch++) failures+=((lit>>(ch*5))&31)<((c>>(ch*5))&31);
+        }
+        failures+=runner_lit_texel(0x7fff,light)!=0x7fff || runner_lit_texel(0xffff,light)!=0xffff;
+    }
+    printf("runner lighting: 65536 palette words per stage and %d world/stage pairs, %d failures\n",pairs,failures);
+    return failures!=0;
+}
+
+static int reach_atmosphere_check(const char *dir) {
+    const Level *lv=0;
+    char name[512];FILE *csv;
+    int i,pass,s,frames=0,failures=0;
+    /* Reverse stage transitions exercise persistent lighting/table caches. */
+    static const int stages[]={0,1,2,1,0};
+    for(i=0;i<level_count;i++) if(!strcmp(levels[i]->track,"reach.ridge")) lv=levels[i];
+    if(!lv) return 1;
+    snprintf(name,sizeof name,"%s/atmosphere.csv",dir);csv=fopen(name,"w");if(!csv) return 1;
+    fprintf(csv,"stage,scroll,bytes,projections,atmosphere_primitives,failures\n");
+    visibility_enabled=1;atmosphere_check_enabled=1;
+    for(pass=0;pass<5;pass++) for(s=0;s<=lv->stages[stages[pass]].finish;s+=1024) {
+        LevelFrame f={s,20,37,0,stages[pass]};Cost c;int r,g,b,bad;
+        uint8_t expected[3];
+        atmosphere_failures=atmosphere_primitives=0;
+        lv->clear_color(&f,&r,&g,&b);expected[0]=r;expected[1]=g;expected[2]=b;
+        c=frame(lv,&f,1,0,0);
+        bad=atmosphere_failures+road_preview_atmosphere_check(expected);
+        bad+=atmosphere_primitives<20 || c.bytes>=BUFFER_LENGTH || road_preview_far_limit_hits;
+        failures+=bad;frames++;
+        fprintf(csv,"%d,%d,%zu,%ld,%d,%d\n",f.stage,s,c.bytes,c.proj,atmosphere_primitives,bad);
+        if(pass<3 && s%8192==0) {
+            snprintf(name,sizeof name,"%s/atmosphere-%d-%d.png",dir,f.stage,s);write_png(name);
+        }
+    }
+    visibility_enabled=atmosphere_check_enabled=0;
+    fclose(csv);
+    printf("Reach atmosphere: %d camera poses, %d failures\n",frames,failures);
+    return failures!=0;
+}
+
+static int compiled_mesh_check(const char *dir) {
+    static unsigned char reference[sizeof fb],candidate[sizeof fb];
+    const Level *lv=0;
+    char name[512];FILE *csv;
+    int i,s,o,stage,frames=0,failures=0,worst_pixels=0,worst_s=0,worst_unmatched=0;
+    double worst_mean=0,stage_worst[3]={0,0,0};
+    for(i=0;i<level_count;i++) if(!strcmp(levels[i]->track,"reach.ridge")) lv=levels[i];
+    if(!lv) return 1;
+    snprintf(name,sizeof name,"%s/compiled-mesh.csv",dir);csv=fopen(name,"w");if(!csv) return 1;
+    fprintf(csv,"stage,scroll,mean_delta,strong_pixels,unmatched_pixels,reference_samples,compiled_samples,reference_bytes,compiled_bytes\n");
+    for(stage=0;stage<lv->stage_count;stage++)
+    for(s=0;s<=lv->stages[stage].finish;s+=256) for(o=0;o<3;o++) {
+        LevelFrame f={s+(o==0?0:o==1?127:255),20,37,0,stage};
+        Cost a,b;unsigned long delta=0;int strong=0,unmatched=0,p;
+        path_reset();road_preview_legacy_mesh=1;
+        a=frame(lv,&f,1,0,0);memcpy(reference,fb,sizeof fb);
+        path_reset();road_preview_legacy_mesh=0;
+        b=frame(lv,&f,1,0,0);memcpy(candidate,fb,sizeof fb);
+        for(p=0;p<SCREEN_W*SCREEN_H;p++) {
+            int c,high=0;
+            for(c=0;c<3;c++) { int d=iabs(reference[p*3+c]-((unsigned char*)fb)[p*3+c]);delta+=d;if(d>24) high=1; }
+            strong+=high;
+            if(high) {
+                int dx,dy,x=p%SCREEN_W,y=p/SCREEN_W,near_ref=0,near_candidate=0;
+                for(dy=-1;dy<=1;dy++) for(dx=-1;dx<=1;dx++) {
+                    int xx=x+dx,yy=y+dy,q,match_ref=1,match_candidate=1;
+                    if(xx<0||xx>=SCREEN_W||yy<0||yy>=SCREEN_H) continue;
+                    q=(yy*SCREEN_W+xx)*3;
+                    for(c=0;c<3;c++) {
+                        if(iabs(reference[q+c]-((unsigned char*)fb)[p*3+c])>8) match_ref=0;
+                        if(iabs(((unsigned char*)fb)[q+c]-reference[p*3+c])>8) match_candidate=0;
+                    }
+                    near_ref|=match_ref;near_candidate|=match_candidate;
+                }
+                unmatched+=!near_ref||!near_candidate;
+            }
+        }
+        double mean=(double)delta/sizeof fb;
+        if(mean>worst_mean) {
+            worst_mean=mean;worst_s=f.scroll;
+            snprintf(name,sizeof name,"%s/mesh-candidate.png",dir);write_png(name);
+            memcpy(fb,reference,sizeof fb);
+            snprintf(name,sizeof name,"%s/mesh-reference.png",dir);write_png(name);
+        }
+        if(mean>=stage_worst[stage]) {
+            stage_worst[stage]=mean;
+            memcpy(fb,candidate,sizeof fb);
+            snprintf(name,sizeof name,"%s/mesh-stage%d-candidate.png",dir,stage);write_png(name);
+            memcpy(fb,reference,sizeof fb);
+            snprintf(name,sizeof name,"%s/mesh-stage%d-reference.png",dir,stage);write_png(name);
+        }
+        if(strong>worst_pixels) worst_pixels=strong;
+        if(unmatched>worst_unmatched) worst_unmatched=unmatched;
+        /* Allow at most 0.1% of the native image for residual fixed-point
+         * edge/dither differences; geometric LOD is independently checked. */
+        if(mean>0.15 || unmatched>SCREEN_W*SCREEN_H/1000 || b.bytes>=BUFFER_LENGTH) failures++;
+        fprintf(csv,"%d,%d,%.6f,%d,%d,%lu,%lu,%zu,%zu\n",stage,f.scroll,mean,strong,unmatched,a.samples,b.samples,a.bytes,b.bytes);frames++;
+    }
+    fclose(csv);road_preview_legacy_mesh=0;
+    printf("compiled mesh: %d frames, %d failures; worst mean %.6f at %d, strong pixels %d, unmatched beyond one pixel %d\n",frames,failures,worst_mean,worst_s,worst_pixels,worst_unmatched);
+    return failures!=0;
+}
+
+static int pipeline_check(const char *dir) {
+    static uint8_t reference[sizeof fb];
+    static const int offsets[]={0,127,255};
+    int i,stage,s,o,alt,failures=0,pairs=0;
+    char name[512]; FILE *csv;
+    XY p;
+    if(project(2000,170,40000,&p)!=40000 || iabs(p.x-168)>1 || iabs(p.y-72)>1) {
+        fprintf(stderr,"far GTE projection wrapped or changed scale\n"); return 1;
+    }
+    snprintf(name,sizeof name,"%s/pipeline.csv",dir);
+    csv=fopen(name,"w"); if(!csv) return 1;
+    fprintf(csv,"world,stage,track,scroll,alternate,pixel_mismatch,reference_samples,compiled_samples,reference_transforms,compiled_transforms,bytes,far_budget_exhausted\n");
+    for(i=0;i<level_count;i++) {
+        const Level *lv=levels[i];
+        int stages=lv->stage_count?lv->stage_count:1;
+        for(stage=0;stage<stages;stage++) {
+            const char *track=lv->stage_count?lv->stages[stage].track:lv->track;
+            int end=lv->stage_count?lv->stages[stage].finish:65536;
+            long old_samples=0,new_samples=0; int count=0,saved=0;
+            path_open(track);
+            for(alt=0;alt<=(path_branches()>0);alt++)
+            for(s=0;s<=end;s+=2048) for(o=0;o<3;o++) {
+                LevelFrame f={s+offsets[o],20,(s+offsets[o])/20+37,0,stage};
+                Cost a,b; int mismatch;
+                path_reset(); road_preview_legacy_surfaces=1; road_preview_disable_occlusion=1;
+                a=frame(lv,&f,1,alt,0); memcpy(reference,fb,sizeof fb);
+                path_reset(); road_preview_legacy_surfaces=0; road_preview_disable_occlusion=0;
+                road_preview_reset_haze(); road_preview_far_limit_hits=0;
+                b=frame(lv,&f,1,alt,0);
+                mismatch=memcmp(reference,fb,sizeof fb)!=0;
+                if(mismatch && !saved) {
+                    snprintf(name,sizeof name,"%s/%s-candidate.png",dir,track); write_png(name);
+                    memcpy(fb,reference,sizeof fb);
+                    snprintf(name,sizeof name,"%s/%s-reference.png",dir,track); write_png(name);
+                    saved=1;
+                }
+                if(mismatch || b.bytes>=BUFFER_LENGTH || road_preview_far_limit_hits) {
+                    if(failures<5) fprintf(stderr,"pipeline mismatch/budget: %s stage %d at %d alt %d: pixels %d, bytes %zu, far %d\n",lv->name,stage,f.scroll,alt,mismatch,b.bytes,road_preview_far_limit_hits);
+                    failures++;
+                }
+                fprintf(csv,"%s,%d,%s,%d,%d,%d,%lu,%lu,%lu,%lu,%zu,%d\n",lv->name,stage,track,f.scroll,alt,mismatch,a.samples,b.samples,a.transforms,b.transforms,b.bytes,road_preview_far_limit_hits);
+                old_samples+=a.samples;new_samples+=b.samples;count++;pairs++;
+            }
+            printf("pipeline %s: %d frame pairs, samples %ld -> %ld\n",track,count,old_samples/count,new_samples/count);
+            fflush(stdout);
+        }
+    }
+    fclose(csv);road_preview_legacy_surfaces=0;
+    printf("pipeline: %d frame pairs, %d failures\n",pairs,failures);
+    return failures!=0;
+}
+
+static int shake_check(void) {
+    static const int offsets[][2]={{1,0},{-1,1},{1,0},{-1,-1},{0,0},{0,0},{9,-9},{0,0}};
+    int failures=0;
+    for(int repeat=0;repeat<2;repeat++) for(int i=0;i<8;i++) {
+        int buffer=world_buffer(),x=offsets[i][0],y=offsets[i][1];
+        world_set_shake(x,y);world_flip();
+        failures+=last_draw_env.ofs[0]!=clamp(x,-1,1) || last_draw_env.ofs[1]!=clamp(y,-1,1);
+        failures+=last_draw_env.clip.y!=buffer*SCREEN_H || last_draw_env.clip.h!=SCREEN_H;
+        failures+=last_draw_env.clip.x!=0 || last_draw_env.clip.w!=SCREEN_W;
+    }
+    printf("shake: both framebuffer origins, bounded offsets and reset, %d failures\n",failures);
+    return failures!=0;
+}
+
 int main(int argc, char **argv) {
     static const struct { const char *tag; int scroll, speed, alt, stage; } shots[] = {
         {"run_a", 2600, 20, 0, 0}, {"run_b", 15000, 20, 0, 0}, {"run_c", 31337, 20, 0, 0},
@@ -839,6 +1253,16 @@ int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     int i, j;
     world_init();
+    if(argc>2 && !strcmp(argv[2],"--shake-check")) return shake_check();
+    if(argc>2 && !strcmp(argv[2],"--finish-gate-check")) return finish_gate_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--runner-lighting-check")) return runner_lighting_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--atmosphere-check")) return reach_atmosphere_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--mesh-check")) return compiled_mesh_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--pipeline-check")) return pipeline_check(dir);
+    if (argc > 2 && !strcmp(argv[2],"--countdown-check"))
+        return countdown_check(dir);
+    if (argc > 2 && !strcmp(argv[2],"--city-check"))
+        return city_check(dir);
     if (argc > 2 && !strcmp(argv[2],"--vesper-motion-check"))
         return vesper_motion_check();
     if (argc > 2 && !strcmp(argv[2],"--texture-self-test"))
@@ -856,13 +1280,13 @@ int main(int argc, char **argv) {
         return compare_world(dir,0);
     if (argc > 2 && !strcmp(argv[2], "--distance"))
         return distance_world(dir);
-    if (argc > 4 && !strcmp(argv[2], "--shot")) {
+    if (argc > 4 && (!strcmp(argv[2], "--shot") || !strcmp(argv[2], "--runner-shot"))) {
         LevelFrame f = {atoi(argv[4]), 20, argc > 5 ? atoi(argv[5]) : 0, 0, atoi(argv[3])};
         char path[512];
         for (i = 0; i < level_count; i++)
             if (!strcmp(levels[i]->track, getenv("RUNNER_PREVIEW_TRACK") ? getenv("RUNNER_PREVIEW_TRACK") : "sine.gate")) {
                 snprintf(path, sizeof path, "%s/shot.png", dir);
-                frame(levels[i], &f, 1, 0, path);
+                frame(levels[i], &f, !strcmp(argv[2],"--runner-shot")?3:1, 0, path);
                 return 0;
             }
         return 1;

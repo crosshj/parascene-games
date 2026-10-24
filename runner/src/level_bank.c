@@ -21,6 +21,7 @@ static const Light k_light = {
     {104, 150, 112}, /* tint */
     {88, 64, 112},   /* shadow */
     144,             /* density */
+    {0,0,0}, /* Automatic ambient fill. */
 };
 
 static const RoadStyle k_road = {
@@ -35,6 +36,8 @@ static const RoadStyle k_road = {
     &k_obstacle,
     0, {0, 0, 0},
     0, {0, 0, 0},
+    0, /* No separately drawn analytic continuation. */
+    0, {0,0,0}, /* Legacy single-color atmosphere. */
 };
 
 static void bank_clear(const LevelFrame *f, int *r, int *g, int *b) {
@@ -44,8 +47,8 @@ static void bank_clear(const LevelFrame *f, int *r, int *g, int *b) {
     *b = k_light.sky[2];
 }
 
-static const uint8_t k_gantry_post[3] = {150, 164, 154};
-static const uint8_t k_gantry_beam[3] = {116, 134, 124};
+static const uint8_t k_gantry_post[3] = {132, 140, 148};
+static const uint8_t k_gantry_beam[3] = {112, 120, 128};
 
 static void bank_draw(const LevelFrame *f) {
     road_backdrop(&k_road);

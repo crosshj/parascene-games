@@ -4,7 +4,7 @@ import unittest
 import struct
 import tempfile
 from pathlib import Path
-from bake_worlds import emit, project, schedules_for, span_ok
+from bake_worlds import emit, project, schedules_for, span_ok, outside_planes
 from check_ram import check
 from bake_tracks import analytic_straight
 from preview.visibility_report import summarize
@@ -40,6 +40,16 @@ class WorldCompilerTests(unittest.TestCase):
         self.assertEqual(seen['occluded'],1)
         self.assertEqual(seen['pixel_candidate_ranges'],[[0,128]])
         self.assertFalse(report['automatic_removal_safe'])
+
+    def test_visibility_bounds_use_common_camera_halfspaces(self):
+        bounds=self.camera+self.camera
+        self.assertEqual(outside_planes([0,170,1000],bounds),0)
+        self.assertTrue(outside_planes([-2000,170,1000],bounds)&2)
+        self.assertTrue(outside_planes([2000,170,1000],bounds)&4)
+        self.assertTrue(outside_planes([0,170,-1000],bounds)&1)
+        # Opposite sides do not share an invisible plane: a connecting face
+        # can cross the viewport and must not be merged as invisible.
+        self.assertEqual(outside_planes([-2000,170,1000],bounds)&outside_planes([2000,170,1000],bounds),0)
 
     def test_bend_is_rejected_but_straight_chord_is_kept(self):
         rings = [[[0, 170, z]] * 6 for z in [1000, 1256, 1512]]

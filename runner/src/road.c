@@ -1,13 +1,18 @@
 #include <psxgpu.h>
+#include <string.h>
 #include "world.h"
 #include "course.h"
 #include "path.h"
 #include "road.h"
 #include "profile.h"
 #include "world_mesh.h"
+#include "reach_world_data.h"
+#include "road_world_data.h"
 #ifdef RUNNER_PREVIEW
 int world_mesh_preview_legacy;
 int world_mesh_preview_depth;
+int road_preview_far_limit_hits;
+int road_preview_disable_occlusion;
 
 static void mesh_depth_color(int z, int *near, int *far) {
     static const int colors[4][3] = {{248,0,0},{248,248,0},{0,248,0},{0,0,248}};
@@ -36,9 +41,17 @@ static void mesh_depth_color(int z, int *near, int *far) {
  * road coming back stay in view. Spacing grows with depth and shrinks
  * where the road bends or changes grade; samples out of view are
  * skipped in long strides, so the cost stays under FAR_MAX samples. */
+#ifdef RUNNER_LEGACY_DISTANCE
 #define VIEW_Z 20000
 #define VIEW_S 44000
 #define FAR_MAX 48
+#else
+static int compiled_view;
+#define VIEW_Z (compiled_view ? 64000 : 20000)
+#define VIEW_S (compiled_view ? 64000 : 44000)
+#define FAR_MAX 192
+#endif
+#define FOG_Z 20000
 #define FAR_DS_MIN STEP
 #define FAR_DS_MAX (STEP * 6)
 #define FAR_DS_SKIP (STEP * 4)
@@ -65,6 +78,48 @@ static const RoadStyle *style;
 static uint8_t road_far[3];
 static int road_time;
 static int streak_overlay;
+/* Conservative opaque coverage from this frame's actual near deck. Each
+ * cell stores the first row guaranteed covered through the screen bottom.
+ * It follows branches, banks and camera motion without a sampled PVS. */
+#define OCC_CELL 8
+static int deck_cover[SCREEN_W / OCC_CELL];
+static int deck_cover_ready;
+static void cover_deck(const RoadSample *a,const RoadSample *b) {
+    int left,right,top,bottom,i,sign=0;
+    const XY *p[4]={&a->l,&a->r,&b->r,&b->l};
+    if(!a->seg->deck || b->gap || a->lz<CLIP || a->rz<CLIP || b->lz<CLIP || b->rz<CLIP ||
+        a->lz>=FAR || a->rz>=FAR || b->lz>=FAR || b->rz>=FAR) return;
+    for(i=0;i<4;i++) {
+        const XY *u=p[i],*v=p[(i+1)&3],*w=p[(i+2)&3];
+        int cross=(v->x-u->x)*(w->y-v->y)-(v->y-u->y)*(w->x-v->x);
+        if(cross && sign && ((cross>0)!=(sign>0))) return;
+        if(cross) sign=cross;
+    }
+    if(iabs(a->l.y-b->l.y)>400 || iabs(a->r.y-b->r.y)>400) return;
+    left=a->l.x>b->l.x?a->l.x:b->l.x;
+    right=a->r.x<b->r.x?a->r.x:b->r.x;
+    top=b->l.y>b->r.y?b->l.y:b->r.y;
+    bottom=a->l.y<a->r.y?a->l.y:a->r.y;
+    if(top>=bottom || left>=right) return;
+    for(i=clamp((left+OCC_CELL-1)/OCC_CELL,0,SCREEN_W/OCC_CELL);
+        i<clamp(right/OCC_CELL,0,SCREEN_W/OCC_CELL);i++)
+        if(bottom>=deck_cover[i] && top<deck_cover[i])
+            deck_cover[i]=top;
+}
+static int covered_rect(int left,int right,int top) {
+    int i,first,last;
+#ifdef RUNNER_LEGACY_DISTANCE
+    return 0;
+#endif
+#ifdef RUNNER_PREVIEW
+    if(road_preview_disable_occlusion) return 0;
+#endif
+    if(!deck_cover_ready || right<left || right<0 || left>=SCREEN_W) return 0;
+    first=clamp(left/OCC_CELL,0,SCREEN_W/OCC_CELL-1);
+    last=clamp(right/OCC_CELL,0,SCREEN_W/OCC_CELL-1);
+    for(i=first;i<=last;i++) if(top<deck_cover[i]+2) return 0;
+    return 1;
+}
 
 int road_runner_bucket(int depth_bucket) {
     return streak_overlay ? (CLIP >> OT_SHIFT) - 2 : depth_bucket;
@@ -115,8 +170,12 @@ static int mountain_h(int a) {
     return h;
 }
 
+const uint8_t *road_horizon_color(const RoadStyle *st) {
+    return st->horizon_enabled ? st->horizon : st->light->haze;
+}
+
 static void ridge_band(const int *h, int num, int den, int lift, int foot,
-                       const uint8_t *c) {
+                       const uint8_t *c, const uint8_t *foot_c) {
     int i;
     for (i = 0; i < MTN_COLS; i++) {
         XY p0, p1, p2, p3;
@@ -130,7 +189,12 @@ static void ridge_band(const int *h, int num, int den, int lift, int foot,
         p2.y = (int16_t)(foot + 18);
         p3.x = (int16_t)x1;
         p3.y = (int16_t)(foot + 18);
-        poly_f4(&p0, &p1, &p2, &p3, FAR_BUCKET, c[0], c[1], c[2], BLEND_NONE);
+        if (foot_c)
+            poly_g4(&p0,&p1,&p2,&p3,FAR_BUCKET,
+                    c[0],c[1],c[2], c[0],c[1],c[2],
+                    foot_c[0],foot_c[1],foot_c[2], foot_c[0],foot_c[1],foot_c[2],BLEND_NONE);
+        else
+            poly_f4(&p0,&p1,&p2,&p3,FAR_BUCKET,c[0],c[1],c[2],BLEND_NONE);
     }
 }
 
@@ -156,6 +220,16 @@ static void backdrop(const RoadStyle *st) {
     /* The far ridge sits deepest in the air; the near wash a little less. */
     through_air(light, st->ridge_far, light->density, far_c);
     through_air(light, st->ridge_near, light->density * 3 / 4, near_c);
+    if (st->horizon_enabled) {
+        const uint8_t *end = road_horizon_color(st);
+        for (i=0;i<3;i++) {
+            far_c[i] = end[i] + (st->ridge_far[i]-end[i])/4;
+            near_c[i] = end[i] + (st->ridge_near[i]-end[i])/3;
+        }
+        /* The lower background is the same color as extinct geometry. */
+        gradient(0,base-4,SCREEN_W,SCREEN_H,FAR_BUCKET,
+                 end[0],end[1],end[2],end[0],end[1],end[2]);
+    } else
     /* Air at the foot of the ridge, settling into the empty world below. */
     gradient(0, base - 4, SCREEN_W, 36, FAR_BUCKET,
              (near_c[0] + light->haze[0]) / 2,
@@ -164,9 +238,9 @@ static void backdrop(const RoadStyle *st) {
              light->sky[0], light->sky[1], light->sky[2]);
     for (i = 0; i <= MTN_COLS; i++)
         h[i] = mountain_h(yaw - MTN_FOV / 2 + MTN_FOV * i / MTN_COLS);
-    ridge_band(h, 1, 1, 0, base, far_c);
+    ridge_band(h, 1, 1, 0, base, far_c, st->horizon_enabled ? st->horizon : 0);
     /* Nearer, lower wash — same family, barely separated. */
-    ridge_band(h, 2, 3, 4, base, near_c);
+    ridge_band(h, 2, 3, 4, base, near_c, st->horizon_enabled ? st->horizon : 0);
 }
 
 static XY lerp_xy(XY a, XY b, int num, int den) {
@@ -229,6 +303,14 @@ static void haze_to(int *r, int *g, int *b, int z, const uint8_t *to, int cap) {
 
 static void haze_air(int *r, int *g, int *b, int z) {
     haze_to(r, g, b, z, style->light->haze, 220);
+    if (z > FAR) {
+#ifndef RUNNER_LEGACY_DISTANCE
+        int t = clamp((z - FAR) * 256 / (FOG_Z - FAR), 0, 256);
+        *r += (road_horizon_color(style)[0] - *r) * t / 256;
+        *g += (road_horizon_color(style)[1] - *g) * t / 256;
+        *b += (road_horizon_color(style)[2] - *b) * t / 256;
+#endif
+    }
 }
 
 static void haze_road(int *r, int *g, int *b, int z) {
@@ -265,8 +347,12 @@ static int view_bucket(int z) {
 
 /* Past FAR: settle on the distant asphalt, then fade into the air. */
 static void haze_far(int *r, int *g, int *b, int z) {
-    const uint8_t *haze = style->light->haze;
-    int k = clamp((z - FAR) * 160 / (VIEW_Z - FAR), 0, 160);
+    const uint8_t *haze = road_horizon_color(style);
+#ifdef RUNNER_LEGACY_DISTANCE
+    int k = clamp((z - FAR) * 160 / (FOG_Z - FAR), 0, 160);
+#else
+    int k = clamp((z - FAR) * 256 / (FOG_Z - FAR), 0, 256);
+#endif
     haze_to(r, g, b, z, road_far, 210);
     *r = *r + (haze[0] - *r) * k / 256;
     *g = *g + (haze[1] - *g) * k / 256;
@@ -277,15 +363,23 @@ static void haze_far(int *r, int *g, int *b, int z) {
  * steps of 1 << HAZE_SHIFT. The style fixes them, so they are built once
  * a style. */
 #define HAZE_SHIFT 9
-#define HAZE_N (((VIEW_Z - FAR) >> HAZE_SHIFT) + 2)
+#define HAZE_N (((FOG_Z - FAR) >> HAZE_SHIFT) + 2)
 static const RoadStyle *haze_style;
+static RoadStyle haze_style_value;
+static Light haze_light_value;
 static uint8_t haze_deck[HAZE_N][3], haze_line[HAZE_N][3], haze_crate[HAZE_N][3];
+#ifdef RUNNER_PREVIEW
+void road_preview_reset_haze(void) { haze_style = 0; }
+#endif
 
 static void haze_tables(void) {
     int i;
-    if (haze_style == style)
+    if (haze_style == style && !memcmp(&haze_style_value, style, sizeof *style) &&
+        !memcmp(&haze_light_value, style->light, sizeof *style->light))
         return;
     haze_style = style;
+    haze_style_value = *style;
+    haze_light_value = *style->light;
     for (i = 0; i < HAZE_N; i++) {
         int z = FAR + (i << HAZE_SHIFT);
         int r = style->road[0], g = style->road[1], b = style->road[2];
@@ -313,8 +407,31 @@ static void haze_tables(void) {
 }
 
 static const uint8_t *haze_at(uint8_t table[][3], int z) {
+    if (style->horizon_enabled && z >= FOG_Z)
+        return road_horizon_color(style);
     return table[clamp((z - FAR) >> HAZE_SHIFT, 0, HAZE_N - 1)];
 }
+
+#ifdef RUNNER_PREVIEW
+/* Exercise the real material shading paths, including cached table endpoints.
+ * Called after drawing a stage so a changed stage must invalidate its cache. */
+int road_preview_atmosphere_check(const uint8_t *expected) {
+    static const int depths[]={20000,20001,24000,64000};
+    static const int colors[][3]={{0,0,0},{255,255,255},{18,10,32},{78,70,84}};
+    int i,j,k,failures=0;
+    if (!style->horizon_enabled || memcmp(road_horizon_color(style),expected,3)) return 1;
+    for(i=0;i<4;i++) {
+        failures += memcmp(haze_at(haze_deck,depths[i]),expected,3)!=0;
+        failures += memcmp(haze_at(haze_line,depths[i]),expected,3)!=0;
+        for(j=0;j<4;j++) for(k=0;k<2;k++) {
+            int r=colors[j][0],g=colors[j][1],b=colors[j][2];
+            if(k) haze_far(&r,&g,&b,depths[i]); else haze_air(&r,&g,&b,depths[i]);
+            failures += r!=expected[0] || g!=expected[1] || b!=expected[2];
+        }
+    }
+    return failures;
+}
+#endif
 
 /* 1 when the quad between two samples is wholly off one side of the screen. */
 static int off_screen(const RoadSample *a, const RoadSample *b) {
@@ -390,7 +507,9 @@ static int pull_guard(int *x, int *y, int *z, int x1, int y1, int z1) {
 }
 
 static int scr128(int v, int z) {
-    return v / z * 128 + (v % z) * 128 / z;
+    /* Calls follow on_guard: coordinates are bounded by five depths,
+     * within this renderer's lookahead. The product fits signed 32 bits. */
+    return v * 128 / z;
 }
 
 /* 1 when this edge would be too long on screen to draw in one quad. */
@@ -434,6 +553,14 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
     int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
     int cn[3], cf[3], za, zb, sort, bucket;
     XY p0, p1, p2, p3;
+#ifdef RUNNER_LEGACY_SURFACES
+    int reuse=0;
+#else
+    int reuse=1;
+#endif
+#ifdef RUNNER_PREVIEW
+    reuse=!road_preview_legacy_surfaces;
+#endif
     if (outer <= inner)
         return;
     edge_out(a, side, inner, &x0, &y0, &z0);
@@ -458,11 +585,22 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
         return;
     cn[0] = rgb[0]; cn[1] = rgb[1]; cn[2] = rgb[2];
     cf[0] = rgb[0]; cf[1] = rgb[1]; cf[2] = rgb[2];
+#ifndef RUNNER_LEGACY_DISTANCE
+    if (za > FAR) haze_far(&cn[0], &cn[1], &cn[2], za);
+    else haze_road(&cn[0], &cn[1], &cn[2], za);
+    if (zb > FAR) haze_far(&cf[0], &cf[1], &cf[2], zb);
+    else haze_road(&cf[0], &cf[1], &cf[2], zb);
+#else
     haze_road(&cn[0], &cn[1], &cn[2], za);
     haze_road(&cf[0], &cf[1], &cf[2], zb);
-    project(x0, y0, z0, &p0);
+#endif
+    if(reuse && inner==0 && x0==(side<0?a->lx:a->rx) && y0==(side<0?a->ly:a->ry) && z0==(side<0?a->lz:a->rz))
+        p0=side<0?a->l:a->r;
+    else project(x0,y0,z0,&p0);
     project(x1, y1, z1, &p1);
-    project(x2, y2, z2, &p2);
+    if(reuse && inner==0 && x2==(side<0?b->lx:b->rx) && y2==(side<0?b->ly:b->ry) && z2==(side<0?b->lz:b->rz))
+        p2=side<0?b->l:b->r;
+    else project(x2,y2,z2,&p2);
     project(x3, y3, z3, &p3);
     bucket = sort >= FAR ? view_bucket(sort) : (sort >> OT_SHIFT);
     emit_piece(p0, p1, p2, p3, bucket, cn, cf, 0);
@@ -718,11 +856,49 @@ void road_panel(int s, int u0, int u1, int v0, int v1, int r, int g, int b) {
     quad(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, sortz, r, g, b);
 }
 
-void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]) {
+/* Resolve the authored finish once per track change, including previews,
+ * reverse seeks and stage transitions. Endless arcade tracks have no limit. */
+static int gate_finish(void) {
+    static const char *last_track;
+    static int finish;
+    const char *track=path_id();
+    int i,j;
+    if (track==last_track) return finish;
+    last_track=track;finish=0;
+    for(i=0;i<level_count;i++) for(j=0;j<levels[i]->stage_count;j++) {
+        const Stage *stage=&levels[i]->stages[j];
+        if(!strcmp(track,stage->track)) {
+            finish=stage->finish;
+            return finish;
+        }
+    }
+    return 0;
+}
+
+int road_scenery_gate_allowed(int s) {
+    int finish=gate_finish();
+    return !finish || s < finish-FAR;
+}
+
+static void gantry_mesh(int s, const uint8_t post[3], const uint8_t beam[3]) {
     int edge = ROAD_HALF + 8;
     road_panel(s, -edge - 36, -edge, 0, 230, post[0], post[1], post[2]);
     road_panel(s, edge, edge + 36, 0, 230, post[0], post[1], post[2]);
     road_panel(s, -edge, edge, 200, 228, beam[0], beam[1], beam[2]);
+}
+
+void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]) {
+    if (!road_scenery_gate_allowed(s)) return;
+    world_asset("scenery_gate",s,"gantry");
+    gantry_mesh(s,post,beam);
+    world_asset("unclassified",0,"mixed");
+}
+
+void road_finish_gantry(int s, const uint8_t post[3], const uint8_t beam[3]) {
+    if (!gate_finish() || s!=gate_finish()) return;
+    world_asset("finish_gate",s,"gantry");
+    gantry_mesh(s,post,beam);
+    world_asset("unclassified",0,"mixed");
 }
 
 void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3]) {
@@ -827,6 +1003,7 @@ static int sheet_hidden(int x0, int y0, int z0, int x1, int y1, int z1,
                         int x2, int y2, int z2, int x3, int y3, int z3) {
     int xs[4], ys[4], zs[4], sx, sy, i;
     int left = 1, right = 1, above = 1, below = 1;
+    int minx=0x7fffffff,maxx=-0x7fffffff,miny=0x7fffffff,deep=1;
     xs[0] = x0; ys[0] = y0; zs[0] = z0;
     xs[1] = x1; ys[1] = y1; zs[1] = z1;
     xs[2] = x2; ys[2] = y2; zs[2] = z2;
@@ -834,6 +1011,10 @@ static int sheet_hidden(int x0, int y0, int z0, int x1, int y1, int z1,
     for (i = 0; i < 4; i++) {
         if (!corner_screen(xs[i], ys[i], zs[i], &sx, &sy))
             return 0;
+        if(sx<minx) minx=sx;
+        if(sx>maxx) maxx=sx;
+        if(sy<miny) miny=sy;
+        if(zs[i]<FAR+256) deep=0;
         if (sx > -96)
             left = 0;
         if (sx < SCREEN_W + 96)
@@ -843,7 +1024,7 @@ static int sheet_hidden(int x0, int y0, int z0, int x1, int y1, int z1,
         if (sy < SCREEN_H + 96)
             below = 0;
     }
-    return left || right || above || below;
+    return left || right || above || below || (deep && covered_rect(minx-2,maxx+2,miny-2));
 }
 
 static void cloth_u(int s, int side, int out, int *u) {
@@ -856,7 +1037,8 @@ static void cloth_u(int s, int side, int out, int *u) {
     *u = side < 0 ? ul - out : ur + out;
 }
 
-int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
+#if defined(RUNNER_LEGACY_SURFACES) || defined(RUNNER_PREVIEW)
+static int cloth_legacy(int s0, int s1, int side, int out0, int v0, int out1, int v1,
                int r, int g, int b) {
     int u0, u1, reach;
     int x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
@@ -879,11 +1061,201 @@ int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
         return 1;
     if (cloth_coarse(s0, s1, x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)) {
         int mid = (s0 + s1) / 2;
-        if (!road_cloth(s0, mid, side, out0, v0, out1, v1, r, g, b))
+        if (!cloth_legacy(s0, mid, side, out0, v0, out1, v1, r, g, b))
             return 0;
-        return road_cloth(mid, s1, side, out0, v0, out1, v1, r, g, b);
+        return cloth_legacy(mid, s1, side, out0, v0, out1, v1, r, g, b);
     }
     return paint_span(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b);
+}
+#endif
+
+typedef struct {
+    int x,y,z, x1,y1,z1;
+    int sx,sy,sx1,sy1; /* exact 160-scale visibility coordinates */
+    int tx,ty,tx1,ty1; /* exact 128-scale split coordinates */
+    int guard;
+} SheetEdge;
+typedef struct { int side,out0,v0,out1,v1,r,g,b; } SheetProfile;
+#ifdef RUNNER_PREVIEW
+int road_preview_legacy_surfaces;
+#endif
+
+static void sheet_edge(int s,const SheetProfile *p,SheetEdge *e) {
+    int l=0,r=0,u0=p->out0,u1=p->out1;
+    e->sx=e->sy=e->sx1=e->sy1=0;
+    if(p->side) {
+        path_edges(s,&l,&r);
+        u0=p->side<0?l-p->out0:r+p->out0;
+        u1=p->side<0?l-p->out1:r+p->out1;
+    }
+    path_cam_pair(s,u0,p->v0,u1,p->v1,&e->x,&e->y,&e->z,&e->x1,&e->y1,&e->z1);
+    e->guard=on_guard(e->x,e->y,e->z)&&on_guard(e->x1,e->y1,e->z1);
+    if(e->z>=28) { e->tx=scr128(e->x,e->z);e->ty=scr128(e->y,e->z); }
+    if(e->z1>=28) { e->tx1=scr128(e->x1,e->z1);e->ty1=scr128(e->y1,e->z1); }
+    corner_screen(e->x,e->y,e->z,&e->sx,&e->sy);
+    corner_screen(e->x1,e->y1,e->z1,&e->sx1,&e->sy1);
+}
+
+static int sheet_cached_hidden(const SheetEdge *a,const SheetEdge *b) {
+    int left,right,top,bottom,i;
+    int x[4]={a->sx,a->sx1,b->sx,b->sx1}, y[4]={a->sy,a->sy1,b->sy,b->sy1};
+    if(a->z<48||a->z1<48||b->z<48||b->z1<48) return 0;
+    left=right=x[0];top=bottom=y[0];
+    for(i=1;i<4;i++) {
+        if(x[i]<left) left=x[i]; if(x[i]>right) right=x[i];
+        if(y[i]<top) top=y[i]; if(y[i]>bottom) bottom=y[i];
+    }
+    if(right<=-96||left>=SCREEN_W+96||bottom<=-96||top>=SCREEN_H+96) return 1;
+    return a->z>=FAR+256&&a->z1>=FAR+256&&b->z>=FAR+256&&b->z1>=FAR+256&&
+        covered_rect(left-2,right+2,top-2);
+}
+
+static int sheet_cached_coarse(int s0,int s1,const SheetEdge *a,const SheetEdge *b) {
+    if(s1-s0<=24) return 0;
+    if(a->z<28&&a->z1<28&&b->z<28&&b->z1<28) return 0;
+    if(a->z<28||a->z1<28||b->z<28||b->z1<28||!a->guard||!b->guard) return 1;
+    return iabs(a->tx-b->tx)>240||iabs(a->ty-b->ty)>240||
+        iabs(a->tx1-b->tx1)>240||iabs(a->ty1-b->ty1)>240||
+        iabs(a->tx-a->tx1)>240||iabs(a->ty-a->ty1)>240||
+        iabs(b->tx-b->tx1)>240||iabs(b->ty-b->ty1)>240;
+}
+
+/* Preserve the exact split/clip/sort decisions, but compute each new edge
+ * once. The recursive renderer previously resampled both endpoints in both
+ * children, including large amounts of geometry that was then clipped. */
+/* Homogeneous clip planes also work when a corner is behind the camera.
+ * Testing projected coordinates cannot reject those near-camera pieces and
+ * used to recurse down to tiny invisible spans before guard clipping them. */
+static int sheet_halfspace_hidden(const SheetEdge *a,const SheetEdge *b) {
+    int x[4]={a->x,a->x1,b->x,b->x1},y[4]={a->y,a->y1,b->y,b->y1};
+    int z[4]={a->z,a->z1,b->z,b->z1};
+    int i,left=1,right=1,top=1,bottom=1,behind=1;
+    for(i=0;i<4;i++) {
+        left &= x[i]*160 < -256*z[i];
+        right &= x[i]*160 > 256*z[i];
+        top &= (CAM_H-y[i])*160 < -(HORIZON_Y+96)*z[i];
+        bottom &= (CAM_H-y[i])*160 > (SCREEN_H-HORIZON_Y+96)*z[i];
+        behind &= z[i]<28;
+    }
+    return left||right||top||bottom||behind;
+}
+static int sheet_tree(int s0,int s1,const SheetProfile *p,const SheetEdge *a,const SheetEdge *b) {
+    int reach=p->out0>p->out1?p->out0:p->out1;
+    if(!scene_room()) return 0;
+    if(s1<s0+8) return 1;
+    if(p->side && (!clear_of_fork(s0,p->side,reach)||!clear_of_fork(s1,p->side,reach))) return 1;
+    if(s1-s0<=STEP && sheet_halfspace_hidden(a,b)) return 1;
+    if(sheet_cached_hidden(a,b)) return 1;
+    if(sheet_cached_coarse(s0,s1,a,b)) {
+        int mid=(s0+s1)/2;
+        SheetEdge m;
+        sheet_edge(mid,p,&m);
+        if(!sheet_tree(s0,mid,p,a,&m)) return 0;
+        return sheet_tree(mid,s1,p,&m,b);
+    }
+    return paint_span(a->x,a->y,a->z,a->x1,a->y1,a->z1,b->x,b->y,b->z,b->x1,b->y1,b->z1,p->r,p->g,p->b);
+}
+
+int road_cloth(int s0,int s1,int side,int out0,int v0,int out1,int v1,int r,int g,int b) {
+#ifdef RUNNER_LEGACY_SURFACES
+    return cloth_legacy(s0,s1,side,out0,v0,out1,v1,r,g,b);
+#else
+    SheetProfile p={side,out0,v0,out1,v1,r,g,b};
+    SheetEdge a,z;
+    static struct { uint32_t revision; int s; SheetProfile profile; SheetEdge edge; } cache[3];
+    int key=side<0?0:side>0?2:1;
+    uint32_t revision=path_view_revision();
+#ifdef RUNNER_PREVIEW
+    if(road_preview_legacy_surfaces) return cloth_legacy(s0,s1,side,out0,v0,out1,v1,r,g,b);
+#endif
+    if(!scene_room()) return 0;
+    if(s1<s0+8) return 1;
+    if(cache[key].revision==revision && cache[key].s==s0 &&
+       cache[key].profile.side==side && cache[key].profile.out0==out0 && cache[key].profile.v0==v0 &&
+       cache[key].profile.out1==out1 && cache[key].profile.v1==v1)
+        a=cache[key].edge;
+    else sheet_edge(s0,&p,&a);
+    sheet_edge(s1,&p,&z);
+    cache[key].revision=revision; cache[key].s=s1; cache[key].profile=p; cache[key].edge=z;
+    return sheet_tree(s0,s1,&p,&a,&z);
+#endif
+}
+
+/* Resident meshes use distance snapshots: no per-frame path sampling or
+ * LOD decisions for their far geometry. Near sheets retain normal clipping. */
+#ifdef RUNNER_PREVIEW
+int road_preview_legacy_mesh;
+#endif
+static const WorldMesh *compiled_walls(void) {
+#ifdef RUNNER_PREVIEW
+    if(road_preview_legacy_mesh) return 0;
+#endif
+#ifndef RUNNER_LEGACY_SURFACES
+    unsigned i;
+    for(i=0;i<WORLD_MESH_COUNT;i++)
+        if(!strcmp(path_id(),world_meshes[i].track)) return &world_meshes[i];
+#endif
+    return 0;
+}
+int road_compiled_walls_start(int scroll) {
+    const WorldMesh *m=compiled_walls();
+    const WorldSchedule *q;
+    int band=scroll/STEP,base,i;
+    if(!m || scroll<0 || band>=m->schedule_count) return -1;
+    q=&m->schedules[band];base=band?band-1:0;
+    for(i=0;i<q->count;i++) {
+        int s=(base+m->indices[q->first+i])*STEP;
+        if(s>=scroll+m->near_distance) return s;
+    }
+    return -1;
+}
+typedef struct { int x,y,z; XY screen; } MeshPoint;
+typedef struct { MeshPoint p[4]; } MeshWallRing;
+static void mesh_wall_ring(const WorldRing *r,MeshWallRing *out) {
+    static const int corners[4]={0,1,5,4};
+    int k;
+    PROF_N(PN_WORLD_RING);
+    for(k=0;k<4;k++) {
+        int j=corners[k];
+        MeshPoint *p=&out->p[k];
+        path_transform(r->origin.x+(j?r->offset[j-1][0]:0),
+                       r->origin.y+(j?r->offset[j-1][1]:0),
+                       r->origin.z+(j?r->offset[j-1][2]:0),&p->x,&p->y,&p->z);
+        if(on_guard(p->x,p->y,p->z)) project(p->x,p->y,p->z,&p->screen);
+    }
+}
+void road_compiled_walls(int scroll,int start,int r,int g,int b) {
+    const WorldMesh *m=compiled_walls();
+    const WorldSchedule *q;
+    MeshWallRing a,z;
+    int band=scroll/STEP,base,i,have=0;
+    if(!m || start<0 || scroll<0 || band>=m->schedule_count) return;
+    q=&m->schedules[band];base=band?band-1:0;
+    for(i=0;i<q->count;i++) {
+        int index=base+m->indices[q->first+i],side;
+        if(index*STEP<start) continue;
+        if(!scene_room()) return;
+        mesh_wall_ring(&m->rings[index],&z);
+        if(have) for(side=0;side<4;side+=2) {
+            const MeshPoint *p=&a.p[side],*t=&a.p[side+1],*u=&z.p[side],*v=&z.p[side+1];
+            int sort=(u->z+v->z)/2;
+            int cn[3]={r,g,b},cf[3]={r,g,b};
+            if(sort>=VIEW_Z) continue;
+            if(!on_guard(p->x,p->y,p->z)||!on_guard(t->x,t->y,t->z)||
+               !on_guard(u->x,u->y,u->z)||!on_guard(v->x,v->y,v->z)) {
+                paint_span(p->x,p->y,p->z,t->x,t->y,t->z,u->x,u->y,u->z,v->x,v->y,v->z,r,g,b);
+                continue;
+            }
+            haze_air(&cn[0],&cn[1],&cn[2],(p->z+t->z)/2);
+            haze_air(&cf[0],&cf[1],&cf[2],sort);
+#ifdef RUNNER_PREVIEW
+            mesh_depth_color(sort,cn,cf);
+#endif
+            PROF_N(PN_WORLD_SPAN);
+            emit_piece(p->screen,t->screen,u->screen,v->screen,view_bucket(sort),cn,cf,0);
+        }
+        a=z;have=1;
+    }
 }
 
 int road_lintel(int s0, int s1, int out, int v, int r, int g, int b) {
@@ -1206,6 +1578,26 @@ static void far_strip(const RoadSample *a, const RoadSample *b) {
         return;
     if (off_screen(a, b))
         return;
+    if(a->lz>FAR+256 && a->rz>FAR+256 && b->lz>FAR+256 && b->rz>FAR+256) {
+        int outside=style->ground>style->shoulder?style->ground:style->shoulder;
+        XY p[4]={a->l,a->r,b->l,b->r};
+        int left,right,top,j,deep=1;
+        if(outside>0) for(j=0;j<4;j++) {
+            const RoadSample *ring=j<2?a:b;
+            int side=(j&1)?1:-1,room=side<0?ring->room_l:ring->room_r;
+            int x,y,z;
+            edge_out(ring,side,room<outside?room:outside,&x,&y,&z);
+            if(z<FAR+256) deep=0;
+            project(x,y,z,&p[j]);
+        }
+        left=right=p[0].x;top=p[0].y;
+        for(j=1;j<4;j++) {
+            if(p[j].y<top) top=p[j].y;
+            if(p[j].x<left) left=p[j].x;
+            if(p[j].x>right) right=p[j].x;
+        }
+        if(deep && covered_rect(left-2,right+2,top-2)) return;
+    }
     za = (a->lz + a->rz) / 2;
     zb = (b->lz + b->rz) / 2;
     sort = za > zb ? za : zb;
@@ -1217,6 +1609,29 @@ static void far_strip(const RoadSample *a, const RoadSample *b) {
     }
     if (za >= VIEW_Z && zb >= VIEW_Z)
         return;
+    /* Once every road material has reached the common fog endpoint,
+     * preserve the corridor silhouette with one face. Dividers, curbs,
+     * shoulder and floor have no remaining color contrast to represent. */
+    if (za >= FOG_Z && zb >= FOG_Z) {
+        int outside=style->ground>style->shoulder?style->ground:style->shoulder;
+        int l=outside, r=outside, x,y,z;
+        XY al=a->l,ar=a->r,bl=b->l,br=b->r;
+        const uint8_t *fog=road_horizon_color(style);
+        if(a->room_l<l) l=a->room_l;
+        if(b->room_l<l) l=b->room_l;
+        if(a->room_r<r) r=a->room_r;
+        if(b->room_r<r) r=b->room_r;
+        if(l>0) {
+            edge_out(a,-1,l,&x,&y,&z); project(x,y,z,&al);
+            edge_out(b,-1,l,&x,&y,&z); project(x,y,z,&bl);
+        }
+        if(r>0) {
+            edge_out(a,1,r,&x,&y,&z); project(x,y,z,&ar);
+            edge_out(b,1,r,&x,&y,&z); project(x,y,z,&br);
+        }
+        poly_f4(&al,&ar,&bl,&br,view_bucket(sort),fog[0],fog[1],fog[2],BLEND_NONE);
+        return;
+    }
     edge_lines(a, b, sort);
     c0 = haze_at(haze_deck, za);
     c1 = haze_at(haze_deck, zb);
@@ -1272,7 +1687,7 @@ static int far_step(int s, const RoadSample *p, int cz, int per) {
  * VIEW_S of track, short of a lap, and not past VIEW_Z. Steps stay
  * `step` beside the camera and grow with depth, so a wall meets the
  * road at the horizon without a quad per near-sized slice. */
-int road_span(int s0, int scroll, int step, int reach, int *s1) {
+int road_span(int s0, int scroll, int step, int reach, int height, int *s1) {
     int lap, end, x, y, z, ds, clear, jump;
     const PathSeg *seg;
     if (step < 8)
@@ -1286,6 +1701,20 @@ int road_span(int s0, int scroll, int step, int reach, int *s1) {
     if (s0 >= end)
         return 0;
     path_cam(s0, 0, 0, &x, &y, &z);
+    /* Test the entire cross-section before the near/far split. Negative
+     * depth used to enter the detailed near loop, so a long view spent
+     * most of its CPU rebuilding sheets behind the camera. The envelope
+     * includes wall height as well as width. Stop skips at topology cuts. */
+    clear = path_view_clear(s0, reach + height, VIEW_Z);
+    if (clear >= step * 2) {
+        int cut;
+        jump = clear / 2;
+        if (jump > SKIP_MAX) jump = SKIP_MAX;
+        if (s0 + jump > end) jump = end - s0;
+        cut = path_first_cut(s0 / STEP + 1, (s0 + jump) / STEP);
+        if (cut >= 0) jump = cut * STEP - s0;
+        if (jump >= 8) { *s1 = s0 + jump; return 2; }
+    }
     /* Beside the camera, including a sheet that starts just behind it.
      * Skipping here would drop the wall next to the runner. Further
      * along, the sheet grows. A bend keeps the short step, and a sheet
@@ -1315,27 +1744,11 @@ int road_span(int s0, int scroll, int step, int reach, int *s1) {
         *s1 = s0 + ds;
         return 1;
     }
-    if (z >= VIEW_Z)
-        return 0;
-    clear = path_view_clear(s0, reach, VIEW_Z);
-    if (clear > 0) {
-        jump = clear < step ? step : clear;
-        if (jump > SKIP_MAX)
-            jump = SKIP_MAX;
-        if (s0 + jump > end)
-            jump = end - s0;
-        if (jump >= 8 && (clear >= jump || path_view_clear(s0 + jump, reach, VIEW_Z) > 0)) {
-            *s1 = s0 + jump;
-            return 2;
-        }
-    }
     ds = z / 5;
     if (ds < step)
         ds = step;
     if (ds > step * 8)
         ds = step * 8;
-    if (VIEW_Z - z < ds)
-        ds = VIEW_Z - z;
     seg = path_at(s0);
     if (seg) {
         int guard = 0;
@@ -1405,8 +1818,96 @@ static void far_crate(int s, int u, const RoadSample *a, const RoadSample *b) {
     poly_f4(&p0, &p1, &p2, &p3, view_bucket(z0) - 1, c[0], c[1], c[2], BLEND_NONE);
 }
 
+typedef struct { MeshPoint p[6]; RoadSample road; } MeshRoadRing;
+static void mesh_road_ring(const WorldRing *r,int s,MeshRoadRing *out) {
+    int k,ul,ur;
+    RoadSample *q=&out->road;
+    for(k=0;k<6;k++) {
+        MeshPoint *p=&out->p[k];
+        path_transform(r->origin.x+(k?r->offset[k-1][0]:0),
+                       r->origin.y+(k?r->offset[k-1][1]:0),
+                       r->origin.z+(k?r->offset[k-1][2]:0),&p->x,&p->y,&p->z);
+        project(p->x,p->y,p->z,&p->screen);
+    }
+    path_edges(s,&ul,&ur);
+    q->s=s;q->seg=path_at(s);q->ul=ul;q->w=ur-ul;q->gap=0;
+    q->l=out->p[2].screen;q->r=out->p[3].screen;
+    q->lx=out->p[2].x;q->ly=out->p[2].y;q->lz=out->p[2].z;
+    q->rx=out->p[3].x;q->ry=out->p[3].y;q->rz=out->p[3].z;
+    q->kl=q->kr=4096;q->room_l=q->room_r=8000;
+}
+static void mesh_road_strip(const MeshRoadRing *a,const MeshRoadRing *b) {
+    int strip,za=(a->road.lz+a->road.rz)/2,zb=(b->road.lz+b->road.rz)/2;
+    int sort=za>zb?za:zb;
+    if(sort>=VIEW_Z || sort<CLIP) return;
+    /* At the common fog endpoint the five material strips are identical.
+     * Submit their outer silhouette once, as the procedural far tier does. */
+    if(za>=FOG_Z && zb>=FOG_Z) {
+        const uint8_t *fog=road_horizon_color(style);
+        poly_f4(&a->p[0].screen,&a->p[5].screen,&b->p[0].screen,&b->p[5].screen,
+                view_bucket(sort),fog[0],fog[1],fog[2],BLEND_NONE);
+        return;
+    }
+    for(strip=0;strip<5;strip++) {
+        const MeshPoint *p=&a->p[strip],*q=&a->p[strip+1],*u=&b->p[strip],*v=&b->p[strip+1];
+        int cn[3],cf[3],k;
+        const uint8_t *color=strip==2?style->road:(strip==1||strip==3)?style->shoulder_c:style->ground_c;
+        if(p->z<CLIP||q->z<CLIP||u->z<CLIP||v->z<CLIP) {
+            far_strip(&a->road,&b->road);return;
+        }
+        if(strip==2) {
+            const uint8_t *n=haze_at(haze_deck,za),*f=haze_at(haze_deck,zb);
+            for(k=0;k<3;k++) {cn[k]=n[k];cf[k]=f[k];}
+        } else {
+            for(k=0;k<3;k++) cn[k]=cf[k]=color[k];
+            haze_far(&cn[0],&cn[1],&cn[2],(p->z+q->z)/2);
+            haze_far(&cf[0],&cf[1],&cf[2],(u->z+v->z)/2);
+        }
+        emit_piece(p->screen,q->screen,u->screen,v->screen,view_bucket(sort),cn,cf,0);
+    }
+    edge_lines(&a->road,&b->road,sort);
+}
+static int compiled_far_road(const RoadSample *seam,int scroll) {
+#ifndef RUNNER_LEGACY_SURFACES
+    const WorldMesh *m=0;const WorldSchedule *q;
+    MeshRoadRing ring[128];
+    int band=scroll/STEP,base,i,n=0,k;
+#ifdef RUNNER_PREVIEW
+    if(road_preview_legacy_mesh) return 0;
+#endif
+    if(scroll<0 || style->ground!=road_world_profile[0][1] || style->shoulder!=road_world_profile[1][1]) return 0;
+    for(i=0;i<(int)ROAD_WORLD_MESH_COUNT;i++) if(!strcmp(path_id(),road_world_meshes[i].track)) m=&road_world_meshes[i];
+    if(!m||band>=m->schedule_count) return 0;
+    q=&m->schedules[band];base=band?band-1:0;
+    if(q->count>128) return 0;
+    for(i=0;i<q->count;i++) {
+        int index=base+m->indices[q->first+i];
+        if(index*STEP<=seam->s) continue;
+        mesh_road_ring(&m->rings[index],index*STEP,&ring[n++]);
+    }
+    if(!n) return 0;
+    for(i=n-2;i>=0;i--) mesh_road_strip(&ring[i],&ring[i+1]);
+    far_strip(seam,&ring[0].road);
+    if(!style->obstacle) return 1;
+    k=0;
+    for(band=(seam->s+STEP/2)/STEP;band<=ring[n-1].road.s/STEP;band++) {
+        int os=band*STEP+STEP/2;
+        const RoadSample *a,*b;
+        if(os<=seam->s||!path_may_crate(band)) continue;
+        while(k<n-1 && ring[k].road.s<os) k++;
+        a=k?&ring[k-1].road:seam;b=&ring[k].road;
+        if((a->lz+a->rz)/2>=CRATE_Z) continue;
+        if(has_obstacle(band)) far_crate(os,obstacle_u(band),a,b);
+    }
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 /* Beyond the near ring: coarse deck out to VIEW_Z, and its crates. */
 static void far_tier(const RoadSample *seam, int scroll) {
+    if(compiled_far_road(seam,scroll)) return;
     RoadSample ring[FAR_MAX + 1];
     int lap = path_lap();
     int s_end = scroll + VIEW_S;
@@ -1425,6 +1926,7 @@ static void far_tier(const RoadSample *seam, int scroll) {
             end = 0;
         } else {
             int cz = (p->lz + p->rz) / 2;
+            if(style->analytic_continuation && path_is_straight() && cz>=FOG_Z) break;
             if (on_screen(p, cz))
                 s = next_s(s, far_step(p->s, p, cz, 5), &end);
             else
@@ -1439,6 +1941,11 @@ static void far_tier(const RoadSample *seam, int scroll) {
         ring[n].gap = gap;
         n++;
     }
+#ifdef RUNNER_PREVIEW
+    if (s < s_end && on_screen(&ring[n-1], (ring[n-1].lz+ring[n-1].rz)/2) &&
+        (ring[n-1].lz+ring[n-1].rz)/2 < FOG_Z)
+        road_preview_far_limit_hits++;
+#endif
 #ifdef RUNNER_PROFILE
     prof_ticks[PF_F_SAMPLE] += (prof_now() - prof_t0_) & 0xFFFF;
     prof_t0_ = prof_now();
@@ -1609,8 +2116,16 @@ static void branches_draw(int scroll) {
 static void route_draw(const RoadStyle *st, const LevelFrame *f);
 
 void road_draw(const RoadStyle *st, const LevelFrame *f) {
+    int i;
+    deck_cover_ready=0;
+    for(i=0;i<SCREEN_W/OCC_CELL;i++) deck_cover[i]=SCREEN_H;
     streak_overlay = 0;
     style = st;
+#ifndef RUNNER_LEGACY_DISTANCE
+    compiled_view = 0;
+    for(i=0;i<(int)WORLD_MESH_COUNT;i++)
+        if(!strcmp(path_id(),world_meshes[i].track)) compiled_view=1;
+#endif
     road_time = f->time;
     through_air(st->light, st->road_far, st->light->density, road_far);
     haze_tables();
@@ -1628,7 +2143,7 @@ void road_to_vanishing_point(int scroll) {
     b.x = SCREEN_W/2+ur*(SCREEN_W/2)/FAR;
     a.y = b.y = HORIZON_Y+CAM_H*(SCREEN_W/2)/FAR;
     near = haze_at(haze_deck,FAR);
-    end = style->light->haze;
+    end = road_horizon_color(style);
     /* At subpixel width the continuation becomes one native pixel, rather
      * than a zero-area tip that the rasterizer cannot cover. */
     poly_g4(&a,&b,&vp,&pixel_end,OT_LENGTH-3,
@@ -1680,6 +2195,12 @@ static void route_draw(const RoadStyle *st, const LevelFrame *f) {
     prof_t0_ = prof_now();
 #endif
 
+    /* Compiled meshes already have their visibility lists. Their near
+     * remainder cannot use the deep-sheet occlusion mask. */
+    if(!compiled_walls()) {
+        for (i=0;i<n-1;i++) cover_deck(&ring[i],&ring[i+1]);
+        deck_cover_ready=1;
+    }
     for (i = n - 2; i >= 0; i--) {
         const PathSeg *seg = ring[i].seg;
         int zb = (ring[i + 1].lz + ring[i + 1].rz) / 2;
@@ -1702,7 +2223,7 @@ static void route_draw(const RoadStyle *st, const LevelFrame *f) {
 
     if (n < 2)
         return;
-    PROF(PF_R_FAR, far_tier(&ring[n - 1], scroll));
+    PROF_LONG(PF_R_FAR, far_tier(&ring[n - 1], scroll));
 #ifdef RUNNER_PROFILE
     prof_t0_ = prof_now();
 #endif
@@ -1762,70 +2283,141 @@ void road_bench(const RoadStyle *st) {
 }
 #endif
 
-typedef struct { int x,y,z,u,v; } FacadeVertex;
-static FacadeVertex facade_mid(FacadeVertex a,FacadeVertex b) {
-    FacadeVertex m={(a.x+b.x)/2,(a.y+b.y)/2,(a.z+b.z)/2,(a.u+b.u)/2,(a.v+b.v)/2};
-    return m;
+/* Keep the mass cheap. Cross-sections are shared by both walls and windows;
+ * only the distant step grows. Curves/banks still come from the real path. */
+typedef struct { int x,y,z; } CityPoint;
+typedef struct { CityPoint p[4]; } CityRing;
+static void city_ring(int s,int outside,int height,CityRing *a) {
+    int l,r;
+    path_edges(s,&l,&r);
+    path_cam_lr(s,l-outside,r+outside,0,&a->p[0].x,&a->p[0].y,&a->p[0].z,
+                &a->p[2].x,&a->p[2].y,&a->p[2].z);
+    path_cam_lr(s,l-outside,r+outside,height,&a->p[1].x,&a->p[1].y,&a->p[1].z,
+                &a->p[3].x,&a->p[3].y,&a->p[3].z);
 }
-static void facade_emit(FacadeVertex *a,uint16_t page,uint16_t clut,int depth) {
-    int i,t,sort;
-    XY p[4],uv[4];
-    if (!scene_room() || sheet_hidden(a[0].x,a[0].y,a[0].z,a[1].x,a[1].y,a[1].z,
-        a[2].x,a[2].y,a[2].z,a[3].x,a[3].y,a[3].z)) return;
-    for (i=0;i<4;i++) {
-        FacadeVertex *b=&a[i^2];
-        t=pull_guard(&a[i].x,&a[i].y,&a[i].z,b->x,b->y,b->z);
-        a[i].u=lerp4096(a[i].u,b->u,t); a[i].v=lerp4096(a[i].v,b->v,t);
-    }
-    for(i=0;i<4;i++) if(!on_guard(a[i].x,a[i].y,a[i].z)) return;
-    if (depth<10) {
-        int vertical=span_long(a[0].x,a[0].y,a[0].z,a[1].x,a[1].y,a[1].z) ||
-                     span_long(a[2].x,a[2].y,a[2].z,a[3].x,a[3].y,a[3].z);
-        int along=span_long(a[0].x,a[0].y,a[0].z,a[2].x,a[2].y,a[2].z) ||
-                  span_long(a[1].x,a[1].y,a[1].z,a[3].x,a[3].y,a[3].z) ||
-                  a[2].z*4>5*a[0].z || a[0].z*4>5*a[2].z;
-        /* PS1 textures are affine. Tall unsplit quads shear a square window
-         * across their diagonal; bound vertical spans when depth varies. */
-        if (iabs(a[2].z-a[0].z)*16 > a[0].z) {
-            vertical |= iabs(scr128(a[0].y,a[0].z)-scr128(a[1].y,a[1].z))>32 ||
-                        iabs(scr128(a[2].y,a[2].z)-scr128(a[3].y,a[3].z))>32;
-        }
-        if (vertical || along) {
-            FacadeVertex b[4],c[4];
-            if(vertical) {
-                b[0]=a[0]; b[1]=facade_mid(a[0],a[1]); b[2]=a[2]; b[3]=facade_mid(a[2],a[3]);
-                c[0]=b[1]; c[1]=a[1]; c[2]=b[3]; c[3]=a[3];
-            } else {
-                b[0]=a[0]; b[1]=a[1]; b[2]=facade_mid(a[0],a[2]); b[3]=facade_mid(a[1],a[3]);
-                c[0]=b[2]; c[1]=b[3]; c[2]=a[2]; c[3]=a[3];
+static CityPoint city_lerp(CityPoint a,CityPoint b,int t) {
+    CityPoint p={lerp4096(a.x,b.x,t),lerp4096(a.y,b.y,t),lerp4096(a.z,b.z,t)};
+    return p;
+}
+static unsigned city_hash(unsigned n) {
+    n^=n>>16; n*=0x7feb352du; n^=n>>15; n*=0x846ca68bu; return n^(n>>16);
+}
+static void city_windows(const CityRing *a,const CityRing *b,int side,int s,int next,int scroll,int bucket) {
+    int col,row;
+    for(col=s;col<next;col+=128) {
+        int ahead=col-scroll;
+        /* Keep stable world-space samples, with fewer columns/floors once
+         * many windows share a pixel. No additional path sampling. */
+        int stride=ahead<3600?128:ahead<8000?256:512;
+        int row_step=ahead<8000?1:2;
+        if(col%stride) continue;
+        int t=(col+64-s)*4096/(next-s);
+        CityPoint foot=city_lerp(a->p[side],b->p[side],t);
+        CityPoint top=city_lerp(a->p[side+1],b->p[side+1],t);
+        for(row=0;row<16;row+=row_step) {
+            unsigned h=city_hash((unsigned)(col/128)*97u+(unsigned)row*7919u+(unsigned)side*1013u);
+            CityPoint p; XY c,q[4]; int size,r,g,bl,k;
+            if(h%10>=3) continue;
+            p=city_lerp(foot,top,192+row*240);
+            if(p.z<CLIP || p.z>VIEW_Z) continue;
+            /* Reject subpixel/offscreen lights before GTE work. Window lights
+             * are small square impostors, never stretched affine textures. */
+            size=clamp(3200/p.z,1,5);
+            if(p.x*160 < (-164)*p.z || p.x*160 > 164*p.z ||
+               (CAM_H-p.y)*160 < -76*p.z || (CAM_H-p.y)*160 > 172*p.z) continue;
+            project(p.x,p.y,p.z,&c);
+            q[0]=(XY){c.x-size/2,c.y-size/2}; q[1]=(XY){q[0].x+size,q[0].y};
+            q[2]=(XY){q[0].x,q[0].y+size}; q[3]=(XY){q[1].x,q[2].y};
+            k=p.z<3600 ? clamp(256-p.z*192/3600,64,256) : 64*6000/(p.z+2400);
+            r=((h&16)?216:64)*k/256; g=((h&16)?168:184)*k/256; bl=((h&16)?72:216)*k/256;
+            if(p.z>=2400) {
+                /* Emission fades into the hazed wall, not below its brightness. */
+                int wr=12,wg=16,wb=28;
+                haze_air(&wr,&wg,&wb,p.z);
+                int ambient=clamp((p.z-2400)*256/1200,0,256);
+                r+=wr*ambient/256;g+=wg*ambient/256;bl+=wb*ambient/256;
             }
-            facade_emit(b,page,clut,depth+1); facade_emit(c,page,clut,depth+1); return;
+            world_asset("city_windows",side+(p.z<3600?0:p.z<8000?4:8),p.z<3600?"near":p.z<8000?"mid":"far");
+            if(size==1) point_f1(c,bucket,r,g,bl);
+            else poly_f4v(q,bucket,r,g,bl,BLEND_NONE);
         }
     }
-    for(i=0;i<4;i++) {
-        project(a[i].x,a[i].y,a[i].z,&p[i]);
-        uv[i].x=a[i].u>>6; uv[i].y=a[i].v>>6;
-    }
-    sort=(a[2].z+a[3].z)/2;
-    if(sort>=VIEW_Z) return;
-    poly_tex4(p,uv,view_bucket(sort),128,page,clut);
 }
-void road_facade(int s0,int s1,int side,int out,int height,
-                 int u,int v,int size,uint16_t page,uint16_t clut) {
-    int s,i;
-    if (!clear_of_fork(s0,side,out) || !clear_of_fork(s1,side,out)) return;
-    /* Follow the curved/banked track; subsequent affine subdivision reuses
-     * these camera-space vertices, without any further path sampling. */
-    for(s=s0;s<s1;s+=160) {
-        int end=s+160<s1 ? s+160 : s1;
-        FacadeVertex a[4];
-        for(i=0;i<4;i++) {
-            int at=i<2 ? s : end, lateral;
-            cloth_u(at,side,out,&lateral);
-            path_cam(at,lateral,(i&1)?height:0,&a[i].x,&a[i].y,&a[i].z);
-            a[i].u=(u<<6)+(at-s0)*((size-1)<<6)/(s1-s0);
-            a[i].v=((i&1)?v:v+size-1)<<6;
+/* Two-pixel guard band avoids a clear scanline from fixed-point rounding. */
+static int city_plane(CityPoint p,int plane) {
+    switch(plane) {
+    case 0:return p.z-CLIP;
+    case 1:return 80*p.x+81*p.z;
+    case 2:return 81*p.z-80*p.x;
+    case 3:return 37*p.z-80*(p.y-CAM_H);
+    default:return 17*p.z+16*(p.y-CAM_H);
+    }
+}
+/* Clip the enclosure before projection. Large near walls must not be dropped
+ * by the GPU's polygon-size limits: they are the city's opaque shell. */
+static void city_shell(CityPoint p,CityPoint q,CityPoint r,CityPoint t,int bucket,int tint) {
+    CityPoint a[12]={p,q,t,r},b[12];
+    XY xy[12]; int colors[12][3];
+    int n=4,plane,i;
+    for(plane=0;plane<5 && n;plane++) {
+        int count=0;
+        CityPoint prev=a[n-1]; int dp=city_plane(prev,plane);
+        for(i=0;i<n;i++) {
+            CityPoint cur=a[i]; int dc=city_plane(cur,plane);
+            if((dp<0)!=(dc<0)) {
+                int k=(int)((int64_t)dp*4096/(dp-dc));
+                b[count++]=city_lerp(prev,cur,k);
+            }
+            if(dc>=0) b[count++]=cur;
+            prev=cur;dp=dc;
         }
-        facade_emit(a,page,clut,0);
+        n=count;
+        for(i=0;i<n;i++) a[i]=b[i];
+    }
+    if(n<3) return;
+    for(i=0;i<n;i++) {
+        colors[i][0]=10+tint;colors[i][1]=14+tint;colors[i][2]=24+tint;
+        haze_air(&colors[i][0],&colors[i][1],&colors[i][2],a[i].z);
+        project(a[i].x,a[i].y,a[i].z,&xy[i]);
+    }
+    for(i=1;i<n-1;i++) {
+        int *c=colors[0],*d=colors[i],*e=colors[i+1];
+        poly_g4(&xy[0],&xy[i],&xy[i+1],&xy[i+1],bucket,
+            c[0],c[1],c[2],d[0],d[1],d[2],e[0],e[1],e[2],e[0],e[1],e[2],BLEND_NONE);
+    }
+}
+void road_city_canyon(int scroll,int outside,int height,const uint32_t *runs,int count) {
+    CityRing a,b;
+    int s=scroll/256*256, end=scroll+20000;
+    city_ring(s,outside,height,&a);
+    for(;s<end;) {
+        int ahead=s-scroll, step=ahead<4096?256:ahead<8192?512:1024;
+        int next=(s/step+1)*step,side;
+        int band=s/256;
+        if(band>=0 && band<count && runs[band]>(unsigned)next) {
+            int limit=ahead<4096 ? 2048 : 8192;
+            next=(s/limit+1)*limit;
+            if(next>(int)runs[band]) next=runs[band];
+        }
+        if(next>end) next=end;
+        city_ring(next,outside,height,&b);
+        for(side=0;side<4;side+=2) {
+            CityRing wa=a,wb=b;
+            unsigned building=city_hash((unsigned)(s/2048)+(unsigned)side*101u);
+            int scale=ahead<4096 ? 3276+(building%3)*820 : 4096;
+            CityPoint p=a.p[side],q=city_lerp(p,a.p[side+1],scale);
+            CityPoint r=b.p[side],t=city_lerp(r,b.p[side+1],scale);
+            int sort=(r.z+t.z)/2, bucket=view_bucket(sort);
+            if(sort<CLIP || sheet_hidden(p.x,p.y,p.z,q.x,q.y,q.z,r.x,r.y,r.z,t.x,t.y,t.z)) continue;
+            world_asset("shell_city",side,"shaded_shell");
+            wa.p[side+1]=q;wb.p[side+1]=t;
+            /* In the same bucket, submit lights first so the opaque mass is
+             * drawn behind them. Later foreground spans occlude both. */
+            city_windows(&wa,&wb,side,s,next,scroll,bucket);
+            world_asset("shell_city",side,"shaded_shell");
+            city_shell(p,q,r,t,bucket,1+(building&3));
+        }
+        a=b; s=next;
+        if(!scene_room()) break;
     }
 }

@@ -2,8 +2,8 @@
 """Compile static world geometry and conservative, distance-indexed LOD lists.
 
 The host sampler uses path.c, not a second implementation of the track camera.
-Only this finite, unbranched prototype is supported; other tracks retain their
-existing renderer. The output is resident C data, not a streaming/file ABI.
+Finite, continuous, unbranched tracks are supported; other tracks retain their
+existing renderer. Cross-sections and LOD policy come from the manifest. The output is resident C data, not a streaming/file ABI.
 """
 import argparse
 import hashlib
@@ -47,15 +47,53 @@ def span_ok(rings, a, b, cameras, error):
     return True
 
 
-def schedules_for(rings, cameras, bands, cfg):
-    schedules, indices, levels = [], [], [0] * 4
+def camera_interval(point, bounds, axis):
+    """Conservative transform over every integer camera pose in a band."""
+    lo=hi=0
+    for component in range(3):
+        d0,d1=point[component]-bounds[12+component],point[component]-bounds[component]
+        index=3+axis*3+component
+        f0,f1=bounds[index],bounds[12+index]
+        products=(d0*f0,d0*f1,d1*f0,d1*f1)
+        lo+=min(products);hi+=max(products)
+    return lo/4096-32,hi/4096+32
+
+
+def outside_planes(point,bounds):
+    x0,x1=camera_interval(point,bounds,0)
+    y0,y1=camera_interval(point,bounds,1)
+    z0,z1=camera_interval(point,bounds,2)
+    return (int(z1<0) | int(x1*160+256*z1<0)<<1 |
+            int(-x0*160+256*z1<0)<<2 | int((170-y0)*160+168*z1<0)<<3 |
+            int((y1-170)*160+264*z1<0)<<4)
+
+
+def schedules_for(rings, cameras, bands, cfg, camera_bounds=None):
+    schedules, indices, levels = [], [], [0] * 7
     step = cfg['step']
     ahead = cfg['lookahead'] // step
     for band in range(bands):
         poses = cameras[band * 2:band * 2 + 3]
         a, end = max(0, band - 1), band + ahead
         sequence = [a]
+        hidden=[0]*len(rings)
+        if camera_bounds is not None:
+            for index in range(a,end+1):
+                mask=31
+                for p in rings[index]: mask &= outside_planes(p,camera_bounds[band])
+                hidden[index]=mask
         while a < end:
+            # A common outside half-space contains the entire fine mesh
+            # and its chord for every camera pose, so merging cannot expose it.
+            if hidden[a]:
+                mask=hidden[a];hidden_end=a
+                for index in range(a+1,min(a+max(cfg['lod_strides']),end)+1):
+                    mask &= hidden[index]
+                    if not mask: break
+                    hidden_end=index
+                if hidden_end>a+1:
+                    levels[(hidden_end-a).bit_length()-1]+=1
+                    sequence.append(hidden_end);a=hidden_end;continue
             depths = [project(p, c) for c in poses for p in rings[a]]
             depth = min((p[2] if p else 0) for p in depths)
             lod = sum(depth >= d for d in cfg['lod_depths'])
@@ -81,21 +119,27 @@ def schedules_for(rings, cameras, bands, cfg):
 def compile_world(cfg, baked, sampler):
     if cfg['version'] != 1 or cfg['step'] != 256:
         raise ValueError('unsupported world version or sample step')
-    if cfg['lod_strides'] != [1, 2, 4, 8] or cfg['lod_depths'] != sorted(cfg['lod_depths']):
+    if len(cfg['lod_strides']) != 4 or any(v < 1 or v > 64 or v & (v-1) for v in cfg['lod_strides']) or cfg['lod_depths'] != sorted(cfg['lod_depths']):
         raise ValueError('expected ordered four-level LOD hierarchy')
     if cfg['lookahead'] % 256 or cfg['finish_allowance'] % 256 or cfg['max_error_px'] <= 0:
         raise ValueError('invalid coverage or error tolerance')
+    profile=cfg.get('cross_section')
+    if profile is not None and (len(profile)!=6 or any(len(p)!=3 or p[0] not in (-1,1) or any(not isinstance(v,int) for v in p) for p in profile)):
+        raise ValueError('cross_section requires six integer [side, outside, height] points')
     groups, aliases = [], []
     for track in cfg['tracks']:
         authored = next(t for t in baked['tracks'] if t['id'] == track)
         if authored['span']['repeat'] != 'ends' or any(s['chain'] != 'main' for s in authored['segments']):
             raise ValueError(f'{track}: prototype requires a finite, unbranched track')
+        if cfg.get('requires_deck') and any(not seg['deck'] for seg in authored['segments']):
+            raise ValueError(f'{track}: road mesh requires continuous deck; gaps need separate mesh sections')
         length = authored['span']['s1']
         bands = (length + cfg['finish_allowance']) // 256 + 1
         limit = (bands + cfg['lookahead'] // 256) * 256
         sampled = json.loads(subprocess.check_output([
             str(sampler), track, '256', str(limit), str(cfg['outside']),
-            str(cfg['wall_height']), str(cfg['ceiling_height'])]))
+            str(cfg['wall_height']), str(cfg['ceiling_height'])] +
+            ([','.join(str(v) for point in cfg['cross_section'] for v in point)] if 'cross_section' in cfg else [])))
         if sampled['length'] != length:
             raise ValueError(f'{track}: track length mismatch')
         rings = sampled['rings']
@@ -104,7 +148,7 @@ def compile_world(cfg, baked, sampler):
         # Share identical geometry across stages with different obstacles/colors.
         group = next((i for i, g in enumerate(groups) if g['rings'] == rings and g['bands'] == bands), None)
         if group is None:
-            schedules, indices, levels = schedules_for(rings, sampled['cameras'], bands, cfg)
+            schedules, indices, levels = schedules_for(rings, sampled['cameras'], bands, cfg, sampled['camera_bounds'])
             group = len(groups)
             axis_aligned = all(
                 r[1] == [r[0][0], r[0][1] + cfg['wall_height'], r[0][2]] and
@@ -137,14 +181,23 @@ def emit(groups, aliases, cfg):
         lines.extend('    ' + ','.join(map(str, indices[j:j + 24])) + ',' for j in range(0, len(indices), 24))
         lines.append('};')
     resident += len(aliases) * 24  # 32-bit console pointers; excludes tiny strings/alignment.
+    if 'cross_section' in cfg: resident += 36
     if resident > cfg['max_resident_bytes']:
         raise ValueError(f'{resident} resident bytes exceeds {cfg["max_resident_bytes"]}')
     lines.append('static const WorldMesh world_meshes[] = {')
     for track, i in aliases:
         aligned = int(groups[i].get('axis_aligned', False))
-        lines.append(f'    {{"{track}",world_rings_{i},world_schedules_{i},world_indices_{i},{groups[i]["bands"]},1,{aligned},0}},')
+        lines.append(f'    {{"{track}",world_rings_{i},world_schedules_{i},world_indices_{i},{groups[i]["bands"]},1,{aligned},{cfg.get("near_distance",2200)}}},')
     lines += ['};', '#define WORLD_MESH_COUNT (sizeof(world_meshes) / sizeof(world_meshes[0]))', '']
-    return '\n'.join(lines), resident
+    header='\n'.join(lines)
+    prefix=cfg.get('symbol_prefix','world')
+    if prefix != 'world':
+        for stem in ('rings','schedules','indices','meshes'):
+            header=header.replace('world_'+stem,prefix+'_'+stem)
+        header=header.replace('WORLD_MESH_COUNT',prefix.upper()+'_MESH_COUNT')
+    if 'cross_section' in cfg:
+        header += '\nstatic const int16_t '+prefix+'_profile[6][3] = {'+','.join('{'+','.join(map(str,p))+'}' for p in cfg['cross_section'])+'};\n'
+    return header, resident
 
 
 def main():
@@ -156,16 +209,24 @@ def main():
     ap.add_argument('--cc', default=os.environ.get('HOST_CC', 'cc'))
     args = ap.parse_args()
     cfg = json.loads(args.manifest.read_text())
+    sources = [args.manifest, args.tracks, Path(__file__), ROOT / 'tools/sample_world.c',
+               ROOT / 'src/path.c', ROOT / 'src/path.h', ROOT / 'src/path_runtime.h',
+               ROOT / 'src/course.h', ROOT / 'src/world.h', ROOT / 'src/world_mesh.h']
+    source_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sources)).hexdigest()
+    if args.header.exists() and args.report.exists():
+        previous=json.loads(args.report.read_text())
+        if (previous.get('source_sha256')==source_hash and
+            previous.get('header_sha256')==hashlib.sha256(args.header.read_bytes()).hexdigest()):
+            print(f'baked worlds: current ({previous["resident_bytes"]} resident bytes)')
+            return
     with tempfile.TemporaryDirectory(prefix='runner-world-') as temp:
         sampler = Path(temp) / 'sample-world'
         subprocess.run([args.cc, '-std=gnu99', '-O2', '-DRUNNER_PREVIEW', '-I', str(ROOT / 'src'),
                         str(ROOT / 'tools/sample_world.c'), '-o', str(sampler)], check=True)
         groups, aliases = compile_world(cfg, json.loads(args.tracks.read_text()), sampler)
     header, resident = emit(groups, aliases, cfg)
-    sources = [args.manifest, args.tracks, Path(__file__), ROOT / 'tools/sample_world.c',
-               ROOT / 'src/path.c', ROOT / 'src/path.h', ROOT / 'src/course.h', ROOT / 'src/world.h']
     report = dict(version=1, tracks=[t for t, _ in aliases], resident_bytes=resident,
-                  geometry_groups=len(groups), source_sha256=hashlib.sha256(b''.join(p.read_bytes() for p in sources)).hexdigest(),
+                  geometry_groups=len(groups), source_sha256=source_hash,header_sha256=hashlib.sha256(header.encode()).hexdigest(),
                   max_error_px=cfg['max_error_px'], camera_samples_per_band=3,
                   lookahead=cfg['lookahead'], groups=[dict(rings=len(g['rings']), schedules=len(g['schedules']),
                   max_schedule_rings=max(n for _, n in g['schedules']), lod_span_counts=g['levels'],

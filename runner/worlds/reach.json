@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "tracks": [
+    "reach.ridge",
+    "reach.climb",
+    "reach.drop"
+  ],
+  "step": 256,
+  "lookahead": 64000,
+  "finish_allowance": 2048,
+  "outside": 360,
+  "wall_height": -760,
+  "ceiling_height": -760,
+  "lod_depths": [
+    4200,
+    8000,
+    16000
+  ],
+  "lod_strides": [
+    1,
+    4,
+    16,
+    64
+  ],
+  "max_error_px": 1.0,
+  "max_schedule_rings": 128,
+  "max_resident_bytes": 180000,
+  "cross_section": [
+    [
+      -1,
+      360,
+      -24
+    ],
+    [
+      -1,
+      980,
+      -760
+    ],
+    [
+      -1,
+      980,
+      -760
+    ],
+    [
+      1,
+      980,
+      -760
+    ],
+    [
+      1,
+      980,
+      -760
+    ],
+    [
+      1,
+      360,
+      -24
+    ]
+  ],
+  "near_distance": 1024
+}

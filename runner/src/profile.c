@@ -23,7 +23,7 @@ static const char *const n_names[PN_COUNT] = {
 };
 
 static const char *const k_names[PF_COUNT] = {
-    "game update", "level total", "runner+shadow+hud", "GPU drawing",
+    "game update", "level total", "runner+shadow+hud", "GPU wait",
     "forest (cell loop)", "crystals", "mounds", "hero giants",
     "stalks near", "stalks mid", "stalks far",
     "ground streaks",
@@ -31,17 +31,23 @@ static const char *const k_names[PF_COUNT] = {
     "skyline", "aurora", "sky",
     "road backdrop", "road near sampling", "road near strips",
     "road dividers", "road far tier", "road crates", "road other fork",
-    "road gantry",
+    "road gantry", "Reach canyon walls", "Reach edge markers", "Reach gantries",
     " far sampling", " far strips", " far crates",
     " fork sampling", " fork strips", " fork dividers", " fork crates",
     "straight tunnel",
 };
 
+static unsigned present_count,present_slow,present_worst,present_blanks;
+void prof_present(unsigned blanks) {
+    present_count++;present_blanks+=blanks;
+    if(blanks>2) present_slow++;
+    if(blanks>present_worst) present_worst=blanks;
+}
 static int frames;
 static size_t bytes_sum;
 static uint32_t level_last, level_worst, level_worst_frame;
-static uint32_t ticks_last[PF_COUNT], ticks_worst[PF_COUNT];
-/* Frames whose level draw passed 80, 90, and 95 % of a 60 Hz frame. */
+static uint32_t ticks_last[PF_COUNT], ticks_worst[PF_COUNT], lines_last[PF_COUNT];
+/* Frames whose level draw passed 80, 90, and 95 % of a 30 Hz frame. */
 static uint32_t over[3];
 
 void prof_start(void) {
@@ -69,37 +75,43 @@ int prof_frame(const char *level, size_t bytes) {
         level_worst = prof_lines_used[PF_LEVEL] - level_last;
         level_worst_frame = frames;
         for (i = 0; i < PF_COUNT; i++)
-            ticks_worst[i] = prof_ticks[i] - ticks_last[i];
+            ticks_worst[i] = prof_lines_used[i] ?
+                (prof_lines_used[i] - lines_last[i]) * CYCLES_PER_LINE :
+                (prof_ticks[i] - ticks_last[i]) * 8;
         for (i = 0; i < PN_COUNT; i++)
             n_worst[i] = prof_n[i];
     }
     for (i = 0; i < PN_COUNT; i++)
         prof_n[i] = 0;
     level_last = prof_lines_used[PF_LEVEL];
-    for (i = 0; i < PF_COUNT; i++)
+    for (i = 0; i < PF_COUNT; i++) {
         ticks_last[i] = prof_ticks[i];
+        lines_last[i] = prof_lines_used[i];
+    }
     if (++frames < PROF_FRAMES)
         return 0;
+    printf("PROF presentation: %u intervals, %u missed 30Hz deadlines, worst %u vblanks, total %u vblanks\n",present_count,present_slow,present_worst,present_blanks);
+    present_count=present_slow=present_worst=present_blanks=0;
     printf("PROF   worst level frame %u cycles at frame %u; frames over 80/90/95%%: %u %u %u\n",
            (unsigned)(level_worst * CYCLES_PER_LINE), (unsigned)level_worst_frame,
            (unsigned)over[0], (unsigned)over[1], (unsigned)over[2]);
     over[0] = over[1] = over[2] = 0;
     for (i = PF_R_BACKDROP; i < PF_COUNT; i++)
         if (ticks_worst[i])
-            printf("PROF     worst %-20s %7u\n", k_names[i], (unsigned)(ticks_worst[i] * 8));
+            printf("PROF     worst %-20s %7u\n", k_names[i], (unsigned)ticks_worst[i]);
     for (i = 0; i < PN_COUNT; i++)
         printf("PROF     worst count %-14s %5u\n", n_names[i], (unsigned)n_worst[i]);
     level_last = level_worst = level_worst_frame = 0;
     for (i = 0; i < PF_COUNT; i++)
-        ticks_last[i] = 0;
+        ticks_last[i] = lines_last[i] = 0;
     printf("PROF %s: %d frames, average per frame, %% of a 30 Hz frame\n", level, frames);
     for (i = PF_CRYSTAL; i <= PF_GSTREAK; i++)
         kinds += prof_ticks[i];
     for (i = 0; i < PF_COUNT; i++) {
         if (prof_lines_used[i])
-            line(k_names[i], prof_lines_used[i] * CYCLES_PER_LINE / PROF_FRAMES);
+            line(k_names[i], (uint64_t)prof_lines_used[i] * CYCLES_PER_LINE / PROF_FRAMES);
         else if (prof_ticks[i])
-            line(k_names[i], (i == PF_FOREST ? prof_ticks[i] - kinds : prof_ticks[i]) * 8 / PROF_FRAMES);
+            line(k_names[i], (uint64_t)(i == PF_FOREST ? prof_ticks[i] - kinds : prof_ticks[i]) * 8 / PROF_FRAMES);
     }
     printf("PROF   %u projections, %u path samples, %u primitive bytes per frame\n",
            (unsigned)(prof_projections / frames), (unsigned)(prof_samples / frames),

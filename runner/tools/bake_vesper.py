@@ -41,6 +41,21 @@ def bake():
     packed = [row[x] | row[x+1]<<4 for row in atlas for x in range(0,256,2)]
     return packed, tiles, means
 
+def straight_runs(segments):
+    """End of each provably constant-frame/width run, in course units."""
+    ends=[s['s']+256 for s in segments]
+    for i in range(len(segments)-2,-1,-1):
+        a,b=segments[i:i+2]
+        keys=('yaw','pitch','roll','edge','edge1','right','right1','up','fwd')
+        same=all(a[k]==b[k] for k in keys) and a['edge']==a['edge1']
+        same &= a['chain']==b['chain']=='main' and a['next']==i+1
+        same &= all(abs(a['p1'][j]-b['p'][j])<1e-5 and
+                    abs((a['p1'][j]-a['p'][j])-(b['p1'][j]-b['p'][j]))<1e-5 for j in range(3))
+        # Stop at b's start when its endpoint is turning/banking: the next
+        # iteration already bounds the safe run through that endpoint.
+        if same: ends[i]=ends[i+1]
+    return ends
+
 def main():
     packed, tiles, means = bake()
     out = Path(sys.argv[1])
@@ -51,6 +66,11 @@ def main():
         lines += [','.join(str(v) for v in values[i:i+32])+',' for i in range(0,len(values),32)]
         lines.append('};')
     lines.append('static const uint8_t vesper_mean[2][3] = {' + ','.join('{'+','.join(map(str,m))+'}' for m in means) + '};')
+    tracks=json.loads((Path(__file__).resolve().parent/'trackview/baked.json').read_text())['tracks']
+    track=next(t for t in tracks if t['id']=='vesper.hook')
+    runs=straight_runs(track['segments'])
+    lines.append('static const uint32_t vesper_city_runs[] = {'+','.join(map(str,runs))+'};')
+    lines.append('#define VESPER_CITY_RUN_COUNT '+str(len(runs)))
     out.write_text('\n'.join(lines)+'\n')
     out.with_suffix('.json').write_text(json.dumps(dict(texture_bytes=len(packed),palette_bytes=32,
         vram=[960,128,64,64],clut=[0,483,16,1],tiles=tiles,mean=means),indent=2)+'\n')

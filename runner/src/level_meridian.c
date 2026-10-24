@@ -52,6 +52,13 @@ static const Look k_look[3] = {
     },
 };
 
+/* Ground-reflected fill: strongest in the two bright stages, none at night. */
+static const uint8_t k_runner_ambient[3][3] = {
+    {40,52,60},
+    {28,44,44},
+    {0,0,0}
+};
+
 static Light live;
 static RoadStyle road;
 static uint8_t sky_top[3];
@@ -77,6 +84,7 @@ static void apply(int stage) {
     rgb(live.haze, L->haze);
     rgb(live.tint, L->tint);
     rgb(live.shadow, L->shadow);
+    rgb(live.runner_ambient,k_runner_ambient[stage]);
     live.density = L->density;
     rgb(sky_top, L->top);
     road.light = &live;
@@ -175,7 +183,7 @@ static void ice(const LevelFrame *f) {
     int reach = ROAD_HALF + WALL_OUT;
     int s = f->scroll / step * step;
     int s1, draw;
-    for (; (draw = road_span(s, f->scroll, step, reach, &s1)) != 0; s = s1) {
+    for (; (draw = road_span(s, f->scroll, step, reach, 960, &s1)) != 0; s = s1) {
         int h, r, g, b;
         if (draw == 2)
             continue;

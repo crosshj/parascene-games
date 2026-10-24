@@ -12,7 +12,7 @@ typedef struct {
     const WorldSchedule *schedules;
     const uint8_t *indices; /* ring offsets relative to max(0, band - 1) */
     uint16_t schedule_count, version;
-    uint16_t axis_aligned, reserved;
+    uint16_t axis_aligned, near_distance;
 } WorldMesh;
 typedef char world_ring_size_check[sizeof(WorldRing) == 44 ? 1 : -1];
 typedef char world_schedule_size_check[sizeof(WorldSchedule) == 8 ? 1 : -1];

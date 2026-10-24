@@ -16,6 +16,7 @@ enum {
     PF_SKYLINE, PF_AURORA, PF_SKY,
     PF_R_BACKDROP, PF_R_SAMPLE, PF_R_STRIPS, PF_R_DASHES, PF_R_FAR,
     PF_R_CRATES, PF_R_BRANCH, PF_R_GANTRY,
+    PF_REACH_CANYON, PF_REACH_MARKERS, PF_REACH_GANTRIES,
     PF_F_SAMPLE, PF_F_STRIPS, PF_F_CRATES,
     PF_B_SAMPLE, PF_B_STRIPS, PF_B_DASHES, PF_B_CRATES,
     PF_WORLD_MESH, PF_COUNT
@@ -59,6 +60,7 @@ extern uint32_t prof_lines_used[PF_COUNT];
 #define PROF_COUNT_SAMPLE() (prof_samples++, prof_n[PN_SAMPLE]++)
 
 void prof_start(void);
+void prof_present(unsigned blanks);
 /* Returns 1 when the current level has run long enough and was reported. */
 int prof_frame(const char *level, size_t bytes);
 #else

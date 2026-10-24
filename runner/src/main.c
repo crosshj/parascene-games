@@ -11,12 +11,15 @@
 #include <psxcd.h>
 #include <psxspu.h>
 #include "world.h"
+#include "countdown.h"
+#include "hit_feedback.h"
 #include "course.h"
 #include "path.h"
 #include "road.h"
 #include "level.h"
 #include "profile.h"
 #include "sprite_sheet.h"
+#include "runner_lighting.h"
 #include "screen_art.h"
 #include "sound_bank.h"
 #include "save.h"
@@ -39,7 +42,8 @@ enum {
     ST_HIT,
     ST_OVER,
     ST_AWAY,
-    ST_TALLY
+    ST_TALLY,
+    ST_COUNTDOWN
 };
 
 enum { MODE_STORY, MODE_ARCADE };
@@ -75,10 +79,14 @@ static int story_run;
 static int story_reach = 1;
 static int save_applied;
 static int stage_index;
-static int flow_focus;
 static int flow_pos;
 static int flow_glow;
 static int flow_glow_at = -1;
+/* Menu-only cursor memory, separate from story_reach unlock progression. */
+#define FLOW_MENU_WORLDS 32
+static int flow_saved_stage[FLOW_MENU_WORLDS];
+static int flow_saved_world_valid;
+static int flow_completion_reset_pending;
 static int jumps, hits;
 /* How far the runner has run ahead of the camera after a finish. */
 static int runner_ahead;
@@ -95,8 +103,9 @@ static int stick_at;
 #define PTS_HIT 100
 /* Ten more jumps than hits. A basic bar, not a tuned one. */
 #define CLEAR_SCORE 1000
-static const uint8_t k_goal_post[3] = {210, 220, 240};
-static const uint8_t k_goal_beam[3] = {255, 214, 64};
+/* Keep the finish marker unmistakable against the plain roadside gantries. */
+static const uint8_t k_goal_post[3] = {48, 232, 255};
+static const uint8_t k_goal_beam[3] = {255, 48, 184};
 
 static const Stage *stages(void) {
     return levels[level_index]->stages;
@@ -349,6 +358,25 @@ static int posed_frame(void) {
     return play_frame(SPR_ANIM_RUN, (anim_tick / 4) % anim_count(SPR_ANIM_RUN));
 }
 
+/* A separate 16-color CLUT beside the source palettes preserves menu art.
+ * Only character/ambient changes upload 32 bytes, never a per-frame overlay. */
+static uint16_t runner_lit_clut(const Light *light) {
+    static int last_character=-1;
+    static uint8_t last_sky[3],last_ambient[3];
+    static uint16_t palette[16] __attribute__((aligned(4)));
+    RECT rect;int i;
+    if(last_character!=character || memcmp(last_sky,light->sky,3) ||
+       memcmp(last_ambient,light->runner_ambient,3)) {
+        for(i=0;i<16;i++) palette[i]=runner_lit_texel(spr_clut[character][i],light);
+        memcpy(last_sky,light->sky,3);memcpy(last_ambient,light->runner_ambient,3);
+        last_character=character;
+        setRECT(&rect,spr_clut_x[0]+16,spr_clut_y[0],16,1);
+        LoadImage(&rect,(const uint32_t *)palette);
+        DrawSync(0);
+    }
+    return getClut(spr_clut_x[0]+16,spr_clut_y[0]);
+}
+
 static void draw_runner(void) {
     XY feet;
     int sz, h, w, frame, bucket, ax, ay, bx, by, ux, uy;
@@ -361,7 +389,17 @@ static void draw_runner(void) {
     if (h < (runner_ahead > 0 ? 2 : 8))
         h = runner_ahead > 0 ? 2 : 8;
     w = h * spr_base_fw[spr_char_base[character]] / spr_base_fh[spr_char_base[character]];
-    frame = posed_frame();
+    if (state == ST_COUNTDOWN) {
+        /* Sprite-map columns 2-3-4-3. Keep the existing pose cadence,
+         * adding four 60 Hz ticks (two rendered frames) to column 4. */
+        {
+            int phase=(tick*2)%68;
+            int pose=phase<15 ? 1 : phase<30 ? 2 : phase<53 ? 3 : 2;
+            frame=play_frame(SPR_ANIM_LEFT,pose);
+        }
+    } else {
+        frame = posed_frame();
+    }
     if (runner_ahead > 0)
         bucket = sz >> OT_SHIFT;
     else
@@ -399,7 +437,7 @@ static void draw_runner(void) {
         spr_base_fw[spr_char_base[character]] - 1,
         spr_base_fh[spr_char_base[character]] - 1);
     spr->tpage = gpu_tpage[spr_cell_page[frame]];
-    spr->clut = gpu_clut[character];
+    spr->clut = runner_lit_clut(level_light(levels[level_index]));
 }
 
 static void hud_center(int y, const char *s) {
@@ -651,6 +689,7 @@ static void judge_boxes(int step) {
         } else {
             course_box_set(b, BOX_HIT);
             hits++;
+            hit_feedback_hit();
         }
     }
 }
@@ -676,6 +715,8 @@ static void open_tally(void) {
             next = total + 1;
         if (next != story_reach) {
             story_reach = next;
+            if (story_reach > total)
+                flow_completion_reset_pending = 1;
             save_store(story_reach);
             if (global + 1 < total) {
                 flow_glow_at = global + 1;
@@ -704,6 +745,7 @@ static void collide(void) {
             state = ST_HIT;
             tick = 0;
             hit_timer = 50;
+            hit_feedback_hit();
             shown = distance;
             if (distance > best)
                 best = distance;
@@ -713,6 +755,7 @@ static void collide(void) {
 }
 
 static void go(int next) {
+    hit_feedback_reset();
     state = next;
     tick = 0;
     pick = 0;
@@ -727,6 +770,11 @@ static void to_title(void) {
     pick = keep;
 }
 
+/* Every fresh run or stage enters through this shared countdown state. */
+static void begin_countdown(void) {
+    go(ST_COUNTDOWN);
+}
+
 static void start_run(void) {
     story_run = 0;
     jumps = 0;
@@ -734,7 +782,7 @@ static void start_run(void) {
     runner_ahead = 0;
     course_boxes_reset(0);
     course_quiet(0, 0);
-    go(ST_RUN);
+    begin_countdown();
     if (!path_open(levels[level_index]->track))
         path_open("straight.run");
     path_reset();
@@ -774,7 +822,7 @@ static void lay_stage(int index) {
 
 static void start_stage(int index) {
     lay_stage(index);
-    go(ST_RUN);
+    begin_countdown();
     music_begin();
 }
 
@@ -792,14 +840,43 @@ static int flow_frontier(int slot) {
     if (g < base)
         return 0;
     if (g >= base + n)
-        return n - 1;
+        return 0;
     return g - base;
 }
 
-/* focus is FLOW_WORLDS or FLOW_STAGES. celebrate lands on a stage that
- * just opened and plays its unlock. */
-static void open_flow(int focus, int celebrate) {
+static int flow_saved_pick(int slot) {
+    int n=flow_stages(slot),saved;
+    if (n<1) return 0;
+    if (slot<0 || slot>=FLOW_MENU_WORLDS) return flow_frontier(slot);
+    saved=flow_saved_stage[slot];
+    if (saved<0 || saved>=n || !stage_unlocked(slot,saved))
+        return flow_frontier(slot);
+    return saved;
+}
+
+static void flow_remember(int slot,int stage) {
+    flow_saved_world_valid=1;
+    if (slot>=0 && slot<FLOW_MENU_WORLDS && stage>=0 &&
+        stage<flow_stages(slot) && stage_unlocked(slot,stage))
+        flow_saved_stage[slot]=stage;
+}
+
+/* Always select a stage. Celebrate selects the newly opened stage. */
+static void open_flow(int celebrate) {
     go(ST_FLOW);
+    /* On first opening after full completion, honor the start-at-beginning
+     * behavior. Later menu visits keep the user's own saved cursor. */
+    if (story_reach > flow_total() &&
+        (flow_completion_reset_pending || !flow_saved_world_valid)) {
+        story_slot = 0;
+        stage_index = 0;
+        flow_pos = 0;
+        flow_glow = 0;
+        flow_glow_at = -1;
+        flow_saved_stage[0]=0;
+        flow_saved_world_valid=1;
+        flow_completion_reset_pending=0;
+    }
     if (celebrate && flow_glow_at >= 0) {
         int slot = flow_slot_for(flow_glow_at);
         int moved = slot != story_slot;
@@ -810,16 +887,16 @@ static void open_flow(int focus, int celebrate) {
             pick = 0;
         if (pick >= flow_stages(slot))
             pick = flow_stages(slot) - 1;
-        flow_focus = FLOW_STAGES;
         if (moved)
             play_sound(SND_WOOSH);
+        flow_remember(story_slot,pick);
         play_sound(SND_CLINK);
     } else {
         flow_glow = 0;
         flow_glow_at = -1;
         level_index = mode_level(1, story_slot);
-        flow_focus = focus;
-        pick = focus == FLOW_STAGES ? stage_index : 0;
+        pick = flow_saved_pick(story_slot);
+        flow_remember(story_slot,pick);
     }
     music_hush();
 }
@@ -891,7 +968,7 @@ static int update_screens(void) {
         if (leaving > 0) {
             if (--leaving == 0) {
                 if (mode == MODE_STORY)
-                    open_flow(FLOW_WORLDS, 0);
+                    open_flow(0);
                 else
                     go(ST_SELECT);
             }
@@ -961,50 +1038,23 @@ static int update_screens(void) {
         n = flow_stages(story_slot);
         if (n < 1)
             n = 1;
-        if (moved && flow_focus == FLOW_STAGES)
-            pick = flow_frontier(story_slot);
+        if (moved)
+            pick = flow_saved_pick(story_slot);
         if (edge(PAD_UP) && !edge(PAD_DOWN)) {
-            if (flow_focus != FLOW_STAGES) {
-                if (!stage_unlocked(story_slot, 0))
-                    play_sound(SND_LOCK);
-                else {
-                    play_sound(SND_CLINK);
-                    flow_focus = FLOW_STAGES;
-                    pick = flow_frontier(story_slot);
-                }
-            } else {
-                pick = (pick + n - 1) % n;
-                play_sound(SND_CLINK);
-            }
+            pick = (pick + n - 1) % n;
+            play_sound(SND_CLINK);
         }
         if (edge(PAD_DOWN) && !edge(PAD_UP)) {
-            if (flow_focus != FLOW_STAGES) {
-                if (!stage_unlocked(story_slot, 0))
-                    play_sound(SND_LOCK);
-                else {
-                    play_sound(SND_CLINK);
-                    flow_focus = FLOW_STAGES;
-                    pick = flow_frontier(story_slot);
-                }
-            } else {
-                pick = (pick + 1) % n;
-                play_sound(SND_CLINK);
-            }
+            pick = (pick + 1) % n;
+            play_sound(SND_CLINK);
         }
         if (pick < 0)
             pick = 0;
         if (pick >= n)
             pick = n - 1;
+        flow_remember(story_slot,pick);
         if (confirm()) {
-            if (flow_focus != FLOW_STAGES) {
-                if (!stage_unlocked(story_slot, 0))
-                    play_sound(SND_LOCK);
-                else {
-                    play_sound(SND_CLINK);
-                    flow_focus = FLOW_STAGES;
-                    pick = flow_frontier(story_slot);
-                }
-            } else if (!stage_unlocked(story_slot, pick)) {
+            if (!stage_unlocked(story_slot, pick)) {
                 play_sound(SND_LOCK);
             } else {
                 play_sound(SND_SELECT);
@@ -1012,10 +1062,7 @@ static int update_screens(void) {
             }
         } else if (back()) {
             play_sound(SND_BACK);
-            if (flow_focus == FLOW_STAGES)
-                flow_focus = FLOW_WORLDS;
-            else
-                to_title();
+            to_title();
         }
         return 0;
     }
@@ -1027,16 +1074,20 @@ static int update_screens(void) {
         if (confirm() || card_finished(tick)) {
             if (confirm())
                 play_sound(SND_SELECT);
-            state = ST_RUN;
-            tick = 0;
+            begin_countdown();
             music_begin();
+        }
+        return 0;
+    case ST_COUNTDOWN:
+        if (!countdown_digit(tick)) {
+            go(ST_RUN);
         }
         return 0;
     case ST_TALLY:
         if (confirm() || back()) {
             if (flow_glow_at < 0)
                 play_sound(confirm() ? SND_SELECT : SND_BACK);
-            open_flow(FLOW_STAGES, 1);
+            open_flow(1);
         }
         return 0;
     case ST_PAUSE:
@@ -1061,7 +1112,7 @@ static int update_screens(void) {
                     start_run();
             } else if (pick == 1) {
                 if (story_run)
-                    open_flow(FLOW_WORLDS, 0);
+                    open_flow(0);
                 else
                     go(ST_SELECT);
             } else
@@ -1123,6 +1174,7 @@ static void update(void) {
     int target;
     int dx;
     held = pad_held();
+    hit_feedback_tick(state==ST_RUN || state==ST_HIT, ((PADTYPE *)pad_buff[0])->stat==0);
     tick++;
     save_service();
     if (!update_screens()) {
@@ -1138,6 +1190,7 @@ static void update(void) {
                 play_sound(SND_PAUSE);
                 music_volume(MUSIC_PAUSED);
                 state = ST_PAUSE;
+                hit_feedback_reset();
                 pick = 0;
                 prev = held;
                 return;
@@ -1602,6 +1655,7 @@ int main(int argc, const char **argv) {
     save_init();
 #endif
     InitPAD(pad_buff[0], 34, pad_buff[1], 34);
+    printf("Hit feedback: BIOS rumble output %s\n",hit_feedback_init()?"enabled":"unavailable");
     StartPAD();
     ChangeClearPAD(0);
 #ifndef RUNNER_NO_MUSIC
@@ -1648,7 +1702,20 @@ int main(int argc, const char **argv) {
         level_index = 0;
 #endif
     }
+#ifdef PROF_STAGE
+    if (PROF_STAGE >= 0 && PROF_STAGE < levels[level_index]->stage_count) {
+        start_stage(PROF_STAGE);
+        scroll = PROF_SCROLL;
+        path_reset();
+        path_follow(scroll + CHAR_Z, 0);
+        printf("PROF target %s / %s\n", levels[level_index]->name,
+               stages()[PROF_STAGE].name);
+    } else
+#endif
     start_run();
+    printf("PROF run %s level=%s stage=%d track=%s frames=%d scroll=%d\n",
+           PROF_RUN_ID, levels[level_index]->name, story_run ? stage_index : -1,
+           path_id(), PROF_FRAMES, scroll);
     printf("PROF start\n");
 #endif
 
@@ -1665,6 +1732,11 @@ int main(int argc, const char **argv) {
             PROF(PF_UPDATE, update());
             cd_service();
         }
+        {
+            int shake_x,shake_y;
+            hit_feedback_offset(&shake_x,&shake_y);
+            world_set_shake(shake_x,shake_y);
+        }
         frame.scroll = scroll;
         frame.speed = scroll > last_scroll ? scroll - last_scroll : 0;
         frame.time = anim_tick;
@@ -1679,7 +1751,7 @@ int main(int argc, const char **argv) {
         } else if (state == ST_TITLE) {
             draw_title();
         } else if (state == ST_FLOW) {
-            flow_draw(story_slot, flow_pos, flow_focus, pick, story_reach,
+            flow_draw(story_slot, flow_pos, pick, story_reach,
                       flow_glow, flow_glow_at, anim_tick);
         } else if (state == ST_CARD && card_black(tick)) {
             card_overlay(levels[level_index]->name, stages()[stage_index].name, tick);
@@ -1692,13 +1764,17 @@ int main(int argc, const char **argv) {
                 path_open("straight.run");
             path_begin(frame.scroll);
             lv->clear_color(&frame, &sr, &sg, &sb);
+            /* Reserve the countdown before scenery can exhaust the buffer.
+             * Its front ordering bucket still draws it over the world. */
+            if (state == ST_COUNTDOWN)
+                countdown_draw(countdown_digit(tick),tick%60);
             PROF_LONG(PF_LEVEL, lv->draw(&frame));
             if (story_run && (state == ST_RUN || state == ST_PAUSE ||
                               state == ST_AWAY || state == ST_TALLY)) {
                 int goal = stage_end(stage_index);
                 /* The bar is a few panels. Skip it until the finish is near. */
                 if (goal > frame.scroll && goal < frame.scroll + 8000)
-                    road_gantry(goal, k_goal_post, k_goal_beam);
+                    road_finish_gantry(goal, k_goal_post, k_goal_beam);
             }
             if (state == ST_SELECT) {
                 draw_select();
@@ -1706,6 +1782,9 @@ int main(int argc, const char **argv) {
                 draw_runner();
                 draw_shadow();
                 card_overlay(levels[level_index]->name, stages()[stage_index].name, tick);
+            } else if (state == ST_COUNTDOWN) {
+                draw_runner();
+                draw_shadow();
             } else if (state == ST_TALLY) {
                 PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_tally()));
             } else {
@@ -1718,11 +1797,21 @@ int main(int argc, const char **argv) {
 #endif
 #ifdef RUNNER_PROFILE
         if (prof_frame(levels[level_index]->name, world_bytes_used())) {
+#ifdef PROF_STAGE
+            /* A targeted stage profile must stay on that exact stage after
+             * each reporting interval. The all-level profiler below keeps
+             * its level-walk behavior when no stage is selected. */
+            level_index = PROF_LEVEL;
+            start_stage(PROF_STAGE);
+            printf("PROF repeat %s / %s\n", levels[level_index]->name,
+                   stages()[PROF_STAGE].name);
+#else
             if (++level_index == level_count) {
                 printf("PROF done\n");
                 level_index = 0;
             }
             start_run();
+#endif
         }
 #endif
         world_flip();

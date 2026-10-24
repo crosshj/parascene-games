@@ -11,7 +11,8 @@
 
 /* The materials of a road world. The air between them and the camera is
  * the world's Light: curbs, signs, the far deck, and the backdrop fade
- * toward its haze, and its tint lights the paint. */
+ * toward its haze, and its tint lights the paint. An optional horizon color
+ * separates the final extinction of geometry from that atmospheric tint. */
 typedef struct {
     const Light *light;
     uint8_t ridge_far[3];  /* backdrop silhouette, at the path horizon */
@@ -28,7 +29,14 @@ typedef struct {
     uint8_t shoulder_c[3];
     int ground;
     uint8_t ground_c[3];
+    int analytic_continuation; /* Flat corridor supplies its own infinite road tip. */
+    /* Optional distant extinction color, separate from Light.haze's air tint.
+     * Backdrop bases and all fully distant surfaces must share this endpoint. */
+    int horizon_enabled;
+    uint8_t horizon[3];
 } RoadStyle;
+
+const uint8_t *road_horizon_color(const RoadStyle *st);
 
 /* Ridge silhouette by absolute heading, at path_horizon(). */
 void road_backdrop(const RoadStyle *st);
@@ -39,7 +47,12 @@ void road_to_vanishing_point(int scroll);
 /* A flat panel across the road at one s, hazed into the air. Call after
  * road_draw in the same frame. */
 void road_panel(int s, int u0, int u1, int v0, int v1, int r, int g, int b);
-/* Overhead bar at one s: two posts and a beam. Call after road_draw. */
+/* Decorative cross-track structures stop one near-view distance before the
+ * authored finish and never resume beyond it. Endless tracks are unrestricted. */
+int road_scenery_gate_allowed(int s);
+/* Only draws at the active track's exact authored finish. */
+void road_finish_gantry(int s, const uint8_t post[3], const uint8_t beam[3]);
+/* Decorative bar at one s: two posts and a beam. Call after road_draw. */
 void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]);
 /* That bar over the start line of a closed track, once a lap. Nothing on
  * a track that does not close. Call after road_draw. */
@@ -53,6 +66,14 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
 void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown);
 /* Keep the runner above foreground streaks, otherwise retain its depth. */
 int road_runner_bucket(int depth_bucket);
+#ifdef RUNNER_PREVIEW
+extern int road_preview_legacy_surfaces;
+extern int road_preview_legacy_mesh;
+extern int road_preview_far_limit_hits;
+extern int road_preview_disable_occlusion;
+void road_preview_reset_haze(void);
+int road_preview_atmosphere_check(const uint8_t *expected);
+#endif
 
 /* A quad along the road from s0 to s1. side -1 stands off the left edge,
  * +1 off the right, and 0 uses out0 and out1 as centerline u. out is how
@@ -75,8 +96,11 @@ int road_marker(int s, int u, int half, int v0, int v1, int r, int g, int b);
  * the centerline the sheet extends. *s1 is the end. Returns 1 to draw
  * s0..*s1, 2 to advance without drawing (the stretch is outside the
  * view), or 0 when the run is finished. */
-int road_span(int s0, int scroll, int step, int reach, int *s1);
+int road_span(int s0, int scroll, int step, int reach, int height, int *s1);
 
-/* Baked opaque facade, with UVs preserved through adaptive subdivision. */
-void road_facade(int s0, int s1, int side, int out, int height,
-                 int u, int v, int size, uint16_t tpage, uint16_t clut);
+/* Open-top, track-following city enclosure with sparse point-window detail. */
+void road_city_canyon(int scroll,int outside,int height,const uint32_t *runs,int count);
+
+/* Compiled static wall continuation; -1 keeps the procedural fallback. */
+int road_compiled_walls_start(int scroll);
+void road_compiled_walls(int scroll,int start,int r,int g,int b);

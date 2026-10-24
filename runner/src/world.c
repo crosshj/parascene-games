@@ -62,10 +62,17 @@ void world_init(void) {
     }
 }
 
+void world_set_shake(int x,int y) {
+    /* Draw-area clipping still confines writes to the active framebuffer. */
+    ctx.buffers[ctx.active].draw.ofs[0]=clamp(x,-1,1);
+    /* PSn00bSDK adds clip.y itself; ofs is relative to that framebuffer. */
+    ctx.buffers[ctx.active].draw.ofs[1]=clamp(y,-1,1);
+}
+
 void world_flip(void) {
     RenderBuffer *draw = &ctx.buffers[ctx.active];
     RenderBuffer *disp = &ctx.buffers[ctx.active ^ 1];
-    DrawSync(0);
+    PROF_LONG(PF_GPU, DrawSync(0));
     if (stamp_px) {
         RECT rect;
         /* disp is the buffer whose draw just finished, and the one PutDispEnv
@@ -80,12 +87,16 @@ void world_flip(void) {
     if (VSync(-1) - frame_mark < 1)
         VSync(0);
     VSync(0);
+#ifdef RUNNER_PROFILE
+    {
+        static int last_present;
+        int now=VSync(-1);
+        if(last_present) prof_present((unsigned)(now-last_present));
+        last_present=now;
+    }
+#endif
     PutDispEnv(&disp->disp);
     DrawOTagEnv(&draw->ot[OT_LENGTH - 1], &draw->draw);
-#ifdef RUNNER_PROFILE
-    /* Waiting here keeps the GPU's time apart from the CPU's. */
-    PROF_LONG(PF_GPU, DrawSync(0));
-#endif
     ctx.active ^= 1;
     ctx.next = disp->buffer;
     ClearOTagR(disp->ot, OT_LENGTH);
@@ -327,8 +338,17 @@ void screen_cover(int r, int g, int b, int blend) {
 int project(int x, int y, int z, XY *out) {
     SVECTOR v __attribute__((aligned(4)));
     int sz = 0;
-    v.vx = (short)clamp(x, -16000, 16000);
-    v.vy = (short)clamp(CAM_H - y, -16000, 16000);
+    int original_z = z, vy = CAM_H - y;
+    /* GTE inputs are signed 16-bit. Scale homogeneous coordinates before
+     * loading distant vertices; casting a depth beyond 32767 wraps it
+     * behind the camera. Keep the returned depth in world units. */
+    while (z > 32767 || iabs(x) > 32767 || iabs(vy) > 32767) {
+        x >>= 1;
+        vy >>= 1;
+        z >>= 1;
+    }
+    v.vx = (short)x;
+    v.vy = (short)vy;
     v.vz = (short)z;
     v.pad = 0;
     PROF_COUNT_PROJECTION();
@@ -336,7 +356,7 @@ int project(int x, int y, int z, XY *out) {
     gte_rtps();
     gte_stsxy(out);
     gte_stsz(&sz);
-    return sz;
+    return original_z != z ? original_z : sz;
 }
 
 void dim(int *r, int *g, int *b, int z) {
@@ -633,4 +653,12 @@ void poly_tex4(const XY *p, const XY *uv, int bucket, int shade,
     setXY4(q,p[0].x,p[0].y,p[1].x,p[1].y,p[2].x,p[2].y,p[3].x,p[3].y);
     setUV4(q,uv[0].x,uv[0].y,uv[1].x,uv[1].y,uv[2].x,uv[2].y,uv[3].x,uv[3].y);
     q->tpage=tpage; q->clut=clut;
+}
+
+void point_f1(XY p,int bucket,int r,int g,int b) {
+    TILE_1 *tile;
+    if(p.x<0 || p.x>=SCREEN_W || p.y<0 || p.y>=SCREEN_H) return;
+    tile=alloc_prim(bucket,sizeof *tile);
+    if(!tile) return;
+    setTile1(tile);setXY0(tile,p.x,p.y);setRGB0(tile,r,g,b);
 }

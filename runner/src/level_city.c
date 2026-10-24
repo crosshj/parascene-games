@@ -5,6 +5,7 @@
 #include "world.h"
 #include "course.h"
 #include "level.h"
+#include "road.h"
 
 #define SHOULDER 640
 
@@ -127,7 +128,7 @@ static void city_draw(const LevelFrame *f) {
         if (z >= CLIP && z < FAR) {
             building(band, z, -1);
             building(band, z, 1);
-            if ((band % 10) == 0 && band > 0)
+            if ((band % 10) == 0 && band > 0 && road_scenery_gate_allowed(scroll+z+48))
                 gantry(z + 48);
         }
         if (has_obstacle(band)) {

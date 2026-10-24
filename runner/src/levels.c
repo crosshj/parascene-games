@@ -40,6 +40,7 @@ const Light light_neutral = {
     {128, 128, 128},
     {128, 128, 128},
     0,
+    {0,0,0}, /* Automatic ambient fill. */
 };
 
 const Light *level_light(const Level *lv) {
