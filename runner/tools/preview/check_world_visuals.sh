@@ -15,9 +15,13 @@ if [ -x "$out/preview" ]; then
     PSX15=1 "$out/preview" "$out" --atmosphere-check || result=$?
     python3 "$here/atmosphere_report.py" "$out" || result=$?
     PSX15=1 "$out/preview" "$out" --mesh-check || result=$?
+    mkdir -p "$out/fork" "$out/verge"
+    PSX15=1 "$out/preview" "$out/fork" --fork-review 1 40 || result=$?
+    PSX15=1 "$out/preview" "$out/verge" --fork-review 2 40 || result=$?
     python3 "$here/reach_report.py" "$out" || result=$?
     PSX15=1 "$out/preview" "$out" --pipeline-check || result=$?
     PSX15=1 "$out/preview" "$out" --speedline-check || result=$?
+    PSX15=1 "$out/preview" "$out" --obstacle-occlusion-check || result=$?
     PSX15=1 "$out/preview" "$out" --countdown-check || result=$?
     PSX15=1 "$out/preview" "$out" --city-check || result=$?
     PSX15=1 "$out/preview" "$out" --vesper-motion-check || result=$?

@@ -160,11 +160,26 @@ CONTROLS
   Left / right   during a run, change lane
   X              jump
   Start          pause; Start again continues
+  L1 / R1        during play or pause, previous / next song in the playlist
   Up / down, X   choose a pause or wipeout menu item
 
 The pause menu offers CONTINUE and QUIT TO TITLE. The game stays frozen
 behind it and the music keeps playing at a lower volume. After a wipeout
 the menu offers RUN AGAIN, CHANGE RUNNER, and QUIT TO TITLE.
 
+Music browsing wraps through the current shuffled playlist in order.
+The browser also supports Q for the previous song and E for the next song.
+
 CD audio plays from the title screen on and starts again when the track
 ends.
+
+CREDITS
+-------
+The audio-credit popover uses m5x7 by Daniel Linssen:
+  https://managore.itch.io/m5x7
+Licensed under Creative Commons Zero v1.0 Universal (CC0 1.0):
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+The original font is included at web/brand/m5x7.ttf. The build renders it
+at its native 16px size into a PS1 texture atlas; the web popover uses
+the same font file directly.

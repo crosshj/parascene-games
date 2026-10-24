@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Assemble the site
         run: |
-          mkdir -p _site/build _site/runner/audio
+          mkdir -p _site/build _site/runner/audio/menu
           cp web/index.html web/manifest.json web/favicon.svg web/.nojekyll _site/
           # The worker's URL is the commit, so Pages and Cloudflare cannot keep
           # serving the previous sw.js under the same name.
@@ -36,6 +36,7 @@ jobs:
           cp build/runner-web.bin _site/build/
           (cd build && zip -9 ../_site/build/runner.zip runner.cue runner.bin)
           cp runner/audio/*.mp3 _site/runner/audio/
+          cp runner/audio/menu/*.mp3 _site/runner/audio/menu/
           node web/game-pages.js _site
       - uses: actions/upload-pages-artifact@v3
         with:

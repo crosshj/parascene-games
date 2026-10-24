@@ -54,6 +54,14 @@ add_custom_command(
 )
 
 set(LUMEN_SKY_H "${CMAKE_CURRENT_BINARY_DIR}/lumen_sky.h")
+set(CREDIT_FONT_H "${CMAKE_CURRENT_BINARY_DIR}/credit_font_data.h")
+add_custom_command(OUTPUT "${CREDIT_FONT_H}"
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_credit_font.py" "${CREDIT_FONT_H}"
+		--ffmpeg "${FFMPEG}"
+	DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_credit_font.py"
+		"${CMAKE_CURRENT_SOURCE_DIR}/../web/brand/m5x7.ttf"
+	VERBATIM)
+set_source_files_properties(src/music_credit.c PROPERTIES OBJECT_DEPENDS "${CREDIT_FONT_H}")
 add_custom_command(
 	OUTPUT "${LUMEN_SKY_H}"
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_lumen_sky.py" "${LUMEN_SKY_H}"
@@ -79,6 +87,15 @@ if(MUSIC_TRACK_COUNT GREATER 32)
 	message(FATAL_ERROR "runner/audio has ${MUSIC_TRACK_COUNT} tracks; max is 32")
 endif()
 
+file(GLOB MENU_AUDIO_MP3S CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/audio/menu/*.mp3")
+list(LENGTH MENU_AUDIO_MP3S MENU_AUDIO_COUNT)
+if(NOT MENU_AUDIO_COUNT EQUAL 1)
+	message(FATAL_ERROR "runner/audio/menu needs exactly one .mp3 menu loop")
+endif()
+list(GET MENU_AUDIO_MP3S 0 MENU_AUDIO_MP3)
+set(MUSIC_MENU_TRACK ${MUSIC_TRACK_COUNT})
+math(EXPR MUSIC_TOTAL_TRACK_COUNT "${MUSIC_TRACK_COUNT} + 1")
+
 if(RUNNER_XA_MUSIC)
 	find_program(CMAKE_C_COMPILER_HOST NAMES cc clang gcc REQUIRED)
 	set(WAV2XA "${CMAKE_CURRENT_BINARY_DIR}/wav2xa")
@@ -98,8 +115,6 @@ if(RUNNER_XA_MUSIC)
 		VERBATIM
 	)
 endif()
-
-include("${CMAKE_CURRENT_SOURCE_DIR}/tools/write_music_iso.cmake")
 
 set(MUSIC_DISC_DEPS "")
 set(_music_i 0)
@@ -139,6 +154,37 @@ foreach(_mp3 ${AUDIO_MP3S})
 	math(EXPR _music_i "${_music_i} + 1")
 endforeach()
 
+add_custom_target(check_music_credit
+	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_music_credit.py"
+		--build "${CMAKE_CURRENT_BINARY_DIR}"
+		--out "${CMAKE_CURRENT_BINARY_DIR}/music-credit-review"
+	DEPENDS runner
+	VERBATIM)
+
+if(_music_i LESS 10)
+	set(_menu_id "0${_music_i}")
+else()
+	set(_menu_id "${_music_i}")
+endif()
+if(RUNNER_XA_MUSIC)
+	set(MENU_TRACK_WAV "${CMAKE_CURRENT_BINARY_DIR}/MUSIC${_menu_id}.wav")
+	set(MENU_TRACK_OUT "${CMAKE_CURRENT_BINARY_DIR}/MUSIC${_menu_id}.xa")
+	add_custom_command(OUTPUT "${MENU_TRACK_WAV}"
+		COMMAND ${FFMPEG} -y -i "${MENU_AUDIO_MP3}" -ac 2 -ar 37800 -c:a pcm_s16le "${MENU_TRACK_WAV}"
+		DEPENDS "${MENU_AUDIO_MP3}" VERBATIM)
+	add_custom_command(OUTPUT "${MENU_TRACK_OUT}"
+		COMMAND "${WAV2XA}" -f 37800 -i 1 -F 1 -C 0 "${MENU_TRACK_WAV}" "${MENU_TRACK_OUT}"
+		DEPENDS "${WAV2XA}" "${MENU_TRACK_WAV}" VERBATIM)
+else()
+	set(MENU_TRACK_OUT "${CMAKE_CURRENT_BINARY_DIR}/MENU_TRACK.wav")
+	add_custom_command(OUTPUT "${MENU_TRACK_OUT}"
+		COMMAND ${FFMPEG} -y -i "${MENU_AUDIO_MP3}" -ac 2 -ar 44100 -c:a pcm_s16le "${MENU_TRACK_OUT}"
+		DEPENDS "${MENU_AUDIO_MP3}" VERBATIM)
+endif()
+list(APPEND MUSIC_DISC_DEPS "${MENU_TRACK_OUT}")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/tools/write_music_iso.cmake")
+
 set(TRACK_H "${CMAKE_CURRENT_SOURCE_DIR}/src/track_data.h")
 set(TRACK_JSON "${CMAKE_CURRENT_SOURCE_DIR}/tools/trackview/baked.json")
 add_custom_command(
@@ -174,6 +220,7 @@ add_custom_command(
 	DEPENDS "${TRACK_H}" "${TRACK_JSON}"
 		"${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
 		"${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_fork_walls.py"
 		"${CMAKE_CURRENT_SOURCE_DIR}/worlds/sine.json"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
@@ -192,6 +239,7 @@ add_custom_command(
     DEPENDS "${TRACK_H}" "${TRACK_JSON}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_fork_walls.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/worlds/reach.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
@@ -205,6 +253,7 @@ add_custom_command(
     DEPENDS "${TRACK_H}" "${TRACK_JSON}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_fork_walls.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/worlds/reach-road.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
@@ -218,6 +267,7 @@ add_custom_command(
     DEPENDS "${TRACK_H}" "${TRACK_JSON}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_fork_walls.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/worlds/meridian.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
@@ -225,6 +275,7 @@ add_custom_command(
 set_source_files_properties(src/road.c PROPERTIES
     OBJECT_DEPENDS "${REACH_WORLD_H};${ROAD_WORLD_H};${MERIDIAN_WORLD_H}")
 add_custom_target(check_worlds
+    COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_fork_walls.py"
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_compiled_worlds.py"
 		--include "${CMAKE_CURRENT_BINARY_DIR}"
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_path_runtime.py"
@@ -386,3 +437,26 @@ foreach(_ram_target runner runner_nomusic runner_web)
 			VERBATIM)
 	endif()
 endforeach()
+
+if(TARGET runner_web)
+	set(_music_host_sdk "$ENV{PSN00BSDK}")
+	if(_music_host_sdk STREQUAL "")
+		set(_music_host_sdk "$ENV{HOME}/psn00bsdk")
+	endif()
+	if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+		set(_music_host_strip "-Wl,-dead_strip")
+	else()
+		set(_music_host_strip "-Wl,--gc-sections")
+	endif()
+	add_custom_target(check_music_controls
+		COMMAND "${WORLD_HOST_CC}" -std=gnu99 -O2 -ffunction-sections -fdata-sections
+			-Wno-comment -Wno-int-to-pointer-cast
+			-I "${CMAKE_CURRENT_SOURCE_DIR}/tools/preview/host"
+			-idirafter "${_music_host_sdk}/include/libpsn00b"
+			-I "${CMAKE_CURRENT_SOURCE_DIR}/src" -I "${CMAKE_CURRENT_BINARY_DIR}"
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/check_music_controls.c"
+			"${CMAKE_CURRENT_SOURCE_DIR}/src/web_row.c" "${_music_host_strip}"
+			-o "${CMAKE_CURRENT_BINARY_DIR}/check_music_controls"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/check_music_controls"
+		DEPENDS runner_web VERBATIM)
+endif()

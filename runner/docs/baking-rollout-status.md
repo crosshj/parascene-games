@@ -10,7 +10,7 @@ emulator qualification across every world are still in progress.
 | --- | --- |
 | All 27 runnable tracks | Baked path preparation: frames, branch/cut/obstacle indexes, and curb tapers. Track opening selects immutable data instead of rebuilding it. |
 | Vesper Reach: Ridge, Climb, Drop | Shared compiled road/canyon geometry, visibility and LOD schedules, and an extended distance range. |
-| Pale Meridian: Drift, Fork, Verge | Shared compiled ice-wall geometry with crack-height profiles, cuts, and route-specific fork schedules. All three stages have native-size A/B captures. |
+| Pale Meridian: Drift, Fork, Verge | Shared compiled ice-wall geometry, route-specific schedules, continuous fork boundaries and ground underlays, and inner islands located from actual wall-contour intersections. |
 | Sineworks | Specialized analytical tunnel renderer and infinite road tip. |
 | Vesper City | Specialized optimized building and window renderer. |
 | Lumenwild, Shatter, Cathedral, arcade scenery | Existing world-specific renderers; shared path preparation does not mean scenery is mesh-baked. |
@@ -25,22 +25,25 @@ paths unless a replacement demonstrates better results.
   LOD spans never bridge a disconnected path section. It supports up to three
   branch decisions per track; loops and unbounded tracks remain unsupported.
 - Meridian uses the shared package on all three stages, with both Fork and
-  Verge route masks. The package is 187,928 resident bytes (220,000-byte cap),
+  Verge route masks. The package is 155,588 resident bytes (220,000-byte cap),
   with a 44,032-unit lookahead and a 1.4 px sampled compiler error target.
 - Independent runtime-camera checks covered 9.33 million Meridian visible
   chord samples; worst error was 1.446 px against the 1.5 px verifier limit.
   Baked path data matches all 27 tracks, branch masks, reverse seeks, and band
   edges exactly.
-- Host image checks compare all three Meridian stages at five matched poses
-  each, including both routes through Fork and Verge (25 pairs total). Worst
-  mean channel delta was 0.0218/255, with at most 9 unmatched
-  high-contrast pixels. Reach's 3,825-pose image check also passes.
+- Both fork stages now have continuous native traversal checks through both
+  branches, splits and joins: 2,140 frames, zero foreground sky holes and zero
+  scenery-budget omissions. These are separate from the older sparse A/B tests,
+  which could agree with a broken baseline. See [fork validation](meridian-fork-rendering.md).
+- Current mesh A/B checks cover 25 Meridian poses and 3,825 Reach poses. Meridian's
+  worst mean channel delta is 0.019340/255, with at most 8 unmatched pixels;
+  Reach's worst mean is 0.053194/255, with at most 19 unmatched pixels.
 - The all-stage host pipeline checked 5,067 frame pairs with no remaining
   failures. Reach/Meridian mesh deltas are counted and reviewed by their native
   image checks instead of being incorrectly required to be pixel-identical to
   the old tessellation. Path equivalence remains exact for the other tracks.
 - The console ISO build passed for music, no-music, and web variants. The
-  latest largest image+BSS was 1,751,804 bytes, leaving 279,812 bytes free
+  latest largest image+BSS was 1,725,580 bytes, leaving 306,036 bytes free
   above the image; the existing 256 KB remains reserved.
 
 After removing banking from Vesper Hook's two bends, the compiled path package

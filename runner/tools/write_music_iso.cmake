@@ -7,12 +7,75 @@ set(_hdr "${CMAKE_CURRENT_BINARY_DIR}/music_tracks.h")
 set(_iso "${CMAKE_CURRENT_BINARY_DIR}/iso.xml")
 
 file(WRITE "${_hdr}"
-"/* Generated from audio/*.mp3 — do not edit. */
+"/* Generated from audio MP3 filenames — do not edit. */
 #ifndef MUSIC_TRACKS_H
 #define MUSIC_TRACKS_H
 
 #define MUSIC_TRACK_COUNT ${MUSIC_TRACK_COUNT}
+#define MUSIC_MENU_TRACK ${MUSIC_MENU_TRACK}
+#define MUSIC_TOTAL_TRACK_COUNT ${MUSIC_TOTAL_TRACK_COUNT}
 ")
+
+file(APPEND "${_hdr}" "\n/* Display credits from the original audio filenames. */\n")
+file(APPEND "${_hdr}" "static const char *const music_artist[MUSIC_TRACK_COUNT] = {\n")
+foreach(_mp3 ${AUDIO_MP3S})
+	cmake_path(GET _mp3 FILENAME _base)
+	string(REGEX REPLACE "\\.[^.]*$" "" _credit "${_base}")
+	string(FIND "${_credit}" " - " _split)
+	if(_split GREATER_EQUAL 0)
+		string(SUBSTRING "${_credit}" 0 ${_split} _artist)
+	else()
+		set(_artist "")
+	endif()
+	string(REPLACE "\\" "\\\\" _artist "${_artist}")
+	string(REPLACE "\"" "\\\"" _artist "${_artist}")
+	file(APPEND "${_hdr}" "\t\"${_artist}\",\n")
+endforeach()
+file(APPEND "${_hdr}" "};\nstatic const char *const music_title[MUSIC_TRACK_COUNT] = {\n")
+foreach(_mp3 ${AUDIO_MP3S})
+	cmake_path(GET _mp3 FILENAME _base)
+	string(REGEX REPLACE "\\.[^.]*$" "" _credit "${_base}")
+	string(FIND "${_credit}" " - " _split)
+	if(_split GREATER_EQUAL 0)
+		math(EXPR _song_at "${_split} + 3")
+		string(SUBSTRING "${_credit}" ${_song_at} -1 _title)
+	else()
+		set(_title "${_credit}")
+	endif()
+	string(REPLACE "\\" "\\\\" _title "${_title}")
+	string(REPLACE "\"" "\\\"" _title "${_title}")
+	file(APPEND "${_hdr}" "\t\"${_title}\",\n")
+endforeach()
+file(APPEND "${_hdr}" "};\n")
+
+cmake_path(GET MENU_AUDIO_MP3 FILENAME _menu_base)
+string(REGEX REPLACE "\\.[^.]*$" "" _menu_credit "${_menu_base}")
+string(FIND "${_menu_credit}" " - " _menu_split)
+if(_menu_split GREATER_EQUAL 0)
+	string(SUBSTRING "${_menu_credit}" 0 ${_menu_split} _menu_artist)
+	math(EXPR _menu_song_at "${_menu_split} + 3")
+	string(SUBSTRING "${_menu_credit}" ${_menu_song_at} -1 _menu_title)
+else()
+	set(_menu_artist "")
+	set(_menu_title "${_menu_credit}")
+endif()
+string(REPLACE "\\" "\\\\" _menu_artist "${_menu_artist}")
+string(REPLACE "\"" "\\\"" _menu_artist "${_menu_artist}")
+string(REPLACE "\\" "\\\\" _menu_title "${_menu_title}")
+string(REPLACE "\"" "\\\"" _menu_title "${_menu_title}")
+file(APPEND "${_hdr}" "static const char music_menu_artist[] = \"${_menu_artist}\";\n")
+file(APPEND "${_hdr}" "static const char music_menu_title[] = \"${_menu_title}\";\n")
+execute_process(
+	COMMAND "${FFPROBE}" -v quiet -show_entries format=duration -of csv=p=0 "${MENU_AUDIO_MP3}"
+	OUTPUT_VARIABLE _menu_duration OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+execute_process(
+	COMMAND "${PYTHON3}" -c "import math,sys; d=float(sys.argv[1])*60; print(math.floor(d+0.5), math.floor(d+0.5))" "${_menu_duration}"
+	OUTPUT_VARIABLE _menu_frame_pair OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+string(REGEX MATCH "^([0-9]+) ([0-9]+)$" _menu_frame_match "${_menu_frame_pair}")
+set(_menu_cd_frames "${CMAKE_MATCH_1}")
+set(_menu_web_frames "${CMAKE_MATCH_2}")
+file(APPEND "${_hdr}" "static const int music_menu_cd_frames = ${_menu_cd_frames};\n")
+file(APPEND "${_hdr}" "static const int music_menu_web_frames = ${_menu_web_frames};\n")
 
 if(NOT RUNNER_XA_MUSIC)
 	file(APPEND "${_hdr}" "\n/* Approx 60Hz frame counts per CDDA track (duration + short pregap). */\n")
@@ -74,7 +137,7 @@ file(WRITE "${_iso}" "<?xml version=\"1.0\" encoding=\"utf-8\"?>
 
 if(RUNNER_XA_MUSIC)
 	set(_i 0)
-	while(_i LESS MUSIC_TRACK_COUNT)
+	while(_i LESS MUSIC_TOTAL_TRACK_COUNT)
 		if(_i LESS 10)
 			set(_id "0${_i}")
 		else()
@@ -107,6 +170,7 @@ else()
 			"	<track type=\"audio\" source=\"${CMAKE_CURRENT_BINARY_DIR}/TRACK${_id}.wav\" />\n")
 		math(EXPR _i "${_i} + 1")
 	endwhile()
+	file(APPEND "${_iso}" "\t<track type=\"audio\" source=\"${MENU_TRACK_OUT}\" />\n")
 	file(APPEND "${_iso}" "</iso_project>\n")
 endif()
 
@@ -161,6 +225,8 @@ foreach(_mp3 ${AUDIO_MP3S})
 	endif()
 	string(APPEND _audio_json "      \"runner/audio/${_base}\"")
 endforeach()
+cmake_path(GET MENU_AUDIO_MP3 FILENAME _menu_base)
+string(APPEND _audio_json ",\n      \"runner/audio/menu/${_menu_base}\"")
 file(WRITE "${_repo}/web/manifest.json" "{
   \"games\": [
     {
@@ -173,6 +239,7 @@ file(WRITE "${_repo}/web/manifest.json" "{
       \"blurb\": \"Pick a runner and hit the road. A PlayStation game you can play right in your browser.\",
       \"width\": 320,
       \"height\": 240,
+      \"menuAudioIndex\": ${MUSIC_MENU_TRACK},
       \"audio\": [
 ${_audio_json}
       ]

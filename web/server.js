@@ -24,6 +24,7 @@ const types = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
   ".css": "text/css; charset=utf-8"
 };
 
@@ -70,7 +71,7 @@ function resolve(urlPath) {
     return path.join(repo, urlPath);
   if (urlPath.startsWith("/runner/audio/")) {
     const name = urlPath.slice("/runner/audio/".length);
-    if (!name || name.includes("/") || name.includes("\\") || name.includes(".."))
+    if (!name || (name.includes("/") && !name.startsWith("menu/")) || name.includes("\\") || name.includes(".."))
       return null;
     const file = path.resolve(repo, "runner", "audio", name);
     return inside(path.resolve(repo, "runner", "audio"), file) ? file : null;

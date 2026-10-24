@@ -79,6 +79,9 @@ void text_scale(int x, int y, const char *s, int r, int g, int b, int scale);
  * setUVWH wants it: one less than the number of texels. */
 void tex_quad(int x, int y, int w, int h, int u, int v, int uw, int uh,
               int r, int g, int b, uint16_t tpage, uint16_t clut);
+/* Unscaled textured sprite: one texel per screen pixel, for small UI glyphs. */
+void tex_sprite(int x, int y, int w, int h, int u, int v,
+                int r, int g, int b, uint16_t tpage, uint16_t clut);
 /* A flat rectangle on the front layer. Used for the menu font. */
 void fill_rect(int x, int y, int w, int h, int r, int g, int b);
 /* Dither off for the front layer, so those rectangles stay solid. */

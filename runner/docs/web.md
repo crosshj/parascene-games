@@ -13,6 +13,13 @@ The page that reads it is the repo's GitHub Pages player. The picker and
 the player are described in the GitHub Pages section of `TODO.md`.
 `npm start` in the `web/` folder serves that same page locally.
 
+The player bypasses EmulatorJS's ROM cache so a refresh loads the current
+disc. In 4.2.3, `EJS_cacheLimit = 0` only stops new cache writes; older
+entries can still win a content-length comparison after a rebuild.
+Core/BIOS caching and the separate memory-card database remain enabled.
+The pinned version's cache lookup is in
+[emulator.js](https://github.com/EmulatorJS/EmulatorJS/blob/v4.2.3/data/src/emulator.js).
+
 ## The row
 
 The game draws 320 pixels on the bottom line, `y = 239`, `x = 0` through
@@ -76,8 +83,9 @@ The page multiplies this volume by its own volume control.
 
 The sequence changes only when the track should start from the beginning.
 The same sequence with a new volume changes loudness and does not seek.
-Today the files are `runner1.mp3` (index 0) and `runner2-lumenwild.mp3`
-(index 1).
+`web/manifest.json` lists the gameplay files in build order, followed by
+the menu track. `menuAudioIndex` identifies the menu track; it plays
+quietly and never shows a music credit popover.
 
 ### 3 — save
 
@@ -86,27 +94,74 @@ had a write this session omits the command.
 
 The argument is not the save. Story progress is a file on the PlayStation
 memory card in slot 1, `bu00:UUUVVV-RUNNER`. The record layout is
-`SAVE_VERSION` in `runner/src/save.h`. The browser keeps that card by
-storing the emulator's slot-1 image under the game id `runner`.
+`SAVE_VERSION` in `runner/src/save.h`. EmulatorJS mounts `/data/saves`
+on IndexedDB and restores it before starting the core. Slot 1 is a
+131,072-byte image at `/data/saves/PCSX-ReARMed/runner-web.srm`, named
+after the ROM basename rather than `EJS_gameName`. Keep that basename
+stable so new builds reuse existing cards.
 
-When the generation changes, the page flushes that card into browser
-storage. The page also flushes it every few seconds, and again when the
-page is hidden. The next visit loads the card back into the emulator
-before the game boots, and the game reads the file.
+When the generation changes, the page calls `saveSaveFiles()` to copy the
+core's card into its filesystem, then awaits `FS.syncfs(false)` to commit
+it to IndexedDB. Only a successful commit acknowledges the generation;
+failed commits remain pending for retry. It also flushes every five
+seconds, on `visibilitychange` to hidden, and on `pagehide` while the
+filesystem is still mounted. The next
+visit loads the card before the game boots, and the game reads the file.
+No separate memory-card server or physical card is needed.
+
+The mount deliberately disables IDBFS `autoPersist`. In EmulatorJS 4.2.3,
+the exit handler writes the card and immediately unmounts `/data/saves`.
+A queued automatic commit can then see an empty filesystem and delete
+the stored files. Explicit commits avoid that shutdown race. Never sync
+an already unmounted card directory.
+The upstream mount and exit handlers are in
+[GameManager.js](https://github.com/EmulatorJS/EmulatorJS/blob/v4.2.3/data/src/GameManager.js).
+
+The card status stays hidden until Play is pressed. It shows
+“Memory card ready” after validating and committing the
+card, “Progress saved” after a game write, or “Memory card save failed”.
+`window.__card` and browser console messages expose the path, generation,
+and persistence errors for diagnosis. A game save is triggered by newly
+unlocked story progress, not by moving around the menus.
+
+Cards belong to the browser profile and origin (scheme, host, and port).
+The hosted site, `localhost`, and `127.0.0.1` therefore have separate
+cards. Clearing site storage removes its card; private browsing may
+discard it when the session closes.
 
 A different record version is still the same card image. The page does
 not learn the new fields. The game ignores an older version and will not
-overwrite a newer one. Renaming the game id would store a second card
+overwrite a newer one. Renaming the ROM would store a second card
 and leave the old one behind.
+
+### Browser regression check
+
+`runner/tools/card_probe` builds a small isolated ROM using the production
+web save code. Its Chrome check writes progress, commits it through the
+page's card bridge, reloads the whole emulator, and verifies that the game
+reads the saved value without rewriting it. It uses a separate browser
+profile and card name, never a player's card:
+
+```
+cmake -S runner/tools/card_probe -B runner/build/card-probe -G Ninja
+cmake --build runner/build/card-probe
+node runner/tools/card_probe/check.cjs
+node runner/tools/card_probe/check.cjs --player
+```
+
+`--player` boots the real page and web disc in the isolated browser. It
+seeds a stale cached ROM, checks that card status is hidden before Play,
+and sends Q/E and standard Gamepad API shoulder-button events. It checks
+the actual command pixels and HTML audio playback after each song change.
 
 ## When the game sends them
 
 This matches the CD build's music, with the page holding the audio files.
 
-- The logo is silence. Music starts once, when the title screen appears.
-  The game shuffles the mp3 list and sends `music` for the first track.
-- The same track keeps playing through runner select, the run, a wipeout,
-  and a return to the title. Those screens do not restart it.
+- The logo is silence. The title and pre-game menus play the menu track.
+  Entering a stage starts the shuffled gameplay playlist.
+- L1 selects the previous song and R1 the next, preserving playlist order.
+  Keyboard Q/E send those same buttons in the web player.
 - Pause sends the same sequence at volume 40. Continue, or quit to the
   title from the pause menu, sends volume 128.
 - The game counts `round(seconds × 60)` frames at 60 Hz, using the real

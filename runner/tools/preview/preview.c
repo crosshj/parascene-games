@@ -541,6 +541,7 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, int alt, con
     int r, g, b;
     projections = 0;
     path_preview_samples = path_preview_transforms = 0;
+    road_preview_scene_limit_hits = 0;
     px_fill = px_blend = 0;
     if (visibility_enabled) {
         asset_count = 0;
@@ -1316,6 +1317,67 @@ static int pipeline_check(const char *dir) {
     return failures!=0;
 }
 
+static int paint_pixel(const uint8_t *p) {
+    return p[0] > p[1] + 40 && p[2] > p[1] + 40;
+}
+
+static void obstacle_check_shade(int *r,int *g,int *b,int z) {
+    (void)r;(void)g;(void)b;(void)z;
+}
+
+/* Ground paint inside the solid silhouette of a box on the road must
+ * be hidden. Render the two independent masks before checking the combined
+ * frame, without a runner sprite concealing the bottom of the screen. */
+static int obstacle_occlusion_check(const char *dir) {
+    static const Light light={.tint={128,128,128}};
+    static const RoadStyle st={.light=&light,.road={24,24,24},.road_far={24,24,24},
+                               .edge={24,24,24},.edge_end=4200,.dash={248,24,248}};
+    static const ObstacleStyle box={{16,240,32},{16,240,32},{16,240,32},{16,240,32},{16,240,32}};
+    static const struct { const char *track; int band; } cases[]={
+        {"straight.run",16},{"bend.flat",24},{"bank.bend",24},{"hill.loop",16}
+    };
+    static uint8_t paint[SCREEN_H][SCREEN_W],solid[SCREEN_H][SCREEN_W];
+    int k,phase,lane,depth,x,y,dx,dy,poses=0,failures=0,worst=0,overlap=0;
+    char name[512];
+    for(k=0;k<(int)(sizeof cases/sizeof cases[0]);k++) {
+    if(!path_open(cases[k].track)) return 1;
+    for(phase=0;phase<3;phase++) for(lane=-1;lane<=1;lane++) for(depth=144;depth<=480;depth+=4) {
+        int s=(cases[k].band+phase)*STEP+STEP/2,leaks=0;
+        LevelFrame f={s-depth,0,0,0,0};
+        path_reset();path_begin(f.scroll);
+        road_draw(&st,&f);render(0,0,0);
+        for(y=0;y<SCREEN_H;y++) for(x=0;x<SCREEN_W;x++) paint[y][x]=paint_pixel(fb[y][x]);
+        world_flip();path_begin(f.scroll);
+        obstacle_box_shade(s,lane*LANE,&box,obstacle_check_shade);render(0,0,0);
+        for(y=0;y<SCREEN_H;y++) for(x=0;x<SCREEN_W;x++)
+            solid[y][x]=fb[y][x][1]>160 && fb[y][x][0]<80;
+        world_flip();path_begin(f.scroll);
+        road_draw(&st,&f);
+        obstacle_box_shade(s,lane*LANE,&box,obstacle_check_shade);render(0,0,0);
+        for(y=1;y<SCREEN_H-1;y++) for(x=1;x<SCREEN_W-1;x++) if(paint[y][x] && solid[y][x]) {
+            int interior=1;
+            for(dy=-1;dy<=1;dy++) for(dx=-1;dx<=1;dx++) interior&=solid[y+dy][x+dx];
+            if(interior) {overlap++;leaks+=paint_pixel(fb[y][x]);}
+        }
+        if(leaks) {
+            failures++;
+            if(leaks>worst) {
+                worst=leaks;
+                snprintf(name,sizeof name,"%s/obstacle-occlusion-worst.png",dir);write_png(name);
+            }
+            if(failures<6) fprintf(stderr,"paint over block: %s phase %d lane %d depth %d: %d pixels\n",cases[k].track,phase,lane,depth,leaks);
+        }
+        if(phase==0 && lane==0 && depth==156) {
+            snprintf(name,sizeof name,"%s/occlusion-case%d.png",dir,k);write_png(name);
+        }
+        world_flip();poses++;
+    }
+    }
+    printf("obstacle occlusion: %d poses, %d paint/solid overlap samples, %d frames with paint over a block, worst %d pixels\n",
+           poses,overlap,failures,worst);
+    return failures!=0 || overlap==0;
+}
+
 static int speedline_check(void) {
     int i,stage,alt,poses=0,failures=0;
     visibility_enabled=1;
@@ -1359,6 +1421,49 @@ static int shake_check(void) {
     return failures!=0;
 }
 
+/* Native motion review of the exact split and join, through both routes.
+ * PNGs can be encoded directly as a video; cost is checked for every frame. */
+static int fork_review(const char *dir,int stage,int step) {
+    const Level *lv=0;
+    int li;
+    for(li=0;li<level_count;li++) if(!strcmp(levels[li]->track,"meridian.drift")) lv=levels[li];
+    if(!lv) return 1;
+    int b0,b1,route,s,n=0,failures=0,exhausted=0,holes=0,worst_hole=0;size_t worst=0;
+    char filename[512];
+    if(stage<0 || stage>=lv->stage_count || step<1) return 1;
+    path_open(lv->stages[stage].track);
+    if(!path_branches() || !path_branch(0,0,&b0,&b1)) return 1;
+    for(route=0;route<2;route++) {
+        int frame_index=0;
+        path_reset();
+        for(s=b0-3000;s<=b1+2000;s+=step) {
+            LevelFrame f={s,20,frame_index,0,stage};Cost c;
+            int cr,cg,cb,x,y,hole=0;
+            snprintf(filename,sizeof filename,"%s/route%d_%04d.png",dir,route,frame_index++);
+            c=frame(lv,&f,3,route,filename);
+            /* Foreground floor coverage is mandatory in these corridors.
+             * Leave the horizon band out: after the join the road descends,
+             * exposing sky between distant wall silhouettes. Their shape is
+             * reviewed in the images, not inferred from a flat-floor rule.
+             * This rejects a hole even if the old renderer also contains it. */
+            lv->clear_color(&f,&cr,&cg,&cb);
+            if(psx15) { cr&=~7;cg&=~7;cb&=~7; }
+            for(y=clamp(path_horizon()+32,0,SCREEN_H);y<SCREEN_H;y++)
+                for(x=0;x<SCREEN_W;x++)
+                    hole+=fb[y][x][0]==cr && fb[y][x][1]==cg && fb[y][x][2]==cb;
+            if(hole) holes++;
+            if(hole>worst_hole) worst_hole=hole;
+            if(c.bytes>worst) worst=c.bytes;
+            if(road_preview_scene_limit_hits) exhausted++;
+            if(c.bytes>=BUFFER_LENGTH || road_preview_scene_limit_hits || hole) failures++;
+            n++;
+        }
+    }
+    printf("fork review: %s, %d frames, both routes, %d..%d, worst %zu primitive bytes, %d scenery-budget omissions, %d frames with foreground sky holes (worst %d pixels), %d failures\n",
+           lv->stages[stage].track,n,b0-3000,b1+2000,worst,exhausted,holes,worst_hole,failures);
+    return failures!=0;
+}
+
 int main(int argc, char **argv) {
     static const struct { const char *tag; int scroll, speed, alt, stage; } shots[] = {
         {"run_a", 2600, 20, 0, 0}, {"run_b", 15000, 20, 0, 0}, {"run_c", 31337, 20, 0, 0},
@@ -1372,6 +1477,8 @@ int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     int i, j;
     world_init();
+    if(argc>2 && !strcmp(argv[2],"--obstacle-occlusion-check")) return obstacle_occlusion_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--fork-review")) return fork_review(dir,argc>3?atoi(argv[3]):1,argc>4?atoi(argv[4]):64);
     if(argc>2 && !strcmp(argv[2],"--shake-check")) return shake_check();
     if(argc>2 && !strcmp(argv[2],"--finish-gate-check")) return finish_gate_check(dir);
     if(argc>2 && !strcmp(argv[2],"--runner-lighting-check")) return runner_lighting_check(dir);
@@ -1409,7 +1516,8 @@ int main(int argc, char **argv) {
         for (i = 0; i < level_count; i++)
             if (!strcmp(levels[i]->track, getenv("RUNNER_PREVIEW_TRACK") ? getenv("RUNNER_PREVIEW_TRACK") : "sine.gate")) {
                 snprintf(path, sizeof path, "%s/shot.png", dir);
-                frame(levels[i], &f, !strcmp(argv[2],"--runner-shot")?3:1, 0, path);
+                frame(levels[i], &f, !strcmp(argv[2],"--runner-shot")?3:1,
+                      argc > 6 ? atoi(argv[6]) : 0, path);
                 return 0;
             }
         return 1;

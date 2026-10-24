@@ -3,6 +3,7 @@ import copy
 import unittest
 import struct
 import tempfile
+import subprocess
 from pathlib import Path
 from bake_worlds import emit, pack_indices, project, route_masks, schedules_for, span_ok, outside_planes
 from check_ram import check
@@ -121,7 +122,7 @@ class WorldCompilerTests(unittest.TestCase):
 
     def test_resident_budget_and_vertex_overflow_fail_the_build(self):
         ring = [[0, 0, 0]] * 6
-        group = dict(rings=[ring], schedules=[(0, 1, 0)], indices=[0], bands=1)
+        group = dict(rings=[ring], schedules=[(0, 1, 0)], indices=[0], bands=1, fork_walls=[])
         with self.assertRaisesRegex(ValueError, 'resident bytes'):
             emit([group], [('test',0,0)], dict(max_resident_bytes=1, lod_strides=[1,2,4,8]))
         group['rings'] = [[[0, 0, 0]] + [[32768, 0, 0]] * 5]
@@ -147,6 +148,31 @@ class WorldCompilerTests(unittest.TestCase):
             path.write_bytes(elf(0x80000000, 0x10000))
             with self.assertRaisesRegex(ValueError, 'reserved low RAM'):
                 check(path)
+
+    def test_shared_ring_pool_preserves_vertices_and_route_cut_flags(self):
+        rings=[[[i*256,0,0]]*6 for i in range(20)]
+        groups=[dict(rings=rings,schedules=[(0,1,0)],indices=[0],bands=1,
+                     fork_walls=[],cuts=cuts) for cuts in ([],[4])]
+        header,resident=emit(groups,[('main',0,0),('alt',1,1)],
+                             dict(max_resident_bytes=1500,lod_strides=[1,2,4,8]))
+        # Two independent geometry arrays exceed the 1500-byte fixture budget.
+        # Decode through the actual runtime accessor, including the unique cut.
+        with tempfile.TemporaryDirectory(prefix='ring-pool-') as tmp:
+            src=Path(tmp)/'check.c'; exe=Path(tmp)/'check'
+            src.write_text('#include "world_mesh.h"\n'+header+'''
+int main(void) {
+    int route,i;
+    for(route=0;route<2;route++) for(i=0;i<20;i++) {
+        const WorldRing *r=world_mesh_ring(&world_meshes[route],i);
+        if(r->origin.x!=i*256 || r->origin.y || r->origin.z ||
+           r->flags!=(route==1 && i==4)) return 1;
+    }
+    return 0;
+}
+''')
+            subprocess.run(['cc','-std=gnu99','-DRUNNER_PREVIEW','-I',
+                            str(Path(__file__).resolve().parents[1]/'src'),str(src),'-o',str(exe)],check=True)
+            subprocess.run([str(exe)],check=True)
 
 
 if __name__ == '__main__':

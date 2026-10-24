@@ -9,6 +9,20 @@ routes through the fork stages. Meridian's profile reproduces the level's
 108-unit ice sheets and path-relative crack height; cut markers split the wall
 draw list so disconnected sections are never bridged.
 
+Manifests with `fork_boundaries` bake one physical boundary shared by both
+routes. Continuous outer walls enclose the fork. The inner island starts and
+ends at the actual intersections of the offset wall contours, beyond the
+curbs; walls are never placed where the two drivable corridors still overlap.
+The outer boundary also supplies a continuous floor under both roads, covering
+the split/join seams. Ordinary wall sheets skip the entire replacement interval.
+One world-space mesh is drawn once through the active camera, using opaque
+faces, back-face rejection and polygon clipping against the near/screen planes.
+The floor draws behind the road and walls. Adjacent faces share exact endpoints.
+
+Identical wall rings across route packages share a vertex pool when this saves
+RAM; each route retains its own visibility/LOD schedule and cut flags. This is
+exact storage sharing, with no additional geometry simplification.
+
 A manifest describes six cross-section vertices as `[side, outside, height]`,
 LOD distances/strides, a screen-error tolerance, near transition distance,
 lookahead, and memory/work limits. The host sampler uses the actual fixed-point
@@ -43,6 +57,8 @@ preparation coverage, **not** a claim that every world's scenery is mesh-baked.
 - `cmake --build runner/build --target check_worlds`: package budgets, path
   equivalence across routes/seeks, exact world vertices, and independent
   between-sample camera/geometry checks of the emitted LOD chords.
+  Fork tests independently reject walls entering either road, open seams,
+  route-dependent world geometry, and incorrect edge selection on mirrored forks.
 - `cmake --build runner/build --target check_world_visuals`: native mesh A/B
   images, the all-stage shared-renderer sweep, and tunnel, city, countdown,
   visibility and motion checks. Mesh image limits are mean channel delta 0.15
@@ -50,6 +66,12 @@ preparation coverage, **not** a claim that every world's scenery is mesh-baked.
   within one pixel of the reference (8 channel units for 15-bit shading). Raw
   high-contrast differences are also recorded. This tests one-pixel silhouette
   agreement rather than penalizing a long edge simply for moving one pixel. The worst pair is saved for review.
+  The separate `--fork-review` traversal follows both routes through the split
+  and join with camera easing. It fails on scenery-budget omissions or exposed
+  foreground sky (32 pixels below the horizon) in these enclosed corridors.
+  Distant silhouettes are reviewed visually. This checks the
+  intended result, rather than accepting agreement with a broken old image.
+  Current fork evidence is recorded in [Meridian fork rendering](meridian-fork-rendering.md).
 - `tools/profile_stage.py`: builds the disc, verifies a unique ROM run ID and
   exact stage/scroll, records disc/source/package hashes and the console report,
   then closes only the emulator it launched. Profiling counts actual presentation
@@ -139,10 +161,11 @@ The last recorded Reach mesh sweep compares 3,825 camera poses: worst mean
 channel delta 0.121580/255 and 39 residual high-contrast pixels beyond
 one-pixel matching. It predates the latest build. The current check is run with
 `check_world_visuals`; generated native pairs are in
-`build/world-visuals/reach-review.html`. Meridian's latest 25-pose check across
+`build/world-visuals/reach-review.html`. Meridian's earlier 25-pose check across
 all stages and both fork routes has 0.021562/255 worst mean delta and at most 13
 residual high-contrast pixels beyond one-pixel matching. These are host visual
-results. Matched emulator performance runs for the revised Reach and Meridian
+results predating the fork-boundary replacement; they did not establish correct
+fork walls. Matched emulator performance runs for the revised Reach and Meridian
 builds remain outstanding.
 Fully fogged road, shoulders and ground share one opaque face because their
 colors have converged, retaining the outer silhouette with fewer primitives.

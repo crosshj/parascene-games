@@ -23,6 +23,7 @@
   <!-- /share -->
   <style>
     @font-face { font-family: "04b_03"; src: url("brand/04b03.woff2") format("woff2"); font-display: swap; }
+    @font-face { font-family: "m5x7"; src: url("brand/m5x7.ttf") format("truetype"); font-weight: 400; font-display: swap; }
     :root {
       color-scheme: dark;
       --bg: #120a1a; --panel: #1e1626; --face: #2a2234; --hi: color-mix(in srgb, var(--face) 92%, white); --mark: color-mix(in srgb, var(--face) 60%, white); --line: #38244c; --pink: #dd49d4; --violet: #7b4dff;
@@ -108,6 +109,27 @@
       image-rendering: pixelated; image-rendering: crisp-edges;
     }
     #bezel { position: absolute; left: 0; right: 0; bottom: 0; height: calc(100% / 240); background: #000; z-index: 4; pointer-events: none; }
+    #song-credit {
+      position: absolute; z-index: 7; left: 2.5%; bottom: 5%; width: min(76%, 340px);
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; overflow: hidden; pointer-events: none;
+      color: #fff; background: linear-gradient(115deg, rgba(22, 13, 32, .96), rgba(31, 20, 43, .9));
+      border: 1px solid rgba(255,255,255,.2); border-left: 3px solid var(--pink);
+      border-radius: 11px; box-shadow: 0 8px 28px #09040bc9, inset 0 1px rgba(255,255,255,.08);
+      opacity: 0; transform: translate3d(-18px, 8px, 0) scale(.97); filter: blur(2px);
+      transition: opacity .55s ease, transform .72s cubic-bezier(.2,.85,.25,1), filter .55s ease;
+    }
+    #song-credit.visible { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: blur(0); }
+    #song-credit[hidden] { display: none; }
+    #song-credit .music-icon { flex: 0 0 16px; width: 16px; height: 20px; color: #d4a8e3; }
+    #song-credit .credit-copy { min-width: 0; }
+    #song-credit .artist, #song-credit .title { display: block; overflow: hidden; font: 400 32px/.85 "m5x7", sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+    #song-credit .artist { color: rgba(255,255,255,.68); }
+    @media (max-width: 640px) {
+      #song-credit { width: min(76%, 230px); gap: 7px; padding: 8px 10px; }
+      #song-credit .artist, #song-credit .title { font-size: 16px; }
+      #song-credit .music-icon { flex-basis: 12px; width: 12px; height: 16px; }
+    }
     #cover { position: absolute; inset: 0; z-index: 5; width: 100%; height: 100%; image-rendering: pixelated; }
     #cover[hidden] { display: none; }
     #play {
@@ -285,6 +307,8 @@
       { id: "crs", idx: 0, gp: 0, keys: ["KeyK", "Space"], label: "✕", slot: "face" },
       { id: "select", idx: 2, gp: 8, keys: ["ShiftLeft", "ShiftRight"], label: "Select", slot: "menu" },
       { id: "start", idx: 3, gp: 9, keys: ["Enter"], label: "Start", slot: "menu" },
+      { id: "l1", idx: 10, gp: 4, keys: ["KeyQ"], label: "Previous song (L1)", slot: null },
+      { id: "r1", idx: 11, gp: 5, keys: ["KeyE"], label: "Next song (R1)", slot: null },
     ];
     const PAD = ["BUTTON_2", "BUTTON_4", "SELECT", "START", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
       "BUTTON_1", "BUTTON_3", "LEFT_TOP_SHOULDER", "RIGHT_TOP_SHOULDER", "LEFT_BOTTOM_SHOULDER",
@@ -300,22 +324,79 @@
 
     /* The game's save is the emulated card, not a byte in the command row.
        Command 3 means a write finished; flush that card into browser storage. */
-    let cardGen = 0;
+    let cardGen = 0, cardRequestedGen = 0, cardSyncPromise = null, cardInterval = 0;
+    const cardState = window.__card = { connected: false, persisted: false, path: null, generation: 0, error: null };
+    function cardStatus(message) {
+      const status = document.getElementById("card-status");
+      if (status) {
+        status.textContent = message;
+        status.hidden = false;
+      }
+    }
+    function mountCardFileSystem() {
+      this.mkdir("/data");
+      this.mkdir("/data/saves");
+      // EmulatorJS 4.2.3 unmounts this filesystem on exit. Its queued
+      // autoPersist can then see an empty mount and delete stored saves.
+      // We commit explicitly on writes, on a timer, and when hidden.
+      this.FS.mount(this.FS.filesystems.IDBFS, { autoPersist: false }, "/data/saves");
+      return new Promise((resolve, reject) => this.FS.syncfs(true, error => {
+        if (!error) { resolve(); return; }
+        cardState.error = String(error);
+        cardStatus("Memory card load failed");
+        console.warn("Could not restore the memory card", error);
+        reject(error);
+      }));
+    }
     function flushCard() {
-      const gm = window.EJS_emulator && window.EJS_emulator.gameManager;
-      if (!gm || typeof gm.saveSaveFiles !== "function") return;
-      try { gm.saveSaveFiles(); } catch { /* core is going away */ }
+      const emu = window.EJS_emulator, gm = emu && emu.gameManager;
+      if (!emu?.started || !gm || typeof gm.saveSaveFiles !== "function") return Promise.resolve(false);
+      if (gm.FS.lookupPath("/data/saves").node.mount.mountpoint !== "/data/saves") return Promise.resolve(false);
+      if (cardSyncPromise) return cardSyncPromise;
+      const generation = cardRequestedGen;
+      cardSyncPromise = (async () => {
+        gm.saveSaveFiles();
+        const image = gm.getSaveFile(false);
+        if (!image || image.length !== 131072 || image[0] !== 0x4d || image[1] !== 0x43) {
+          cardStatus("Memory card connecting");
+          return false;
+        }
+        cardState.path = gm.getSaveFilePath();
+        if (!cardState.connected) console.info("Memory card connected", { path: cardState.path, bytes: image.length });
+        cardState.connected = true;
+        // saveSaveFiles copies the core's card to its filesystem. Wait for the
+        // IndexedDB commit before acknowledging the game's save generation.
+        await new Promise((resolve, reject) => gm.FS.syncfs(false, error => error ? reject(error) : resolve()));
+        const changed = generation !== cardGen;
+        cardGen = generation;
+        Object.assign(cardState, { persisted: true, generation, error: null });
+        cardStatus(generation ? "Progress saved" : "Memory card ready");
+        if (changed) console.info("Memory card saved", { path: cardState.path, generation });
+        return true;
+      })().catch(error => {
+        cardState.persisted = false;
+        cardState.error = String(error);
+        cardStatus("Memory card save failed");
+        console.warn("Could not persist the memory card", error);
+        return false;
+      }).finally(() => {
+        cardSyncPromise = null;
+        // A newer write may have arrived while the previous card was syncing.
+        if (cardRequestedGen !== cardGen && cardRequestedGen !== generation) flushCard();
+      });
+      return cardSyncPromise;
     }
     function noteCard(cmds) {
       for (const cmd of cmds) {
         if (cmd.id !== 3 || cmd.args.length < 1) continue;
         const gen = cmd.args[0];
         if (!gen || gen === cardGen) continue;
-        cardGen = gen;
+        cardRequestedGen = gen;
         flushCard();
       }
     }
     addEventListener("pagehide", flushCard);
+    addEventListener("visibilitychange", () => { if (document.hidden) flushCard(); });
 
     function unlockAudio() {
       for (const c of window.__audioCtxs) c.resume();
@@ -388,6 +469,43 @@
       let active = null;
       let outgoing = null;
       let raf = 0;
+      const credit = document.getElementById("song-credit");
+      let creditTimer = 0;
+      let creditHideTimer = 0;
+      let creditFrame = 0;
+      function hideCredit(immediate = false) {
+        if (!credit) return;
+        clearTimeout(creditTimer);
+        cancelAnimationFrame(creditFrame);
+        creditFrame = 0;
+        credit.classList.remove("visible");
+        clearTimeout(creditHideTimer);
+        if (immediate) credit.hidden = true;
+        else creditHideTimer = setTimeout(() => { credit.hidden = true; }, 750);
+      }
+      function showCredit(track) {
+        if (track === game.menuAudioIndex) {
+          hideCredit(true);
+          return;
+        }
+        if (!credit || !game.audio[track]) return;
+        const file = decodeURIComponent(new URL(game.audio[track], document.baseURI).pathname.split("/").pop());
+        const stem = file.replace(/\.[^.]+$/, "");
+        const split = stem.match(/^(.+?)\s+-\s+(.+)$/);
+        credit.querySelector(".artist").textContent = split ? split[1] : "Parascene Games";
+        credit.querySelector(".title").textContent = split ? split[2] : stem;
+        credit.hidden = false;
+        credit.classList.remove("visible");
+        void credit.offsetWidth;
+        cancelAnimationFrame(creditFrame);
+        creditFrame = requestAnimationFrame(() => {
+          creditFrame = 0;
+          credit.classList.add("visible");
+        });
+        clearTimeout(creditTimer);
+        clearTimeout(creditHideTimer);
+        creditTimer = setTimeout(hideCredit, 8200);
+      }
       function loud() {
         return Math.max(0, Math.min(1, gameVol / 128 * pageVolume));
       }
@@ -460,7 +578,7 @@
         },
         command(cmds) {
           for (const cmd of cmds) {
-            if (cmd.id === 1) api.stop();
+            if (cmd.id === 1) { api.stop(); hideCredit(); }
             else if (cmd.id === 2 && cmd.args.length >= 3) {
               const sequence = cmd.args[0];
               const track = cmd.args[1];
@@ -468,6 +586,7 @@
               if (sequence !== seq && sequence !== 0 && game.audio[track]) {
                 seq = sequence;
                 begin(new URL(game.audio[track], document.baseURI).href, !!(active || outgoing));
+                showCredit(track);
               }
             }
           }
@@ -614,6 +733,7 @@
         get: () => GM.value,
         set(v) {
           GM.value = v;
+          v.prototype.mountFileSystems = mountCardFileSystem;
           const cfg = v.prototype.getRetroArchCfg;
           v.prototype.getRetroArchCfg = function () {
             return cfg.call(this) + "audio_sync = false\nblock_sram_overwrite = true\n";
@@ -627,13 +747,10 @@
       };
       window.EJS_player = "#game";
       window.EJS_core = "psx";
-      /* This id is the emulated memory card's name. The browser core has
-         no PlayStation BIOS, so there is no card browser on screen. Slot 1
-         is still the save image: the game writes bu00:UUUVVV-RUNNER there.
-         A new record version stays inside the same card; renaming the id
-         would orphan it. */
+      /* Slot 1 holds bu00:UUUVVV-RUNNER. EmulatorJS restores its image from
+         IndexedDB before boot. The ROM basename determines the save path;
+         keep runner-web.bin stable so existing cards remain available. */
       window.EJS_gameName = game.id;
-      window.EJS_fixedSaveInterval = 5000;
       window.EJS_gameUrl = new URL(game.bin, document.baseURI).href;
       window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
       /* The core waits for Play. In 4.2.3, auto language is skipped only when this is false. */
@@ -669,6 +786,10 @@
         }
       } catch { /* private mode */ }
       window.EJS_onGameStart = () => {
+        cardStatus("Memory card connecting");
+        clearInterval(cardInterval);
+        cardInterval = setInterval(flushCard, 5000);
+        setTimeout(flushCard, 1000);
         unlockAudio();
         applyEmuVolume();
         setTimeout(applyEmuVolume, 1000);
@@ -677,6 +798,10 @@
         watchPace();
       };
       window.EJS_ready = () => {
+        // cacheLimit=0 only prevents new writes in 4.2.3. Old ROMs are still
+        // accepted by content-length, which often stays equal across builds.
+        // Bypass the ROM cache while retaining cached core/BIOS assets.
+        window.EJS_emulator.storage.rom = new window.EJS_DUMMYSTORAGE();
         const play = document.getElementById("play");
         if (!play || play.hidden) return;
         play.disabled = false;
@@ -739,7 +864,7 @@
       function send(b) {
         const gm = window.EJS_emulator && EJS_emulator.gameManager;
         if (gm) gm.simulateInput(0, b.idx, b.holders.size ? 1 : 0);
-        b.el.classList.toggle("on", b.holders.size > 0);
+        b.el?.classList.toggle("on", b.holders.size > 0);
       }
       function hold(b, who) { if (!b.holders.has(who)) { b.holders.add(who); send(b); } }
       function free(b, who) { if (b.holders.delete(who)) send(b); }
@@ -801,6 +926,8 @@
         if (b.id === "tri") return !!(hid.face & 0x80);
         if (b.id === "select") return !!(hid.shoulder & 0x10);
         if (b.id === "start") return !!(hid.shoulder & 0x20);
+        if (b.id === "l1") return !!(hid.shoulder & 0x01);
+        if (b.id === "r1") return !!(hid.shoulder & 0x02);
         return false;
       }
       function readHid(reportId, buf) {
@@ -901,6 +1028,7 @@
         requestAnimationFrame(watchPads);
       })();
       for (const b of BUTTONS) {
+        if (!b.el) continue;
         b.el.addEventListener("pointerdown", (e) => {
           e.preventDefault();
           try { b.el.setPointerCapture(e.pointerId); } catch { /* already gone */ }
@@ -1046,6 +1174,10 @@
           <div class="stage">
           <div id="screen">
             <div id="game"></div>
+            <div id="song-credit" aria-live="polite" aria-atomic="true" hidden>
+              <svg class="music-icon" viewBox="0 0 16 20" aria-hidden="true"><path fill="currentColor" d="M5 3 15 1v13c0 4-6 5-6 1 0-2 2-3 4-3V5L7 6v10c0 4-6 5-6 1 0-2 2-3 4-3Z"/></svg>
+              <div class="credit-copy"><span class="artist"></span><span class="title"></span></div>
+            </div>
             <img id="cover" alt="" width="${game.width}" height="${game.height}" hidden>
             <button type="button" id="play" disabled>Loading</button>
             <div id="bezel"></div>
@@ -1078,6 +1210,7 @@
               <a id="getdisc-link" download>Download BIN/CUE</a>
             </div>
             <span id="status" hidden></span>
+            <span id="card-status" role="status" hidden></span>
           </div>
           <dialog id="more-sheet">
             <h2>More</h2>
@@ -1104,7 +1237,7 @@
       }
       if (!navigator.hid) document.getElementById("findpad").hidden = true;
       for (const b of BUTTONS) {
-        if (b.slot === "pad") continue;
+        if (b.slot === "pad" || !b.slot) continue;
         const el = document.createElement("button");
         el.type = "button";
         el.className = b.slot === "menu" ? "wide" : "btn";
@@ -1147,6 +1280,7 @@
       wirePad();
       boot(game);
       document.getElementById("play").addEventListener("click", () => {
+        cardStatus("Memory card connecting");
         const AC = window.AudioContext || window.webkitAudioContext;
         if (AC) {
           const ctx = new AC();

@@ -10,9 +10,16 @@
       "blurb": "Pick a runner and hit the road. A PlayStation game you can play right in your browser.",
       "width": 320,
       "height": 240,
+      "menuAudioIndex": 7,
       "audio": [
-      "runner/audio/runner1.mp3",
-      "runner/audio/runner2-lumenwild.mp3"
+      "runner/audio/Oceanman - Jagged.mp3",
+      "runner/audio/Oceanman - Lumen.mp3",
+      "runner/audio/Oceanman - Runner.mp3",
+      "runner/audio/TwincaT - Hyper Speed Dimension.mp3",
+      "runner/audio/TwincaT - Parallel Drift.mp3",
+      "runner/audio/TwincaT - Slip Stream.mp3",
+      "runner/audio/TwincaT - Split Drive.mp3",
+      "runner/audio/menu/Oceanman - Digital Atmosphere.mp3"
       ]
     }
   ]

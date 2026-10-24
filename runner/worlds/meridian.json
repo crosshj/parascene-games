@@ -35,6 +35,7 @@
     [1, 108, 0]
   ],
   "height_mode": "crack",
+  "fork_boundaries": true,
   "symbol_prefix": "meridian_world",
   "near_distance": 4200
 }

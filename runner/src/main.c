@@ -12,6 +12,7 @@
 #include <psxspu.h>
 #include "world.h"
 #include "countdown.h"
+#include "music_credit.h"
 #include "hit_feedback.h"
 #include "course.h"
 #include "path.h"
@@ -58,6 +59,7 @@ enum { MODE_STORY, MODE_ARCADE };
 
 #define MUSIC_FULL 128
 #define MUSIC_PAUSED 40
+#define MUSIC_MENU_LEVEL 56
 
 static uint8_t pad_buff[2][34];
 static uint16_t gpu_tpage[SPR_PAGE_COUNT];
@@ -146,6 +148,9 @@ static int cd_on, cd_started;
 static int music_level = MUSIC_FULL;
 static int music_on;
 static int music_fade;
+static int music_notice_age = -1;
+static int music_notice_delay;
+static int music_menu_active;
 #endif
 static uint16_t art_tpage[ART_COUNT];
 static uint16_t art_clutid[ART_COUNT];
@@ -159,7 +164,7 @@ static int music_at;
 static int music_cur = -1;
 
 #ifdef RUNNER_XA_MUSIC
-static CdlLOC xa_loc[MUSIC_TRACK_COUNT];
+static CdlLOC xa_loc[MUSIC_TOTAL_TRACK_COUNT];
 static volatile int xa_need_next;
 
 typedef struct {
@@ -210,6 +215,8 @@ static uint16_t pad_held(void) {
     if (!(w & PAD_SQUARE)) b |= PAD_SQUARE;
     if (!(w & PAD_TRIANGLE)) b |= PAD_TRIANGLE;
     if (!(w & PAD_START)) b |= PAD_START;
+    if (!(w & PAD_L1)) b |= PAD_L1;
+    if (!(w & PAD_R1)) b |= PAD_R1;
     if (pad->type != PAD_ID_DIGITAL) {
         if (pad->ls_x < 64) b |= PAD_LEFT;
         if (pad->ls_x > 192) b |= PAD_RIGHT;
@@ -623,6 +630,17 @@ static void draw_menu(int y, const char *const *items, int count) {
     }
 }
 
+#if !defined(RUNNER_NO_MUSIC) && !defined(RUNNER_WEB)
+static void draw_song_credit(void) {
+    int age = music_notice_age;
+    if (music_cur < 0 || music_cur >= MUSIC_TRACK_COUNT || music_notice_delay > 0 ||
+        age < 0 || age >= MUSIC_CREDIT_END ||
+        (state != ST_COUNTDOWN && state != ST_RUN && state != ST_HIT && state != ST_PAUSE))
+        return;
+    music_credit_draw(music_artist[music_cur], music_title[music_cur], age);
+}
+#endif
+
 static void draw_ui(void) {
     char line[80];
     TILE *bar;
@@ -647,6 +665,9 @@ static void draw_ui(void) {
             snprintf(line, sizeof line, "RUN %d     START PAUSE", distance);
         }
         text(8, 8, line);
+#if !defined(RUNNER_NO_MUSIC) && !defined(RUNNER_WEB)
+        draw_song_credit();
+#endif
     }
     if (state == ST_PAUSE) {
         panel(3, 80, 80, 160, 84);
@@ -700,6 +721,8 @@ static void music_volume(int level);
 static void music_begin(void);
 static void music_hush(void);
 static void music_service(void);
+static void music_sync_menu(void);
+static void music_input(void);
 
 static void open_tally(void) {
     int global = flow_base(story_slot) + stage_index;
@@ -1067,8 +1090,6 @@ static int update_screens(void) {
         return 0;
     }
     case ST_CARD:
-        if (tick == CARD_HOLD)
-            music_begin();
         if (!card_black(tick))
             anim_tick++;
         if (confirm() || card_finished(tick)) {
@@ -1177,10 +1198,15 @@ static void update(void) {
     hit_feedback_tick(state==ST_RUN || state==ST_HIT, ((PADTYPE *)pad_buff[0])->stat==0);
     tick++;
     save_service();
-    if (!update_screens()) {
-        music_service();
-        prev = held;
-        return;
+    {
+        int moving = update_screens();
+        music_sync_menu();
+        music_input();
+        if (!moving) {
+            music_service();
+            prev = held;
+            return;
+        }
     }
     if (state == ST_RUN || state == ST_AWAY) {
         int stuck = state == ST_AWAY && scroll >= stick_at;
@@ -1329,6 +1355,9 @@ static void play_sound(int id) {
 
 static void setup_video(void) {
     world_init();
+#if !defined(RUNNER_NO_MUSIC) && !defined(RUNNER_WEB)
+    music_credit_init();
+#endif
     upload_sprite();
     upload_shadow();
     upload_art();
@@ -1349,6 +1378,9 @@ static void music_begin(void) {}
 static void music_hush(void) {}
 
 static void music_service(void) {}
+
+static void music_sync_menu(void) {}
+static void music_input(void) {}
 #else
 static void music_shuffle(int avoid) {
     int i, j, t;
@@ -1370,14 +1402,32 @@ static void music_shuffle(int avoid) {
     music_at = 0;
 }
 
+static void music_seed_shuffle(void) {
+    uint32_t seed = (uint32_t)VSync(-1) ^ ((uint32_t)tick * 0x9e3779b9u);
+    const uint8_t *pad = (const uint8_t *)pad_buff[0];
+    int i;
+    /* Boot-time VSync was nearly identical on every fresh launch. Mix in the
+     * later stage-start timing and controller state before the first shuffle. */
+    for (i = 0; i < 34; i++) {
+        seed ^= pad[i];
+        seed = (seed << 5) | (seed >> 27);
+        seed *= 0x85ebca6bu;
+    }
+    seed ^= seed >> 16;
+    if (!seed) seed = 0x6d2b79f5u;
+    srand((unsigned)seed);
+}
+
 #ifdef RUNNER_XA_MUSIC
 static int music_play_track(int track) {
     uint8_t mode = CdlModeRT | CdlModeSF;
     CdlFILTER filter;
     CdlATV mix;
 
-    if (track < 0 || track >= MUSIC_TRACK_COUNT)
+    if (track < 0 || track >= MUSIC_TOTAL_TRACK_COUNT)
         return 0;
+    if (track != music_cur)
+        music_notice_age = 0;
     music_cur = track;
     filter.file = 1;
     filter.chan = 0;
@@ -1399,6 +1449,10 @@ static int music_play_track(int track) {
 }
 
 static void music_advance(void) {
+    if (music_menu_active) {
+        music_play_track(MUSIC_MENU_TRACK);
+        return;
+    }
     music_at++;
     if (music_at >= MUSIC_TRACK_COUNT)
         music_shuffle(music_cur);
@@ -1432,13 +1486,12 @@ static int music_setup(void) {
     char path[16];
     int i;
 
-    for (i = 0; i < MUSIC_TRACK_COUNT; i++) {
+    for (i = 0; i < MUSIC_TOTAL_TRACK_COUNT; i++) {
         sprintf(path, "\\MUSIC%02d.XA", i);
         if (!CdSearchFile(&file, path))
             return 0;
         xa_loc[i] = file.pos;
     }
-    srand((unsigned)VSync(-1));
     EnterCriticalSection();
     CdReadyCallback(&xa_ready);
     ExitCriticalSection();
@@ -1452,13 +1505,24 @@ static void web_publish(void) {
 }
 
 static int music_play_track(int track) {
-    if (track < 0 || track >= MUSIC_TRACK_COUNT)
+    if (track < 0 || track >= MUSIC_TOTAL_TRACK_COUNT)
         return 0;
+    if (track != music_cur)
+        music_notice_age = 0;
     music_cur = track;
     return 1;
 }
 
 static void music_advance(void) {
+    if (music_menu_active) {
+        web_seq = web_seq >= 255 ? 1 : web_seq + 1;
+        if (music_play_track(MUSIC_MENU_TRACK))
+            cd_wait = music_menu_web_frames;
+        else
+            cd_wait = 0;
+        web_publish();
+        return;
+    }
     music_at++;
     if (music_at >= MUSIC_TRACK_COUNT)
         music_shuffle(music_cur);
@@ -1480,7 +1544,6 @@ static void cd_service(void) {
 }
 
 static int music_setup(void) {
-    srand((unsigned)VSync(-1));
     web_publish();
     return 1;
 }
@@ -1493,8 +1556,10 @@ static int music_play_track(int track) {
     CdlLOC loc;
     CdlATV mix;
 
-    if (track < 0 || track >= MUSIC_TRACK_COUNT)
+    if (track < 0 || track >= MUSIC_TOTAL_TRACK_COUNT)
         return 0;
+    if (track != music_cur)
+        music_notice_age = 0;
     music_cur = track;
     if (!CdControlB(CdlSetmode, &mode, 0))
         return 0;
@@ -1522,6 +1587,13 @@ static int music_play_track(int track) {
 }
 
 static void music_advance(void) {
+    if (music_menu_active) {
+        if (music_play_track(MUSIC_MENU_TRACK))
+            cd_wait = music_menu_cd_frames;
+        else
+            cd_wait = 0;
+        return;
+    }
     music_at++;
     if (music_at >= MUSIC_TRACK_COUNT)
         music_shuffle(music_cur);
@@ -1541,15 +1613,47 @@ static void cd_service(void) {
 }
 
 static int music_setup(void) {
-    srand((unsigned)VSync(-1));
     return 1;
 }
 #endif
+
+/* Manual browsing follows the existing playlist in either direction. */
+static void music_input(void) {
+    int left, right, next, previous;
+    if (!cd_on || !cd_started || !music_on || music_menu_active || music_fade)
+        return;
+    if (state != ST_COUNTDOWN && state != ST_RUN && state != ST_PAUSE &&
+        state != ST_HIT && state != ST_AWAY)
+        return;
+    left = edge(PAD_L1);
+    right = edge(PAD_R1);
+    if (left == right)
+        return;
+    next = (music_at + (right ? 1 : MUSIC_TRACK_COUNT - 1)) % MUSIC_TRACK_COUNT;
+    previous = music_cur;
+    if (!music_play_track(music_order[next])) {
+        music_cur = previous;
+        return;
+    }
+    music_at = next;
+    music_notice_age = 0;
+    music_notice_delay = 0;
+#if defined(RUNNER_XA_MUSIC)
+    xa_need_next = 0;
+#elif defined(RUNNER_WEB)
+    web_seq = web_seq >= 255 ? 1 : web_seq + 1;
+    cd_wait = music_web_frames[music_cur];
+    web_publish();
+#else
+    cd_wait = music_cd_frames[music_cur];
+#endif
+}
 
 static void music_start(void) {
     if (!cd_on || cd_started)
         return;
     cd_started = 1;
+    music_seed_shuffle();
     music_shuffle(-1);
 #if defined(RUNNER_XA_MUSIC)
     music_play_track(music_order[music_at]);
@@ -1589,6 +1693,7 @@ static void music_volume(int level) {
 static void music_cut(void) {
     music_on = 0;
     music_fade = 0;
+    music_menu_active = 0;
     music_level = 0;
     if (!cd_on || !cd_started)
         return;
@@ -1603,15 +1708,23 @@ static void music_begin(void) {
     int restart;
     if (!cd_on)
         return;
-    restart = !music_on;
+    restart = !music_on || music_menu_active;
+    if (restart)
+        music_notice_delay = state == ST_COUNTDOWN ? MUSIC_CREDIT_START_DELAY : 0;
+    if (restart && music_cur >= 0 && !music_menu_active)
+        music_shuffle(music_cur);
+    else if (restart)
+        music_shuffle(-1);
     music_fade = 0;
     music_on = 1;
+    music_menu_active = 0;
     music_level = MUSIC_FULL;
     if (!cd_started) {
         music_start();
         return;
     }
-    if (restart && music_cur >= 0 && music_play_track(music_cur)) {
+    if (restart && music_cur >= 0 && music_play_track(music_order[music_at])) {
+        music_notice_age = 0;
 #if defined(RUNNER_WEB)
         web_seq = web_seq >= 255 ? 1 : web_seq + 1;
         cd_wait = music_web_frames[music_cur];
@@ -1622,6 +1735,46 @@ static void music_begin(void) {
     music_volume(MUSIC_FULL);
 }
 
+static void music_menu_begin(void) {
+    if (!cd_on)
+        return;
+    if (music_on && music_menu_active) {
+        if (music_fade) {
+            music_fade = 0;
+            music_level = MUSIC_MENU_LEVEL;
+            music_volume(MUSIC_MENU_LEVEL);
+        }
+        return;
+    }
+    if (!cd_started) {
+        cd_started = 1;
+        music_seed_shuffle();
+        music_shuffle(-1);
+    }
+    music_fade = 0;
+    music_on = 1;
+    music_menu_active = 1;
+    music_notice_age = -1;
+    music_level = MUSIC_MENU_LEVEL;
+    if (music_play_track(MUSIC_MENU_TRACK)) {
+#if defined(RUNNER_WEB)
+        web_seq = web_seq >= 255 ? 1 : web_seq + 1;
+        cd_wait = music_menu_web_frames;
+        web_publish();
+#elif !defined(RUNNER_XA_MUSIC)
+        cd_wait = music_menu_cd_frames;
+#endif
+    }
+    music_volume(MUSIC_MENU_LEVEL);
+    music_notice_age = -1;
+}
+
+static void music_sync_menu(void) {
+    if (state == ST_BOOT || state == ST_TITLE || state == ST_SELECT ||
+        state == ST_FLOW || state == ST_CARD)
+        music_menu_begin();
+}
+
 static void music_hush(void) {
     if (!music_on)
         return;
@@ -1629,6 +1782,13 @@ static void music_hush(void) {
 }
 
 static void music_service(void) {
+    if (music_on && music_notice_age >= 0 && music_notice_age < MUSIC_CREDIT_END &&
+        (state == ST_COUNTDOWN || state == ST_RUN || state == ST_HIT || state == ST_PAUSE)) {
+        if (music_notice_delay > 0)
+            music_notice_delay--;
+        else
+            music_notice_age++;
+    }
     if (!music_fade)
         return;
     if (music_level > 0) {
@@ -1786,6 +1946,9 @@ int main(int argc, const char **argv) {
             } else if (state == ST_COUNTDOWN) {
                 draw_runner();
                 draw_shadow();
+#if !defined(RUNNER_NO_MUSIC) && !defined(RUNNER_WEB)
+                draw_song_credit();
+#endif
             } else if (state == ST_TALLY) {
                 PROF(PF_SPRITES, (draw_runner(), draw_shadow(), draw_tally()));
             } else {

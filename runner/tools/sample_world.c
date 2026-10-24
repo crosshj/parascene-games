@@ -36,8 +36,24 @@ static void ring_at(int s,int outside,int wall,int ceiling,const int *profile,
     }
 }
 
+/* Four exact world-space boundary vertices: left base/top, right base/top.
+ * All fork variants use the same canonical contours, independent of camera. */
+static void print_wall_pair(int s,int outside,int wall,int ceiling,const int *profile,
+                            int custom,int crack) {
+    static const int corner[4]={0,1,5,4};
+    int p[6][3],i;
+    ring_at(s,outside,wall,ceiling,profile,custom,crack,p);
+    printf("[");
+    for(i=0;i<4;i++) {
+        int k=corner[i];
+        printf("%s[%d,%d,%d]",i?",":"",p[k][0],p[k][1],p[k][2]);
+    }
+    printf("]");
+}
+
 int main(int argc, char **argv) {
     int s, i, limit, outside, wall, ceiling, step, crack_height, route;
+    int fork_boundaries=getenv("RUNNER_BAKE_FORK_BOUNDARIES")!=0;
     int profile[18];
     if ((argc != 7 && argc != 8 && argc != 9) || !path_open(argv[1]) || path_lap()) {
         fprintf(stderr, "sample_world: expected a finite track\n");
@@ -77,6 +93,37 @@ int main(int argc, char **argv) {
     printf("],\"cuts\":[");
     for(s=0;s<=limit;s+=step)
         printf("%s%d",s?",":"",s>0&&path_cut(s/step));
+    printf("],\"fork_sections\":[");
+    if(fork_boundaries) {
+        int k;
+        /* A world mesh is camera-independent. Sample both physical roads
+         * once in canonical route order, then restore the requested route. */
+        path_reset();
+        path_begin(0);
+        for(k=0;k<path_branches();k++) {
+            int s0,s1,alt;
+            if(!path_branch(k,0,&s0,&s1)) continue;
+            printf("%s{\"start\":%d,\"end\":%d,\"entry\":",k?",":"",s0,s1);
+            print_wall_pair(s0-STEP,outside,wall,ceiling,profile,argc>=8,crack_height);
+            printf(",\"exit\":");
+            print_wall_pair(s1,outside,wall,ceiling,profile,argc>=8,crack_height);
+            for(alt=0;alt<2;alt++) {
+                printf(",\"%s\":[",alt?"alt":"main");
+                if(alt) path_swap(k);
+                for(s=s0;s<=s1;s+=STEP) {
+                    path_end_side(s==s1);
+                    printf("%s[%d,",s>s0?",":"",s);
+                    print_wall_pair(s,outside,wall,ceiling,profile,argc>=8,crack_height);
+                    printf("]");
+                    path_end_side(0);
+                }
+                if(alt) path_swap(k);
+                printf("]");
+            }
+            printf("}");
+        }
+        for(i=0;i<path_branches() && i<3;i++) if(route&(1<<i)) path_swap(i);
+    }
     printf("],\"cameras\":[");
     /* Five poses per schedule interval, including both endpoints. */
     for (s = 0; s <= limit; s += step / 4) {

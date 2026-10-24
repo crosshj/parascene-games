@@ -603,7 +603,8 @@ static void verge_band(const RoadSample *a, const RoadSample *b, int side,
         p2=side<0?b->l:b->r;
     else project(x2,y2,z2,&p2);
     project(x3, y3, z3, &p3);
-    bucket = sort >= FAR ? view_bucket(sort) : (sort >> OT_SHIFT);
+    bucket = style->ground_underlay && rgb==style->ground_c ? FAR_BUCKET-1 :
+             sort >= FAR ? view_bucket(sort) : (sort >> OT_SHIFT);
     emit_piece(p0, p1, p2, p3, bucket, cn, cf, 0);
 }
 
@@ -638,6 +639,11 @@ static void verge(const RoadSample *a, const RoadSample *b) {
     }
 }
 
+/* Keep close ground surfaces behind obstacle faces at the screen bottom. */
+static int deck_sort_depth(int z) {
+    return z < 500 ? z + 48 : z;
+}
+
 /* The deck shaded from its near edge to its far edge, so the haze ramps
  * across the strip instead of stepping at each seam. */
 static void strip(const RoadSample *a, const RoadSample *b) {
@@ -659,8 +665,7 @@ static void strip(const RoadSample *a, const RoadSample *b) {
     haze_road(&cn[0], &cn[1], &cn[2], (a->lz + a->rz) / 2);
     haze_road(&cf[0], &cf[1], &cf[2], sort);
     /* Nudge near deck back a hair so crate sides win at the screen bottom. */
-    if (sort < 500)
-        sort += 48;
+    sort = deck_sort_depth(sort);
     bucket = sort >> OT_SHIFT;
     emit_piece(a->l, a->r, b->l, b->r, bucket, cn, cf, 0);
 }
@@ -925,8 +930,15 @@ void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3])
  * the speed lines and the HUD have somewhere to land. */
 #define SCENE_SLACK (10 * 1024)
 
+#ifdef RUNNER_PREVIEW
+int road_preview_scene_limit_hits;
+#endif
 static int scene_room(void) {
-    return world_bytes_used() + SCENE_SLACK <= BUFFER_LENGTH;
+    int room=world_bytes_used() + SCENE_SLACK <= BUFFER_LENGTH;
+#ifdef RUNNER_PREVIEW
+    if(!room) road_preview_scene_limit_hits++;
+#endif
+    return room;
 }
 
 /* 1 when a sheet `out` past this edge stays off the other road. */
@@ -1048,7 +1060,8 @@ static int cloth_legacy(int s0, int s1, int side, int out0, int v0, int out1, in
     if (s1 < s0 + 8)
         return 1;
     reach = out0 > out1 ? out0 : out1;
-    if (side && (!clear_of_fork(s0, side, reach) || !clear_of_fork(s1, side, reach)))
+    if (side &&
+        (!clear_of_fork(s0, side, reach) || !clear_of_fork(s1, side, reach)))
         return 1;
     cloth_u(s0, side, out0, &u0);
     cloth_u(s0, side, out1, &u1);
@@ -1144,7 +1157,8 @@ static int sheet_tree(int s0,int s1,const SheetProfile *p,const SheetEdge *a,con
     int reach=p->out0>p->out1?p->out0:p->out1;
     if(!scene_room()) return 0;
     if(s1<s0+8) return 1;
-    if(p->side && (!clear_of_fork(s0,p->side,reach)||!clear_of_fork(s1,p->side,reach))) return 1;
+    if(p->side &&
+       (!clear_of_fork(s0,p->side,reach)||!clear_of_fork(s1,p->side,reach))) return 1;
     if(s1-s0<=STEP && sheet_halfspace_hidden(a,b)) return 1;
     if(sheet_cached_hidden(a,b)) return 1;
     if(sheet_cached_coarse(s0,s1,a,b)) {
@@ -1180,6 +1194,29 @@ int road_cloth(int s0,int s1,int side,int out0,int v0,int out1,int v1,int r,int 
     cache[key].revision=revision; cache[key].s=s1; cache[key].profile=p; cache[key].edge=z;
     return sheet_tree(s0,s1,&p,&a,&z);
 #endif
+}
+
+/* A compiled fork owns its complete boundary from the last common road
+ * section to the join. Ordinary sheets must not enter that replacement. */
+static int fork_replaces_span(int s0,int s1,int *begin,int *end) {
+    int k,a,b;
+    for(k=0;k<path_branches();k++) {
+        if(path_branch(k,0,&a,&b) && s0<b && s1>a-STEP) {
+            if(begin) *begin=a-STEP;
+            if(end) *end=b;
+            return 1;
+        }
+    }
+    return 0;
+}
+int road_fork_cloth(int s0,int s1,int side,int out0,int v0,int out1,int v1,int r,int g,int b) {
+    int begin,end;
+    if(fork_replaces_span(s0,s1,&begin,&end)) {
+        if(s0<begin && !road_cloth(s0,begin,side,out0,v0,out1,v1,r,g,b)) return 0;
+        if(s1>end) return road_fork_cloth(end,s1,side,out0,v0,out1,v1,r,g,b);
+        return 1;
+    }
+    return road_cloth(s0,s1,side,out0,v0,out1,v1,r,g,b);
 }
 
 /* Resident meshes use distance snapshots: no per-frame path sampling or
@@ -1258,9 +1295,10 @@ static void compiled_walls_range(int scroll,int start,int end,int r,int g,int b)
         if(i) { relative+=(int)mesh_stride(m,bit);bit+=m->stride_bits; }
         index=base+relative;
         if(end<0 && index*STEP<start) continue;
-        mesh_wall_ring(&m->rings[index],&z);
-        if(m->rings[index].flags&WORLD_RING_CUT_BEFORE) have=0;
-        if(have && (end<0 || (previous*STEP>=start && index*STEP<=end))) {
+        mesh_wall_ring(world_mesh_ring(m,index),&z);
+        if(world_mesh_ring(m,index)->flags&WORLD_RING_CUT_BEFORE) have=0;
+        if(have && (end<0 || (previous*STEP>=start && index*STEP<=end)) &&
+           (!m->fork_wall_count || !fork_replaces_span(previous*STEP,index*STEP,0,0))) {
         if(!scene_room()) return;
         for(side=0;side<4;side+=2) {
             const MeshPoint *p=&a.p[side],*t=&a.p[side+1],*u=&z.p[side],*v=&z.p[side+1];
@@ -1285,11 +1323,164 @@ static void compiled_walls_range(int scroll,int start,int end,int r,int g,int b)
     }
     }
 }
+/* Clip the actual polygon, rather than dropping a wall when its corners
+ * are outside the projection guard. This matters beside the camera, where
+ * an opaque wall can cover the view with none of its corners on screen. */
+static int fork_plane(const int *p,int plane) {
+    switch(plane) {
+    case 0: return p[2]-32;
+    case 1: return p[0]*160+176*p[2];
+    case 2: return 176*p[2]-p[0]*160;
+    case 3: return (HORIZON_Y+16)*p[2]+(CAM_H-p[1])*160;
+    default:return (SCREEN_H+16-HORIZON_Y)*p[2]-(CAM_H-p[1])*160;
+    }
+}
+static int fork_polygon(const int p[4][3],int r,int g,int b,int floor) {
+    int poly[12][3],next[12][3],n=4,plane,i,j,sort=0;
+    int bucket;
+    int colors[12][3];XY xy[12];
+    static const int perimeter[4]={0,1,3,2};
+    for(i=0;i<4;i++) memcpy(poly[i],p[perimeter[i]],sizeof poly[i]);
+    for(plane=0;plane<5 && n>=3;plane++) {
+        int count=0;
+        for(i=0;i<n;i++) {
+            const int *a=poly[i],*z=poly[(i+1)%n];
+            int da=fork_plane(a,plane),dz=fork_plane(z,plane);
+            if(da>=0) memcpy(next[count++],a,sizeof next[0]);
+            if((da<0)!=(dz<0)) {
+                for(j=0;j<3;j++)
+                    /* Symmetric rounding is essential: adjacent faces visit
+                     * their shared clipping edge in opposite directions. */
+                    next[count][j]=(int)(((int64_t)z[j]*da-(int64_t)a[j]*dz)/(da-dz));
+                count++;
+            }
+        }
+        n=count;memcpy(poly,next,n*sizeof poly[0]);
+    }
+    if(n<3) return 1;
+    for(i=0;i<n;i++) {
+        project(poly[i][0],poly[i][1],poly[i][2],&xy[i]);
+        colors[i][0]=r;colors[i][1]=g;colors[i][2]=b;
+        if(floor) haze_road(&colors[i][0],&colors[i][1],&colors[i][2],poly[i][2]);
+        else haze_air(&colors[i][0],&colors[i][1],&colors[i][2],poly[i][2]);
+        if(poly[i][2]>sort) sort=poly[i][2];
+    }
+    if(sort>=VIEW_Z) return 1;
+    /* The fork floor is an underlay beneath both roads and their curbs.
+     * Road, shoulders and walls always cover it, independent of their depth
+     * tessellation. The floor still receives its actual per-vertex haze. */
+    bucket=floor?FAR_BUCKET-1:view_bucket(sort);
+    if(!scene_room()) return 0;
+    if(n==4) {
+        poly_g4(&xy[0],&xy[1],&xy[3],&xy[2],bucket,
+            colors[0][0],colors[0][1],colors[0][2],colors[1][0],colors[1][1],colors[1][2],
+            colors[3][0],colors[3][1],colors[3][2],colors[2][0],colors[2][1],colors[2][2],BLEND_NONE);
+    } else for(i=1;i<n-1;i++) {
+        if(!scene_room()) return 0;
+        poly_g4(&xy[0],&xy[i],&xy[i+1],&xy[i+1],bucket,
+            colors[0][0],colors[0][1],colors[0][2],colors[i][0],colors[i][1],colors[i][2],
+            colors[i+1][0],colors[i+1][1],colors[i+1][2],colors[i+1][0],colors[i+1][1],colors[i+1][2],BLEND_NONE);
+    }
+    return 1;
+}
+static int fork_face(const int p[4][3],int r,int g,int b,int floor,int depth) {
+    int i,j,plane,lo=p[0][2];
+    for(plane=0;plane<5;plane++) {
+        for(i=0;i<4 && fork_plane(p[i],plane)<0;i++);
+        if(i==4) return 1;
+    }
+    for(i=1;i<4;i++) if(p[i][2]<lo) lo=p[i][2];
+    if(lo>=VIEW_Z) return 1;
+    /* Short depth intervals keep the ordering table consistent with the
+     * road at the wall's foot; subdivision uses baked positions only. */
+    /* Splitting longitudinally cannot reduce the depth difference across a
+     * wide floor. Test the two edges this split actually shortens. */
+    if(!floor && depth<6 && lo<2400 &&
+       (iabs(p[0][2]-p[2][2])>128 || iabs(p[1][2]-p[3][2])>128)) {
+        int a[4][3],z[4][3];
+        for(i=0;i<2;i++) for(j=0;j<3;j++) {
+            a[i][j]=p[i][j];z[i+2][j]=p[i+2][j];
+            a[i+2][j]=z[i][j]=(p[i][j]+p[i+2][j])/2;
+        }
+        return fork_face(a,r,g,b,floor,depth+1) && fork_face(z,r,g,b,floor,depth+1);
+    }
+    return fork_polygon(p,r,g,b,floor);
+}
+/* Orient a boundary face from the solid's interior, then reject its back.
+ * The reference points toward the other wall for the enclosing outer walls,
+ * away from the other wall for the island, and upward for its roof. */
+static int fork_visible(const int p[4][3],const int reference[3],int toward) {
+    int a[3],z[3],i;
+    int64_t normal[3],interior=0,eye=0;
+    for(i=0;i<3;i++) { a[i]=p[1][i]-p[0][i];z[i]=p[2][i]-p[0][i]; }
+    normal[0]=(int64_t)a[1]*z[2]-(int64_t)a[2]*z[1];
+    normal[1]=(int64_t)a[2]*z[0]-(int64_t)a[0]*z[2];
+    normal[2]=(int64_t)a[0]*z[1]-(int64_t)a[1]*z[0];
+    if(!normal[0]&&!normal[1]&&!normal[2]) return 1;
+    for(i=0;i<3;i++) {
+        interior+=(int64_t)normal[i]*reference[i];
+        eye+=(int64_t)normal[i]*((i==1?CAM_H:0)-p[0][i]);
+    }
+    if(!interior) return 1;
+    return toward>0 ? (interior>0?eye>=0:eye<=0) : (interior>0?eye<=0:eye>=0);
+}
+/* Only the hidden ground underlay overlaps its neighbors. Sixteen world
+ * units bridge the independent fixed-point rounding of road cuts, wall
+ * subdivisions and clipped floor edges; visible wall positions stay exact. */
+static void fork_floor_outset(int p[4][3]) {
+    int original[4][3],i,j,edge;
+    memcpy(original,p,sizeof original);
+    for(i=0;i<4;i++) for(edge=1;edge<=2;edge++) {
+        int d[3],length=0;
+        for(j=0;j<3;j++) {
+            d[j]=original[i][j]-original[i^edge][j];
+            if(iabs(d[j])>length) length=iabs(d[j]);
+        }
+        if(length) for(j=0;j<3;j++) p[i][j]+=d[j]*16/length;
+    }
+}
+static void compiled_fork_walls(const WorldMesh *m,int scroll,int r,int g,int b) {
+    unsigned i;
+    if(!m || !m->fork_walls) return;
+    for(i=0;i<m->fork_wall_count;) {
+        const WorldForkWall *first=&m->fork_walls[i],*end=first;
+        int p[8][3],face[4][3],depth=first->start-scroll,j,k,last=i;
+        int stride=depth<4200?1:depth<8000?2:depth<16000?4:8;
+        if(first->end<scroll-512 || first->start>scroll+VIEW_S) { i++;continue; }
+        for(j=1;j<stride && i+(unsigned)j<m->fork_wall_count;j++) {
+            const WorldForkWall *candidate=&m->fork_walls[i+j];
+            if(candidate->flags!=first->flags || candidate->start!=end->end) break;
+            end=candidate;last=i+j;
+        }
+        for(j=0;j<8;j++) {
+            WorldVertex v=world_fork_vertex((j&1)?end:first,j);
+            path_transform(v.x,v.y,v.z,&p[j][0],&p[j][1],&p[j][2]);
+        }
+        for(j=0;j<3;j++) {
+            int floor=j==2 && !(first->flags&WORLD_FORK_ISLAND);
+            int reference[3];
+            static const int corners[4][4]={{0,4,1,5},{2,6,3,7},{4,6,5,7},{0,2,1,3}};
+            for(k=0;k<4;k++) memcpy(face[k],p[corners[floor?3:j][k]],sizeof face[k]);
+            if(floor) fork_floor_outset(face);
+            if(!floor) {
+                for(k=0;k<3;k++) reference[k]=j==2 ? p[4][k]-p[0][k] :
+                    (j==0?1:-1)*(p[2][k]+p[3][k]-p[0][k]-p[1][k]);
+                if(!fork_visible(face,reference,j==2 || !(first->flags&WORLD_FORK_ISLAND)?1:-1)) continue;
+            }
+            if(!fork_face(face,floor?style->ground_c[0]:r,floor?style->ground_c[1]:g,
+                          floor?style->ground_c[2]:b,floor,0)) return;
+        }
+        i=(unsigned)last+1;
+    }
+}
 void road_compiled_walls(int scroll,int start,int r,int g,int b) {
     compiled_walls_range(scroll,start,-1,r,g,b);
 }
 void road_compiled_walls_range(int scroll,int start,int end,int r,int g,int b) {
     if(end>=start) compiled_walls_range(scroll,start,end,r,g,b);
+}
+void road_compiled_fork_walls(int scroll,int r,int g,int b) {
+    compiled_fork_walls(compiled_wall_package(),scroll,r,g,b);
 }
 
 int road_lintel(int s0, int s1, int out, int v, int r, int g, int b) {
@@ -1506,7 +1697,8 @@ static void dash(const RoadSample *a, const RoadSample *b, int t0, int t1, int u
         haze_paint(&rr, &gg, &bb, z0);
         project(x0, y0, z0, &p0);
         project(x1, y1, z1, &p1);
-        line_f2(p0, p1, z0 >> OT_SHIFT, rr, gg, bb);
+        sort = deck_sort_depth(z0 > z1 ? z0 : z1) - (1 << OT_SHIFT);
+        line_f2(p0, p1, sort >> OT_SHIFT, rr, gg, bb);
         return;
     }
     deck_point(a, b, t0, u0 - 6, &x0, &y0, &z0);
@@ -1526,6 +1718,12 @@ static void dash(const RoadSample *a, const RoadSample *b, int t0, int t1, int u
     project(x1, y1, z1, &p1);
     project(x3, y3, z3, &p2);
     project(x2, y2, z2, &p3);
+    /* Sort paint by its far edge, one bucket ahead of its supporting road.
+     * A near-edge sort lets the tail of a dash paint over a closer block. */
+    sort = z0 > z1 ? z0 : z1;
+    if (z2 > sort) sort = z2;
+    if (z3 > sort) sort = z3;
+    sort = deck_sort_depth(sort) - (1 << OT_SHIFT);
     poly_f4(&p0, &p1, &p2, &p3, sort >> OT_SHIFT, rr, gg, bb, BLEND_NONE);
 }
 
@@ -1926,7 +2124,7 @@ static int compiled_far_road(const RoadSample *seam,int scroll) {
         if(i) { relative+=(int)mesh_stride(m,bit);bit+=m->stride_bits; }
         index=base+relative;
         if(index*STEP<=seam->s) continue;
-        mesh_road_ring(&m->rings[index],index*STEP,&ring[n++]);
+        mesh_road_ring(world_mesh_ring(m,index),index*STEP,&ring[n++]);
     }
     }
     if(!n) return 0;

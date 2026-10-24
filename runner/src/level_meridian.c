@@ -14,7 +14,8 @@
 #define EDGE_END 2200
 #define SHOULDER_W 40
 #define WALL_OUT 108
-#define GROUND_W WALL_OUT
+/* Independent road/wall sampling must overlap at the wall's foot. */
+#define GROUND_W (WALL_OUT + 32)
 
 typedef struct {
     uint8_t sky[3], haze[3], tint[3], shadow[3], top[3];
@@ -92,6 +93,7 @@ static void apply(int stage) {
     road.edge_end = EDGE_END;
     road.shoulder = SHOULDER_W;
     road.ground = GROUND_W;
+    road.ground_underlay = 1;
     rgb(road.ridge_far, L->ridge_far);
     rgb(road.ridge_near, L->ridge_near);
     rgb(road.road, L->asphalt);
@@ -193,50 +195,19 @@ static void ice(const LevelFrame *f) {
         r = road.shoulder_c[0];
         g = road.shoulder_c[1];
         b = road.shoulder_c[2];
-        if (!road_cloth(s, s1, -1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
+        if (!road_fork_cloth(s, s1, -1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
             return;
-        if (!road_cloth(s, s1, 1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
+        if (!road_fork_cloth(s, s1, 1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
             return;
     }
     if(compiled_start>=0)
         road_compiled_walls(f->scroll,compiled_start,road.shoulder_c[0],
                             road.shoulder_c[1],road.shoulder_c[2]);
 
-    /* The road renderer draws the unselected side of a fork separately.
-     * Meridian's wall sheets are world scenery, so draw that route too.
-     * Use its baked route package for the far part and the normal cloth
-     * renderer only up to the package's near-distance boundary. */
-    {
-        int k;
-        for(k=0;k<path_branches();k++) {
-            int s0,s1,s,alt_start;
-            if(!path_branch(k,f->scroll,&s0,&s1)) continue;
-            if(s0<f->scroll) s0=f->scroll;
-            if(s0>=s1) continue;
-            path_swap(k);
-            alt_start=road_compiled_walls_start(f->scroll);
-            if(alt_start<0 || alt_start>s1) alt_start=s1;
-            for(s=s0;s<alt_start;) {
-                int next,draw=road_span(s,f->scroll,step,reach,960,&next);
-                if(!draw) break;
-                if(next>alt_start) next=alt_start;
-                if(draw==1) {
-                    int h=crack_h((s+next)/2,top);
-                    if(!road_cloth(s,next,-1,WALL_OUT,0,WALL_OUT,h,
-                                   road.shoulder_c[0],road.shoulder_c[1],road.shoulder_c[2]) ||
-                       !road_cloth(s,next,1,WALL_OUT,0,WALL_OUT,h,
-                                   road.shoulder_c[0],road.shoulder_c[1],road.shoulder_c[2]))
-                        break;
-                }
-                s=next;
-            }
-            if(alt_start<s1)
-                road_compiled_walls_range(f->scroll,alt_start,s1,
-                                          road.shoulder_c[0],road.shoulder_c[1],
-                                          road.shoulder_c[2]);
-            path_swap(k);
-        }
-    }
+    /* The baked boundary contains both physical branches and the closed
+     * inner island in world coordinates. Render it once from this camera. */
+    road_compiled_fork_walls(f->scroll,road.shoulder_c[0],
+                            road.shoulder_c[1],road.shoulder_c[2]);
 }
 
 static void meridian_draw(const LevelFrame *f) {

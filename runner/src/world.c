@@ -312,6 +312,32 @@ void tex_quad(int x, int y, int w, int h, int u, int v, int uw, int uh,
 #endif
 }
 
+void tex_sprite(int x, int y, int w, int h, int u, int v,
+                int r, int g, int b, uint16_t tpage, uint16_t clut) {
+#ifndef RUNNER_PREVIEW
+    RenderBuffer *buf = &ctx.buffers[ctx.active];
+    SPRT *sprite;
+    DR_TPAGE *mode;
+    if (w < 1 || h < 1 || ctx.next + sizeof(SPRT) + sizeof(DR_TPAGE) > buf->buffer + BUFFER_LENGTH)
+        return;
+    sprite = (SPRT *)ctx.next;
+    setSprt(sprite);
+    setXY0(sprite, x, y);
+    setWH(sprite, w, h);
+    setUV0(sprite, u, v);
+    setRGB0(sprite, clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255));
+    sprite->clut = clut;
+    addPrim(&buf->ot[0], sprite);
+    mode = (DR_TPAGE *)(sprite + 1);
+    setDrawTPage(mode, 0, 0, tpage);
+    addPrim(&buf->ot[0], mode);
+    ctx.next = (uint8_t *)(mode + 1);
+#else
+    (void)x; (void)y; (void)w; (void)h; (void)u; (void)v;
+    (void)r; (void)g; (void)b; (void)tpage; (void)clut;
+#endif
+}
+
 void screen_cover(int r, int g, int b, int blend) {
     RenderBuffer *buf = &ctx.buffers[ctx.active];
     POLY_F4 *poly;

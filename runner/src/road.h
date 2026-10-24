@@ -34,6 +34,8 @@ typedef struct {
      * Backdrop bases and all fully distant surfaces must share this endpoint. */
     int horizon_enabled;
     uint8_t horizon[3];
+    /* Enclosed corridors: ground fills behind the road and enclosing walls. */
+    int ground_underlay;
 } RoadStyle;
 
 const uint8_t *road_horizon_color(const RoadStyle *st);
@@ -67,6 +69,7 @@ int road_runner_bucket(int depth_bucket);
 extern int road_preview_legacy_surfaces;
 extern int road_preview_legacy_mesh;
 extern int road_preview_far_limit_hits;
+extern int road_preview_scene_limit_hits;
 extern int road_preview_disable_occlusion;
 void road_preview_reset_haze(void);
 int road_preview_atmosphere_check(const uint8_t *expected);
@@ -82,6 +85,8 @@ int road_preview_atmosphere_check(const uint8_t *expected);
  * already in the bucket stays in front of the quad. */
 int road_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
                int r, int g, int b);
+int road_fork_cloth(int s0, int s1, int side, int out0, int v0, int out1, int v1,
+                    int r, int g, int b);
 /* Ceiling from one edge to the other, `out` past each edge, at height v. */
 int road_lintel(int s0, int s1, int out, int v, int r, int g, int b);
 /* A card facing along the road, centered at u, `half` wide. Skipped when
@@ -102,3 +107,4 @@ void road_city_canyon(int scroll,int outside,int height,const uint32_t *runs,int
 int road_compiled_walls_start(int scroll);
 void road_compiled_walls(int scroll,int start,int r,int g,int b);
 void road_compiled_walls_range(int scroll,int start,int end,int r,int g,int b);
+void road_compiled_fork_walls(int scroll,int r,int g,int b);

@@ -55,6 +55,49 @@ int main(int argc,char **argv) {
         if (!path_open(mesh->track))
             return 1;
         path_reset();
+        if(mesh->fork_wall_count && !mesh->fork_walls) {
+            fprintf(stderr,"%s: fork wall mesh has no geometry\n",mesh->track);
+            return 1;
+        }
+        for(i=0;i<mesh->fork_wall_count;i++) {
+            const WorldForkWall *w=&mesh->fork_walls[i];
+            WorldVertex points[8];int corner;
+            for(corner=0;corner<8;corner++) points[corner]=world_fork_vertex(w,corner);
+            if(w->start<0 || w->end<=w->start || w->end>path_len()*STEP) {
+                fprintf(stderr,"%s: invalid baked fork wall segment %d\n",mesh->track,i);
+                return 1;
+            }
+            for(j=0;j<2;j++) {
+                const WorldVertex *a=&points[j*2],*b=&points[j*2+1];
+                const WorldVertex *ta=&points[j*2+4],*tb=&points[j*2+5];
+                const WorldVertex *oa=&points[(1-j)*2],*ob=&points[(1-j)*2+1];
+                const WorldVertex *ota=&points[(1-j)*2+4],*otb=&points[(1-j)*2+5];
+                long long ux=b->x-a->x,uy=b->y-a->y,uz=b->z-a->z;
+                long long vx=ta->x-a->x,vy=ta->y-a->y,vz=ta->z-a->z;
+                long long cx=uy*vz-uz*vy,cy=uz*vx-ux*vz,cz=ux*vy-uy*vx;
+                if(a->x==oa->x&&a->y==oa->y&&a->z==oa->z&&
+                   b->x==ob->x&&b->y==ob->y&&b->z==ob->z&&
+                   ta->x==ota->x&&ta->y==ota->y&&ta->z==ota->z&&
+                   tb->x==otb->x&&tb->y==otb->y&&tb->z==otb->z) continue;
+                if(cx*cx+cy*cy+cz*cz<=256 || ta->y<=a->y || tb->y<=b->y) {
+                    fprintf(stderr,"%s: invalid fork wall surface %d/%d\n",mesh->track,i,j);
+                    return 1;
+                }
+            }
+            if(i>0 && mesh->fork_walls[i-1].flags==w->flags) {
+                const WorldForkWall *prev=&mesh->fork_walls[i-1];
+                int edge;
+                for(edge=0;edge<4;edge++) {
+                    WorldVertex previous_point=world_fork_vertex(prev,edge*2+1);
+                    const WorldVertex *a=&previous_point,*b=&points[edge*2];
+                    long long dx=a->x-b->x,dy=a->y-b->y,dz=a->z-b->z;
+                    if(prev->end!=w->start || dx || dy || dz) {
+                        fprintf(stderr,"%s: discontinuous fork edge at %d\n",mesh->track,w->start);
+                        return 1;
+                    }
+                }
+            }
+        }
         for(j=0;j<path_branches() && j<3;j++)
             if(mesh->route_mask&(1u<<j)) path_swap(j);
         /* Reverse band order and jump between offsets; no forward cursor. */
@@ -82,7 +125,7 @@ int main(int argc,char **argv) {
                 path_begin(band * STEP + (pose == 0 ? 255 : pose == 1 ? 0 : 127));
                 for (i = 0; i < schedule->count; i++) {
                     int index = schedule_ring[i];
-                    const WorldRing *ring = &mesh->rings[index];
+                    const WorldRing *ring = world_mesh_ring(mesh,index);
                     int ul, ur;
                     path_edges(index * STEP, &ul, &ur);
                     for (j = 0; j < 6; j++) {
@@ -109,10 +152,10 @@ int main(int argc,char **argv) {
                     int ia=schedule_ring[i-1];
                     int ib=schedule_ring[i];
                     int at,span=(ib-ia)*STEP;
-                    if(mesh->rings[ib].flags&WORLD_RING_CUT_BEFORE) continue;
+                    if(world_mesh_ring(mesh,ib)->flags&WORLD_RING_CUT_BEFORE) continue;
                     if(ia*STEP<camera+mesh->near_distance) continue;
                     for(at=37;at<span;at+=113) for(j=0;j<6;j++) {
-                        const WorldRing *a=&mesh->rings[ia],*b=&mesh->rings[ib];
+                        const WorldRing *a=world_mesh_ring(mesh,ia),*b=world_mesh_ring(mesh,ib);
                         int ul,ur,x,y,z,ax,ay,az,bx,by,bz;
                         double qx,qy,qz,error,px,py;
                         path_edges(ia*STEP+at,&ul,&ur);
