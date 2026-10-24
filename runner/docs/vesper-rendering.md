@@ -7,8 +7,9 @@ stepped rooflines and dark sky above them. It has no ceiling or separate
 screen-space skyline in this stage. Distant buildings remain on the road.
 The nominal tower height is now 960 units (near variation roughly 768–1152),
 three times the initial canyon height.
-The side surfaces extend 20,000 course units ahead, up from 4,200. Curves and
-banking still follow the track; this is not Sineworks' straight-only projection.
+The side surfaces extend 20,000 course units ahead, up from 4,200. Hook keeps
+its horizontal bends, but those bends are unbanked so the road-side buildings
+stay vertical as the track turns.
 
 Like Sineworks, the renderer separates the enclosure from its decorative detail.
 It no longer tessellates large textured facades. Small square window-light sprites

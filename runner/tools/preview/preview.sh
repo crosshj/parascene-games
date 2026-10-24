@@ -14,6 +14,7 @@ python3 "$here/../bake_path_runtime.py" --header "$out/path_runtime_data.h" --re
 python3 "$here/../bake_vesper.py" "$out/vesper_facades.h"
 python3 "$here/../bake_worlds.py" --manifest "$here/../../worlds/reach.json" --header "$out/reach_world_data.h" --report "$out/reach_world_report.json"
 python3 "$here/../bake_worlds.py" --manifest "$here/../../worlds/reach-road.json" --header "$out/road_world_data.h" --report "$out/road_world_report.json"
+python3 "$here/../bake_worlds.py" --manifest "$here/../../worlds/meridian.json" --header "$out/meridian_world_data.h" --report "$out/meridian_world_report.json"
 cc -std=gnu99 -O2 -Wall -Wextra -Wno-unused-parameter -DRUNNER_PREVIEW \
     ${RUNNER_PREVIEW_FLAGS:-} \
     -I "$here/host" -idirafter "$sdk/include/libpsn00b" -I "$src" -I "$out" \

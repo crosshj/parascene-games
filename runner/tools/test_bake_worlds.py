@@ -4,7 +4,7 @@ import unittest
 import struct
 import tempfile
 from pathlib import Path
-from bake_worlds import emit, project, schedules_for, span_ok, outside_planes
+from bake_worlds import emit, pack_indices, project, route_masks, schedules_for, span_ok, outside_planes
 from check_ram import check
 from bake_tracks import analytic_straight
 from preview.visibility_report import summarize
@@ -61,22 +61,72 @@ class WorldCompilerTests(unittest.TestCase):
     def test_schedule_preserves_coverage_and_rejects_excess_work(self):
         rings = [[[0, 170, 1000 + i * 256]] * 6 for i in range(10)]
         cfg = dict(step=256, lookahead=2048, lod_depths=[1600, 5000, 10000],
-                   lod_strides=[1, 2, 4, 8], max_error_px=1, max_schedule_rings=10)
-        schedules, indices, _ = schedules_for(rings, [self.camera] * 3, 1, cfg)
+                   lod_strides=[1, 2, 4, 8], max_error_px=1, max_schedule_rings=10,
+                   near_distance=0)
+        schedules, indices, _ = schedules_for(rings, [self.camera] * 5, 1, cfg)
         self.assertEqual(indices[0], 0)
         self.assertEqual(indices[-1], 8)
         cfg['max_schedule_rings'] = 2
         with self.assertRaisesRegex(ValueError, 'schedule budget'):
-            schedules_for(rings, [self.camera] * 3, 1, cfg)
+            schedules_for(rings, [self.camera] * 5, 1, cfg)
+
+    def test_branch_cut_boundaries_and_packed_schedule_gaps(self):
+        rings = [[[0, 170, 1000 + i * 256]] * 6 for i in range(20)]
+        cfg = dict(step=256, lookahead=4096, lod_depths=[1600, 5000, 10000],
+                   lod_strides=[1, 4, 16, 64], max_error_px=1, max_schedule_rings=32,
+                   near_distance=0)
+        schedules, indices, _ = schedules_for(rings, [self.camera] * 9, 2, cfg, cuts=[9])
+        start,count,_=schedules[0]
+        sequence=indices[start:start+count]
+        self.assertIn(8,sequence)
+        self.assertIn(9,sequence)
+        self.assertFalse(any(a<9<b for a,b in zip(sequence,sequence[1:])))
+        encoded,packed=pack_indices(schedules,indices)
+        first,count,initial=encoded[0]
+        decoded=[initial]
+        for i in range(count-1):
+            bit=first+i*6
+            value=(packed[bit//8] | (packed[bit//8+1]<<8)) >> (bit%8)
+            decoded.append(decoded[-1]+(value&63)+1)
+        self.assertEqual(decoded,sequence)
+
+    def test_cut_runs_never_join_and_branch_masks_are_bounded(self):
+        rings = [[[0, 170, 1000 + i * 256]] * 6 for i in range(20)]
+        cfg = dict(step=256, lookahead=4096, lod_depths=[1600, 5000, 10000],
+                   lod_strides=[1, 4, 16, 64], max_error_px=1,
+                   max_schedule_rings=32, near_distance=0)
+        schedules, indices, _ = schedules_for(rings, [self.camera] * 9, 2, cfg,
+                                               cuts=[9,10,11])
+        start,count,_=schedules[0]
+        sequence=indices[start:start+count]
+        self.assertTrue(all(cut in sequence for cut in (9,10,11)))
+        self.assertFalse(any(a<cut<b for cut in (9,10,11)
+                             for a,b in zip(sequence,sequence[1:])))
+        authored={'id':'fixture','segments':[{'chain':c} for c in
+            ('main','left','middle','right')]}
+        self.assertEqual(list(route_masks(authored)),list(range(8)))
+        authored['segments'].append({'chain':'extra'})
+        with self.assertRaisesRegex(ValueError,'forks exceed'):
+            route_masks(authored)
+
+    def test_packed_schedule_rejects_unrepresentable_stride(self):
+        with self.assertRaisesRegex(ValueError, 'bits'):
+            pack_indices([(0,2,0)],[0,65])
+        encoded,packed=pack_indices([(0,2,17)],[17,18])
+        self.assertEqual(encoded,[(0,2,17)])
+        self.assertEqual(packed[0]&63,0)
+        self.assertEqual(len(packed),2)  # safe unaligned 16-bit runtime read
+        encoded,packed=pack_indices([(0,2,17)],[17,81])
+        self.assertEqual(packed[0]&63,63) # stride 64 fits the six-bit code
 
     def test_resident_budget_and_vertex_overflow_fail_the_build(self):
         ring = [[0, 0, 0]] * 6
-        group = dict(rings=[ring], schedules=[(0, 1)], indices=[0], bands=1)
+        group = dict(rings=[ring], schedules=[(0, 1, 0)], indices=[0], bands=1)
         with self.assertRaisesRegex(ValueError, 'resident bytes'):
-            emit([group], [('test', 0)], dict(max_resident_bytes=1))
+            emit([group], [('test',0,0)], dict(max_resident_bytes=1, lod_strides=[1,2,4,8]))
         group['rings'] = [[[0, 0, 0]] + [[32768, 0, 0]] * 5]
         with self.assertRaisesRegex(ValueError, 'overflow'):
-            emit([group], [('test', 0)], dict(max_resident_bytes=1000))
+            emit([group], [('test',0,0)], dict(max_resident_bytes=1000, lod_strides=[1,2,4,8]))
 
     def test_ram_guard_counts_bss_and_protects_reserved_memory(self):
         def elf(address, size):

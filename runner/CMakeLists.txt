@@ -209,7 +209,21 @@ add_custom_command(
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
     VERBATIM)
-set_source_files_properties(src/road.c PROPERTIES OBJECT_DEPENDS "${REACH_WORLD_H};${ROAD_WORLD_H}")
+set(MERIDIAN_WORLD_H "${CMAKE_CURRENT_BINARY_DIR}/meridian_world_data.h")
+add_custom_command(
+    OUTPUT "${MERIDIAN_WORLD_H}" "${CMAKE_CURRENT_BINARY_DIR}/meridian_world_report.json"
+    COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/worlds/meridian.json"
+        --header "${MERIDIAN_WORLD_H}" --report "${CMAKE_CURRENT_BINARY_DIR}/meridian_world_report.json"
+    DEPENDS "${TRACK_H}" "${TRACK_JSON}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/bake_worlds.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/worlds/meridian.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/path.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/path_runtime.h" "${CMAKE_CURRENT_SOURCE_DIR}/src/world_mesh.h"
+    VERBATIM)
+set_source_files_properties(src/road.c PROPERTIES
+    OBJECT_DEPENDS "${REACH_WORLD_H};${ROAD_WORLD_H};${MERIDIAN_WORLD_H}")
 add_custom_target(check_worlds
 	COMMAND "${PYTHON3}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_compiled_worlds.py"
 		--include "${CMAKE_CURRENT_BINARY_DIR}"
@@ -222,7 +236,7 @@ add_custom_target(check_worlds
 		"${CMAKE_CURRENT_SOURCE_DIR}/tools/check_world_mesh.c"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" -o "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
 	COMMAND "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
-	DEPENDS "${WORLD_H}" "${TRACK_H}" "${PATH_RUNTIME_H}" "${REACH_WORLD_H}" "${ROAD_WORLD_H}"
+	DEPENDS "${WORLD_H}" "${TRACK_H}" "${PATH_RUNTIME_H}" "${REACH_WORLD_H}" "${ROAD_WORLD_H}" "${MERIDIAN_WORLD_H}"
 	VERBATIM
 )
 add_custom_target(check_world_visuals

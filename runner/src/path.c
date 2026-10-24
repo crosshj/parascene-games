@@ -916,6 +916,10 @@ int path_branches(void) {
     return active->branches;
 }
 
+int path_route(int k) {
+    return k >= 0 && k < active->branches ? route[k] : 0;
+}
+
 int path_branch(int k, int s, int *s0, int *s1) {
     const TrackBranch *b = &active->branch[k];
     int band = s < 0 ? 0 : s / STEP;

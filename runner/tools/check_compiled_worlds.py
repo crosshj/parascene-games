@@ -12,12 +12,16 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--include',type=Path,required=True)
     args=ap.parse_args()
-    packages=[('reach.json','reach_world_data.h'),('reach-road.json','road_world_data.h')]
+    packages=[('reach.json','reach_world_data.h'),('reach-road.json','road_world_data.h'),
+              ('meridian.json','meridian_world_data.h')]
     with tempfile.TemporaryDirectory(prefix='world-mesh-check-') as tmp:
         for manifest,header in packages:
             cfg=json.loads((ROOT/'worlds'/manifest).read_text())
             prefix=cfg.get('symbol_prefix','world')
             flags=[] if prefix=='world' else [f'-Dworld_meshes={prefix}_meshes',f'-DWORLD_MESH_COUNT={prefix.upper()}_MESH_COUNT']
+            if cfg.get('height_mode')=='crack': flags.append('-DWORLD_HEIGHT_CRACK')
+            if cfg.get('independent_error_px'):
+                flags.append(f'-DWORLD_LOD_ERROR_LIMIT={cfg["independent_error_px"]}')
             exe=Path(tmp)/manifest
             subprocess.run(['cc','-std=gnu99','-O2','-DRUNNER_PREVIEW',f'-DWORLD_MESH_HEADER="{header}"',*flags,
                 '-I',str(ROOT/'src'),'-I',str(args.include),str(ROOT/'tools/check_world_mesh.c'),

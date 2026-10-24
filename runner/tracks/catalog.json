@@ -2429,10 +2429,9 @@
       "id": "vesper.hook",
       "name": "Vesper hook",
       "status": "runnable",
-      "summary": "Story stage 3. A banked bend, a long run, and a tighter banked bend into the finish. The road ends.",
+      "summary": "Story stage 3. An unbanked bend, a long run, and a tighter unbanked bend into the finish. The road ends.",
       "capabilities": [
-        "yaw",
-        "bank"
+        "yaw"
       ],
       "start": "open",
       "pieces": [
@@ -2491,7 +2490,6 @@
           "id": "turn-in",
           "length": 4096,
           "yaw": 45,
-          "bank": 33.75,
           "next": "turn",
           "obstacles": [
             {
@@ -2540,7 +2538,6 @@
           "id": "turn-out",
           "length": 4096,
           "yaw": 45,
-          "bank": -33.75,
           "next": "run"
         },
         {
@@ -2654,7 +2651,6 @@
           "id": "hook-in",
           "length": 2048,
           "yaw": 45,
-          "bank": 33.75,
           "next": "hook"
         },
         {
@@ -2685,7 +2681,6 @@
           "id": "hook-out",
           "length": 2048,
           "yaw": 45,
-          "bank": -33.75,
           "next": "home"
         },
         {

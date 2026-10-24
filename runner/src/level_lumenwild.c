@@ -38,7 +38,6 @@
 #define SMALL_FAR_Z 6000
 /* Keep this much clear beside the asphalt so canopies never cover the road. */
 #define ROAD_CLEAR (ROAD_HALF + 60)
-#define STREAKS 64
 #define MAX_GLOWS 20
 
 /* One cell in HERO_EVERY carries a full-detail giant. */
@@ -113,7 +112,6 @@ static RoadStyle lw_road;
 static ObstacleStyle lw_obstacle;
 static Scheme lw_schemes[5];
 static RGB lw_floor_glow, lw_floor, lw_fog, lw_fade;
-static Col lw_streak;
 
 /* Move one color along the night. Stage 0 is the color as authored. */
 static RGB mood_rgb(RGB c) {
@@ -169,7 +167,7 @@ static const ObstacleStyle k_obstacle = {
     {120, 26, 40}, {176, 44, 52}, {220, 70, 40}, {255, 210, 130}, {255, 118, 34}
 };
 
-static int lw_scroll, lw_speed, lw_time, lw_x, lw_glows, lw_foot;
+static int lw_scroll, lw_speed, lw_time, lw_glows, lw_foot;
 /* Set while drawing things the player must judge, which never deform. */
 static int lw_rigid;
 
@@ -1027,116 +1025,6 @@ static void skyline(void) {
 static void spores(void) {
 }
 
-/* Averaged with the scene, so the grey stays see-through. One pixel. */
-static void glow_line(XY a, XY b, int bucket, Col c) {
-    LINE_F2 *line;
-    DR_TPAGE *mode;
-    if (!xy_ok(&a) || !xy_ok(&b) || !edge_ok(a, b))
-        return;
-    if (world_bytes_used() + sizeof(LINE_F2) + sizeof(DR_TPAGE) > BUFFER_LENGTH)
-        return;
-    line = alloc_prim(bucket, sizeof(LINE_F2));
-    if (!line)
-        return;
-    setLineF2(line);
-    setSemiTrans(line, 1);
-    setRGB0(line, clamp(c.r, 0, 255), clamp(c.g, 0, 255), clamp(c.b, 0, 255));
-    setXY2(line, a.x, a.y, b.x, b.y);
-    mode = alloc_prim(bucket, sizeof(DR_TPAGE));
-    if (mode)
-        setDrawTPage(mode, 0, 1, getTPage(0, BLEND_AVG, 0, 0));
-}
-
-/* A tube standing on the road, centered on the runner. The bottom of the
- * circle is the deck, so the low lines sit on the road beside the character.
- * Lines are generators: one angle all the way around, stepped along the road.
- * The crown is the centerline height that lands on the top of the screen,
- * measured with the camera as it is this frame, so a downhill shortens the
- * tube. Width stays put; only the height follows the crown. */
-#define TUBE_R 460
-/* Height of the crown above the deck on level ground, the height that
- * meets the top of the screen at the runner. Kept fixed so a rising road
- * does not flatten the tube into the sliver of screen above it. Lines
- * that leave the top of the screen are dropped. */
-#define TUBE_CROWN (CAM_H + HORIZON_Y * CHAR_Z / (SCREEN_W / 2))
-
-/* The two projected ends already give the line's direction. Carry the
- * lower end to just past the bottom of the screen without more samples. */
-static void extend_bottom(XY *far, XY *near) {
-    int dy, dx, reach, nx, ny, span;
-    if (near->y < 0 || near->y >= SCREEN_H || far->y >= near->y)
-        return;
-    dy = near->y - far->y;
-    if (dy < 1)
-        return;
-    dx = near->x - far->x;
-    if (dx > 2000)
-        dx = 2000;
-    if (dx < -2000)
-        dx = -2000;
-    reach = SCREEN_H + 12 - near->y;
-    nx = near->x + dx * reach / dy;
-    ny = SCREEN_H + 12;
-    span = iabs(nx - far->x);
-    if (iabs(ny - far->y) > span)
-        span = iabs(ny - far->y);
-    if (span > 480) {
-        nx = far->x + (nx - far->x) * 480 / span;
-        ny = far->y + (ny - far->y) * 480 / span;
-    }
-    if (nx < -1000)
-        nx = -1000;
-    if (nx > 1000)
-        nx = 1000;
-    near->x = nx;
-    near->y = ny;
-}
-
-static void speed_streaks(void) {
-    int picture = lw_time >> 1;
-    int i;
-    if (lw_speed <= 0)
-        return;
-    for (i = 0; i < STREAKS; i++) {
-        /* Each slot has its own angle, speed, and phase, and the angle
-         * jumps when the slot respawns. A shared step around the circle
-         * reads as a spiral. travel still shrinks ahead, so a live line
-         * runs toward the camera. On for one fifth of its cycle. */
-        uint32_t slot = mix((uint32_t)i * 0x9E3779B9u);
-        int span = 480;
-        int cycle = span * 5;
-        int speed = 128 + (int)((slot >> 8) & 63);
-        uint32_t clock = (uint32_t)picture * (uint32_t)speed + (slot >> 16);
-        int travel = (int)(clock % (uint32_t)cycle);
-        int a = (int)(mix(slot ^ (clock / (uint32_t)cycle)) & 63);
-        int ahead = CHAR_Z + span - travel % span;
-        int step = 48 + (int)((slot >> 24) & 63);
-        int cax = cs(a), sax = sn(a);
-        int u = lw_x + TUBE_R * cax / 127;
-        int h = TUBE_CROWN * (sax + 127) / 254;
-        Col grey = lw_streak;
-        int bucket;
-        XY far, near;
-        int zf, zn;
-        if (travel >= span)
-            continue;
-        zf = path_project(lw_scroll + ahead + step, u, h, &far);
-        zn = path_project(lw_scroll + ahead, u, h, &near);
-        if (zf < 48 || zn < 48)
-            continue;
-        if (far.y < 0 || near.y < 0)
-            continue;
-        extend_bottom(&far, &near);
-        /* The offscreen tip is close to the camera. Sort by the line's real
-         * distance instead, and never nearer than the road under the runner,
-         * so the runner and the obstacles (drawn later, or closer) cover it. */
-        bucket = ahead >> OT_SHIFT;
-        if (bucket < (CHAR_Z >> OT_SHIFT))
-            bucket = CHAR_Z >> OT_SHIFT;
-        glow_line(far, near, bucket, grey);
-    }
-}
-
 static const Light k_light = {
     {10, 6, 28},     /* sky */
     {34, 20, 80},    /* haze */
@@ -1166,7 +1054,6 @@ static const RoadStyle k_road = {
 
 static void apply_stage(int stage) {
     int i;
-    RGB streak;
     if (stage < 0)
         stage = 0;
     if (stage > 2)
@@ -1206,10 +1093,6 @@ static void apply_stage(int stage) {
     lw_floor = mood_rgb(k_floor);
     lw_fog = mood_rgb(k_fog);
     lw_fade = mood_rgb(k_fade);
-    streak = mood_rgb((RGB){112, 112, 112});
-    lw_streak.r = streak.r;
-    lw_streak.g = streak.g;
-    lw_streak.b = streak.b;
     sky_refresh = 1;
     sky_dirty = 1;
 }
@@ -1226,7 +1109,6 @@ static void lumen_draw(const LevelFrame *f) {
     lw_scroll = f->scroll;
     lw_speed = f->speed;
     lw_time = f->time;
-    lw_x = f->x;
     lw_glows = 0;
     PROF(PF_SKY, sky());
     PROF(PF_AURORA, aurora());
@@ -1234,7 +1116,6 @@ static void lumen_draw(const LevelFrame *f) {
     PROF(PF_FOREST, forest());
     road_draw(&lw_road, f);
     PROF(PF_SPORES, spores());
-    PROF(PF_STREAKS, speed_streaks());
 }
 
 static const Stage k_stages[] = {

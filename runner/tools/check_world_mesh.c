@@ -7,6 +7,9 @@
 #include "path.h"
 #include "course.h"
 #include "world_mesh.h"
+#ifndef WORLD_LOD_ERROR_LIMIT
+#define WORLD_LOD_ERROR_LIMIT 1.1
+#endif
 #ifndef WORLD_MESH_HEADER
 #define WORLD_MESH_HEADER "world_mesh_data.h"
 #endif
@@ -17,6 +20,25 @@
 #endif
 
 int project(int x, int y, int z, XY *out) { return z; }
+
+static int height_at(int s,int configured) {
+#ifdef WORLD_HEIGHT_CRACK
+    if(configured>0) {
+        const PathSeg *lip=path_at(0),*seg=path_at(s);
+        int drop=lip&&seg?lip->y-seg->y:0;
+        if(drop<0) drop=0;
+        drop=220+drop/2;
+        return drop>960?960:drop;
+    }
+#endif
+    return configured;
+}
+
+static unsigned mesh_stride(const WorldMesh *mesh,uint32_t bit) {
+    unsigned byte=bit>>3,shift=bit&7;
+    unsigned value=mesh->indices[byte]|((unsigned)mesh->indices[byte+1]<<8);
+    return ((value>>shift)&((1u<<mesh->stride_bits)-1))+1;
+}
 
 int main(int argc,char **argv) {
     int profile[18]={-1,36,0,-1,36,420,-1,36,408,1,36,408,1,36,420,1,36,0};
@@ -32,27 +54,40 @@ int main(int argc,char **argv) {
         int band, pose, i, j;
         if (!path_open(mesh->track))
             return 1;
+        path_reset();
+        for(j=0;j<path_branches() && j<3;j++)
+            if(mesh->route_mask&(1u<<j)) path_swap(j);
         /* Reverse band order and jump between offsets; no forward cursor. */
         for (band = mesh->schedule_count - 1; band >= 0; band--) {
             const WorldSchedule *schedule = &mesh->schedules[band];
             int base = band > 0 ? band - 1 : 0;
+            int schedule_ring[128],relative=schedule->first_offset;
+            uint32_t bit=schedule->first;
             if (mesh->version != 1 || schedule->count < 2 ||
-                mesh->indices[schedule->first] != 0)
+                schedule->count>128) {
+                fprintf(stderr,"%s band %d: invalid schedule version/count %u/%u\n",
+                        mesh->track,band,mesh->version,schedule->count);
                 return 1;
+            }
+            for(i=0;i<schedule->count;i++) {
+                if(i) { relative+=(int)mesh_stride(mesh,bit);bit+=mesh->stride_bits; }
+                schedule_ring[i]=base+relative;
+                if(i && relative-(schedule_ring[i-1]-base)>max_stride) {
+                    fprintf(stderr,"%s band %d: packed stride %d exceeds %d\n",mesh->track,band,
+                            relative-(schedule_ring[i-1]-base),max_stride);
+                    return 1;
+                }
+            }
             for (pose = 0; pose < 3; pose++) {
                 path_begin(band * STEP + (pose == 0 ? 255 : pose == 1 ? 0 : 127));
                 for (i = 0; i < schedule->count; i++) {
-                    int relative = mesh->indices[schedule->first + i];
-                    int index = base + relative;
+                    int index = schedule_ring[i];
                     const WorldRing *ring = &mesh->rings[index];
                     int ul, ur;
-                    if (i && (relative <= mesh->indices[schedule->first + i - 1] ||
-                              relative - mesh->indices[schedule->first + i - 1] > max_stride))
-                        return 1;
                     path_edges(index * STEP, &ul, &ur);
                     for (j = 0; j < 6; j++) {
                         int x, y, z, bx, by, bz;
-                        int height=profile[j*3+2],outside=profile[j*3+1];
+                        int height=height_at(index*STEP,profile[j*3+2]),outside=profile[j*3+1];
                         path_cam(index * STEP, profile[j*3]<0 ? ul-outside : ur+outside, height, &x, &y, &z);
                         path_transform(ring->origin.x + (j ? ring->offset[j - 1][0] : 0),
                                        ring->origin.y + (j ? ring->offset[j - 1][1] : 0),
@@ -71,16 +106,17 @@ int main(int argc,char **argv) {
                 int camera=band*STEP+(pose?191:63);
                 path_begin(camera);
                 for(i=1;i<schedule->count;i++) {
-                    int ia=base+mesh->indices[schedule->first+i-1];
-                    int ib=base+mesh->indices[schedule->first+i];
+                    int ia=schedule_ring[i-1];
+                    int ib=schedule_ring[i];
                     int at,span=(ib-ia)*STEP;
+                    if(mesh->rings[ib].flags&WORLD_RING_CUT_BEFORE) continue;
                     if(ia*STEP<camera+mesh->near_distance) continue;
                     for(at=37;at<span;at+=113) for(j=0;j<6;j++) {
                         const WorldRing *a=&mesh->rings[ia],*b=&mesh->rings[ib];
                         int ul,ur,x,y,z,ax,ay,az,bx,by,bz;
                         double qx,qy,qz,error,px,py;
                         path_edges(ia*STEP+at,&ul,&ur);
-                        path_cam(ia*STEP+at,profile[j*3]<0?ul-profile[j*3+1]:ur+profile[j*3+1],profile[j*3+2],&x,&y,&z);
+                        path_cam(ia*STEP+at,profile[j*3]<0?ul-profile[j*3+1]:ur+profile[j*3+1],height_at(ia*STEP+at,profile[j*3+2]),&x,&y,&z);
                         path_transform(a->origin.x+(j?a->offset[j-1][0]:0),a->origin.y+(j?a->offset[j-1][1]:0),a->origin.z+(j?a->offset[j-1][2]:0),&ax,&ay,&az);
                         path_transform(b->origin.x+(j?b->offset[j-1][0]:0),b->origin.y+(j?b->offset[j-1][1]:0),b->origin.z+(j?b->offset[j-1][2]:0),&bx,&by,&bz);
                         qx=ax+(bx-ax)*(double)at/span;qy=ay+(by-ay)*(double)at/span;qz=az+(bz-az)*(double)at/span;
@@ -89,12 +125,15 @@ int main(int argc,char **argv) {
                         if(px<0||px>=320||py<0||py>=240) continue;
                         error=fmax(fabs(px-(160+qx*160/qz)),fabs(py-(72+(170-qy)*160/qz)));
                         lod_checks++;if(error>worst_error) worst_error=error;
-                        if(error>1.1) { fprintf(stderr,"mesh chord error %.5f px at %d span %d+%d\n",error,camera,ia*STEP,span);return 1; }
+                        if(error>WORLD_LOD_ERROR_LIMIT) { fprintf(stderr,"mesh chord error %.5f px at %d span %d+%d\n",error,camera,ia*STEP,span);return 1; }
                     }
                 }
             }
-            if ((base + mesh->indices[schedule->first + schedule->count - 1]) * STEP < band * STEP + lookahead)
+            if (schedule_ring[schedule->count-1] * STEP < band * STEP + lookahead) {
+                fprintf(stderr,"%s band %d: schedule ends at %d before lookahead %d\n",
+                        mesh->track,band,schedule_ring[schedule->count-1]*STEP,band*STEP+lookahead);
                 return 1;
+            }
         }
     }
     if(lod_checks) printf("mesh LOD: %lu independent visible samples, worst %.6f pixels\n",lod_checks,worst_error);

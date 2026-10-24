@@ -555,6 +555,7 @@ static Cost frame(const Level *lv, const LevelFrame *f, int marker, int alt, con
     path_begin(f->scroll);
     lv->clear_color(f, &r, &g, &b);
     lv->draw(f);
+    road_speed_lines(f);
     if (marker) {
         world_asset("runner",0,"quad");
         if(marker>1) runner_sprite_preview(f,level_light(lv),marker==3);
@@ -882,6 +883,7 @@ static int tunnel_check(const char *dir) {
             LevelFrame f = {positions[p],0,37,0,stage};
             uint64_t mask = 0;
             int shell_pixels = 0, primitives = 0, road_pixels = 0, road_at_vp = 0, far_pixels = 0, x,y;
+            int expects_far_rib = 0, rib_s;
             int near_g, mid_g, end_g;
             render_shell_only = 1;
             frame(lv,&f,0,0,0);
@@ -893,6 +895,13 @@ static int tunnel_check(const char *dir) {
             for (y = 0; y < SCREEN_H; y++)
                 for (x = 0; x < SCREEN_W; x++)
                     shell_pixels += (submitted_mask[y][x]&mask) != 0;
+            /* The tunnel deliberately stops adding decorative ribs before
+             * the finish. Only require a far contributor when the authored
+             * 2,560-unit schedule actually has one beyond 5,000 units. */
+            rib_s = f.scroll / 2560 * 2560;
+            if (rib_s < f.scroll + CLIP) rib_s += 2560;
+            for (; rib_s < f.scroll + 20000 && road_scenery_gate_allowed(rib_s); rib_s += 2560)
+                if (rib_s >= f.scroll + 5000) expects_far_rib = 1;
             near_g = mid_g = end_g = 0;
             for (x = 0; x < 16; x++) {
                 near_g += fb[HORIZON_Y][x][1];
@@ -915,7 +924,7 @@ static int tunnel_check(const char *dir) {
                 if (!strcmp(a->kind,"rib") && a->instance >= f.scroll+5000)
                     far_pixels += a->visible_pixels;
             }
-            failures += road_pixels == 0 || !road_at_vp || far_pixels == 0;
+            failures += road_pixels == 0 || !road_at_vp || (expects_far_rib && far_pixels == 0);
             fprintf(csv,"%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",stage,f.scroll,shell_pixels,
                     primitives,road_pixels,road_at_vp,far_pixels,near_g,mid_g,end_g);
         }
@@ -1174,10 +1183,81 @@ static int compiled_mesh_check(const char *dir) {
     return failures!=0;
 }
 
+/* Meridian's branch-aware corridor bake must be compared against the same
+ * procedural wall path at matching poses, independently of the Reach check. */
+static int compiled_meridian_check(const char *dir) {
+    static unsigned char reference[sizeof fb],candidate[sizeof fb];
+    const Level *lv=0;
+    char name[512];FILE *csv;
+    int i,stage,pose,alt,frames=0,failures=0,worst_unmatched=0;
+    double worst_mean=0,stage_worst[3][2]={{0,0},{0,0},{0,0}};
+    for(i=0;i<level_count;i++) if(!strcmp(levels[i]->track,"meridian.drift")) lv=levels[i];
+    if(!lv) return 1;
+    snprintf(name,sizeof name,"%s/meridian-mesh.csv",dir);csv=fopen(name,"w");if(!csv) return 1;
+    fprintf(csv,"stage,alternate,scroll,mean_delta,strong_pixels,unmatched_pixels,reference_samples,compiled_samples,reference_bytes,compiled_bytes\n");
+    for(stage=0;stage<lv->stage_count;stage++) {
+        int finish=lv->stages[stage].finish;
+        int offsets[5]={0,finish/4,finish/2,(finish*3)/4,finish>0?finish-1:0};
+        path_open(lv->stages[stage].track);
+        for(alt=0;alt<=(path_branches()>0);alt++)
+        for(pose=0;pose<5;pose++) {
+            LevelFrame f={offsets[pose],20,37,0,stage};
+            Cost a,b;unsigned long delta=0;int strong=0,unmatched=0,p;
+            path_reset();road_preview_legacy_mesh=1;
+            a=frame(lv,&f,1,alt,0);memcpy(reference,fb,sizeof fb);
+            path_reset();road_preview_legacy_mesh=0;
+            b=frame(lv,&f,1,alt,0);memcpy(candidate,fb,sizeof fb);
+            path_open(lv->stages[stage].track);
+            if(alt && path_branches()>0) path_swap(0);
+            path_begin(f.scroll);
+            {
+                int baked_start=road_compiled_walls_start(f.scroll);
+                if(baked_start<f.scroll+4200 || baked_start>f.scroll+44032)
+                    failures++;
+            }
+            if(b.samples>=a.samples) failures++;
+            for(p=0;p<SCREEN_W*SCREEN_H;p++) {
+                int c,high=0;
+                for(c=0;c<3;c++) { int d=iabs(reference[p*3+c]-candidate[p*3+c]);delta+=d;if(d>24) high=1; }
+                strong+=high;
+                if(high) {
+                    int dx,dy,x=p%SCREEN_W,y=p/SCREEN_W,near_ref=0,near_candidate=0;
+                    for(dy=-1;dy<=1;dy++) for(dx=-1;dx<=1;dx++) {
+                        int xx=x+dx,yy=y+dy,q,match_ref=1,match_candidate=1;
+                        if(xx<0||xx>=SCREEN_W||yy<0||yy>=SCREEN_H) continue;
+                        q=(yy*SCREEN_W+xx)*3;
+                        for(c=0;c<3;c++) {
+                            if(iabs(reference[q+c]-candidate[p*3+c])>8) match_ref=0;
+                            if(iabs(candidate[q+c]-reference[p*3+c])>8) match_candidate=0;
+                        }
+                        near_ref|=match_ref;near_candidate|=match_candidate;
+                    }
+                    unmatched+=!near_ref||!near_candidate;
+                }
+            }
+            double mean=(double)delta/sizeof fb;
+            if(mean>worst_mean) worst_mean=mean;
+            if(mean>stage_worst[stage][alt]) {
+                stage_worst[stage][alt]=mean;
+                memcpy(fb,reference,sizeof fb);
+                snprintf(name,sizeof name,"%s/meridian-mesh-stage%d-route%d-reference.png",dir,stage,alt);write_png(name);
+                memcpy(fb,candidate,sizeof fb);
+                snprintf(name,sizeof name,"%s/meridian-mesh-stage%d-route%d-candidate.png",dir,stage,alt);write_png(name);
+            }
+            if(unmatched>worst_unmatched) worst_unmatched=unmatched;
+            if(mean>0.15 || unmatched>SCREEN_W*SCREEN_H/1000 || b.bytes>=BUFFER_LENGTH) failures++;
+            fprintf(csv,"%d,%d,%d,%.6f,%d,%d,%lu,%lu,%zu,%zu\n",stage,alt,f.scroll,mean,strong,unmatched,a.samples,b.samples,a.bytes,b.bytes);frames++;
+        }
+    }
+    fclose(csv);road_preview_legacy_mesh=0;
+    printf("Meridian mesh: %d matched poses, %d failures; worst mean %.6f, unmatched pixels %d\n",frames,failures,worst_mean,worst_unmatched);
+    return failures!=0;
+}
+
 static int pipeline_check(const char *dir) {
     static uint8_t reference[sizeof fb];
     static const int offsets[]={0,127,255};
-    int i,stage,s,o,alt,failures=0,pairs=0;
+    int i,stage,s,o,alt,failures=0,pairs=0,baked_scene_differences=0;
     char name[512]; FILE *csv;
     XY p;
     if(project(2000,170,40000,&p)!=40000 || iabs(p.x-168)>1 || iabs(p.y-72)>1) {
@@ -1198,9 +1278,12 @@ static int pipeline_check(const char *dir) {
             for(s=0;s<=end;s+=2048) for(o=0;o<3;o++) {
                 LevelFrame f={s+offsets[o],20,(s+offsets[o])/20+37,0,stage};
                 Cost a,b; int mismatch;
+                int baked_scene=!strncmp(track,"reach.",6)||!strncmp(track,"meridian.",9);
                 path_reset(); road_preview_legacy_surfaces=1; road_preview_disable_occlusion=1;
+                road_preview_legacy_mesh=1;
                 a=frame(lv,&f,1,alt,0); memcpy(reference,fb,sizeof fb);
                 path_reset(); road_preview_legacy_surfaces=0; road_preview_disable_occlusion=0;
+                road_preview_legacy_mesh=0;
                 road_preview_reset_haze(); road_preview_far_limit_hits=0;
                 b=frame(lv,&f,1,alt,0);
                 mismatch=memcmp(reference,fb,sizeof fb)!=0;
@@ -1210,7 +1293,13 @@ static int pipeline_check(const char *dir) {
                     snprintf(name,sizeof name,"%s/%s-reference.png",dir,track); write_png(name);
                     saved=1;
                 }
-                if(mismatch || b.bytes>=BUFFER_LENGTH || road_preview_far_limit_hits) {
+                /* Reach and Meridian deliberately replace the old far-wall
+                 * tessellation. Their pixel deltas have dedicated native-size
+                 * A/B checks with geometry-aware tolerances above. This loop
+                 * still verifies their path integration, command budget, and
+                 * distant-bound guards; exact pixels remain required elsewhere. */
+                if(mismatch && baked_scene) baked_scene_differences++;
+                if((mismatch && !baked_scene) || b.bytes>=BUFFER_LENGTH || road_preview_far_limit_hits) {
                     if(failures<5) fprintf(stderr,"pipeline mismatch/budget: %s stage %d at %d alt %d: pixels %d, bytes %zu, far %d\n",lv->name,stage,f.scroll,alt,mismatch,b.bytes,road_preview_far_limit_hits);
                     failures++;
                 }
@@ -1221,8 +1310,38 @@ static int pipeline_check(const char *dir) {
             fflush(stdout);
         }
     }
-    fclose(csv);road_preview_legacy_surfaces=0;
-    printf("pipeline: %d frame pairs, %d failures\n",pairs,failures);
+    fclose(csv);road_preview_legacy_surfaces=0;road_preview_legacy_mesh=0;
+    printf("pipeline: %d frame pairs, %d failures; %d Reach/Meridian mesh deltas checked by native-size A/B tests\n",
+           pairs,failures,baked_scene_differences);
+    return failures!=0;
+}
+
+static int speedline_check(void) {
+    int i,stage,alt,poses=0,failures=0;
+    visibility_enabled=1;
+    for(i=0;i<level_count;i++) {
+        const Level *lv=levels[i];
+        int stages=lv->stage_count?lv->stage_count:1;
+        for(stage=0;stage<stages;stage++) {
+            const char *track=lv->stage_count?lv->stages[stage].track:lv->track;
+            path_open(track);
+            for(alt=0;alt<=(path_branches()>0);alt++) {
+                LevelFrame f={2600,20,72,0,stage};
+                int found=0,k;
+                frame(lv,&f,1,alt,0);
+                for(k=0;k<asset_count;k++)
+                    if(!strcmp(frame_assets[k].kind,"speed_lines") &&
+                       frame_assets[k].primitives>0) found=1;
+                failures+=!found;
+                failures+=road_runner_bucket((CHAR_Z>>OT_SHIFT)-1)!=
+                          (CLIP>>OT_SHIFT)-2;
+                poses++;
+            }
+        }
+    }
+    visibility_enabled=0;
+    printf("global speed lines: %d stage/routes, overlay emitted and runner ordered above; %d failures\n",
+           poses,failures);
     return failures!=0;
 }
 
@@ -1257,8 +1376,12 @@ int main(int argc, char **argv) {
     if(argc>2 && !strcmp(argv[2],"--finish-gate-check")) return finish_gate_check(dir);
     if(argc>2 && !strcmp(argv[2],"--runner-lighting-check")) return runner_lighting_check(dir);
     if(argc>2 && !strcmp(argv[2],"--atmosphere-check")) return reach_atmosphere_check(dir);
-    if(argc>2 && !strcmp(argv[2],"--mesh-check")) return compiled_mesh_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--mesh-check")) {
+        int a=compiled_mesh_check(dir),b=compiled_meridian_check(dir);
+        return a||b;
+    }
     if(argc>2 && !strcmp(argv[2],"--pipeline-check")) return pipeline_check(dir);
+    if(argc>2 && !strcmp(argv[2],"--speedline-check")) return speedline_check();
     if (argc > 2 && !strcmp(argv[2],"--countdown-check"))
         return countdown_check(dir);
     if (argc > 2 && !strcmp(argv[2],"--city-check"))

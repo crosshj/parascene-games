@@ -3,7 +3,11 @@
 The active mesh path extends the existing `bake_worlds.py` pipeline. It does
 not reconstruct distant walls from path samples every frame.
 
-The Reach road and canyon manifests cover Ridge, Climb, and Drop.
+The Reach road and canyon manifests cover Ridge, Climb, and Drop. A separate
+Meridian wall manifest covers Drift, Fork, and Verge, including both alternate
+routes through the fork stages. Meridian's profile reproduces the level's
+108-unit ice sheets and path-relative crack height; cut markers split the wall
+draw list so disconnected sections are never bridged.
 
 A manifest describes six cross-section vertices as `[side, outside, height]`,
 LOD distances/strides, a screen-error tolerance, near transition distance,
@@ -23,14 +27,14 @@ projected chord-error test. No distance-only removal is used.
 
 No event cursor must be reconstructed after restart or backward seeking.
 
-Only tracks with a compiled package receive the extended 64,000-unit view.
-Other tracks keep the previous 20,000-depth / 44,000-progress limits. Sineworks
-keeps its analytical tunnel and infinite road tip; the finite road stops before
-it overwrites that tip. The discarded per-frame geometric-error LOD selector
-and its large tables have been removed.
+Compiled packages carry their own lookahead: Reach uses 64,000 units and
+Meridian uses 44,032. Other tracks keep the previous 20,000-depth /
+44,000-progress limits. Sineworks keeps its analytical tunnel and infinite road
+tip; the finite road stops before it overwrites that tip. The discarded
+per-frame geometric-error LOD selector and its large tables have been removed.
 
 Separately, `bake_path_runtime.py` compiles frames, branch/cut/obstacle indexes,
-and curb tapers for all 27 runnable tracks. The resident package is 62,068 bytes.
+and curb tapers for all 27 runnable tracks. The resident package is 68,980 bytes.
 Track opening selects immutable data instead of rebuilding it. This is path
 preparation coverage, **not** a claim that every world's scenery is mesh-baked.
 
@@ -72,18 +76,20 @@ these are not host preview work-count estimates or real-hardware measurements.
 
 ## Supported geometry and limits
 
-The current scene compiler accepts continuous, finite, unbranched corridors.
-It explicitly rejects loops, alternate chains and cuts in a declared package.
-The path-preparation compiler supports those features, but that does not make
-the scene scheduler safe for them. Unsupported scenery retains its renderer;
-there is no claim of an automatic bake of arbitrary procedural level code.
+The scene compiler accepts finite tracks with up to three branch decisions and
+explicit cut markers. It emits one schedule for each route mask, and cut
+markers prevent polygons from bridging gaps. Tracks with more than three
+branch decisions, loops, and unbounded tracks are rejected. Path preparation
+supports a broader set of paths; that does not make every one safe for resident
+scene geometry. Unsupported scenery retains its renderer; arbitrary procedural
+level code is not automatically converted into a bake.
 
 The camera follows track yaw and three quarters of pitch; lane switching and
-jumping do not translate it. Branch camera easing needs separate route-aware
-schedules before those tracks can use this scene package. The geometric LOD
-checks sample intermediate positions independently of the compiler; they are
-strong regression coverage, not a continuous mathematical proof for every
-possible camera configuration. Runtime sorting remains necessary on PS1.
+jumping do not translate it. Branch easing uses route-specific camera bounds,
+but still needs an adversarial fixture near cuts. Independent geometric checks
+sample camera and surface positions between compiler poses. They are strong
+regression coverage, not a continuous mathematical proof for every possible
+camera configuration. Runtime sorting remains necessary on PS1.
 
 ## Measured Ridge comparison
 
@@ -129,8 +135,14 @@ Only Ridge has a matched procedural timing reference. Drop meets the measured
 30 fps target but **fails** the additional 15% worst-frame CPU-headroom gate
 (14.8% available); its acceptance report preserves that failure.
 
-The final mesh sweep compares 3,825 camera poses: worst mean channel delta
-0.121580/255 and 39 residual high-contrast pixels beyond one-pixel matching.
-Native reference/candidate pairs are in `build/world-visuals/reach-review.html`.
+The last recorded Reach mesh sweep compares 3,825 camera poses: worst mean
+channel delta 0.121580/255 and 39 residual high-contrast pixels beyond
+one-pixel matching. It predates the latest build. The current check is run with
+`check_world_visuals`; generated native pairs are in
+`build/world-visuals/reach-review.html`. Meridian's latest 25-pose check across
+all stages and both fork routes has 0.021562/255 worst mean delta and at most 13
+residual high-contrast pixels beyond one-pixel matching. These are host visual
+results. Matched emulator performance runs for the revised Reach and Meridian
+builds remain outstanding.
 Fully fogged road, shoulders and ground share one opaque face because their
 colors have converged, retaining the outer silhouette with fewer primitives.

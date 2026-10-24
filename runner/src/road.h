@@ -58,12 +58,9 @@ void road_gantry(int s, const uint8_t post[3], const uint8_t beam[3]);
  * a track that does not close. Call after road_draw. */
 void road_start_gantry(int scroll, const uint8_t post[3], const uint8_t beam[3]);
 
-/* Motion lines around the runner. radius and crown are the tube's
- * half-width and height; 0 is the open-road size. A set radius keeps the
- * lines inside a cave or a crack. Call after road_draw. The tint is
- * pulled toward a glassy mid color. */
-/* radius < 0: default geometry as a foreground overlay; 0: depth sorted. */
-void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown);
+/* The shared motion-line formation, called after scenery and before the
+ * runner. It overlays world geometry and reserves the runner's front bucket. */
+void road_speed_lines(const LevelFrame *f);
 /* Keep the runner above foreground streaks, otherwise retain its depth. */
 int road_runner_bucket(int depth_bucket);
 #ifdef RUNNER_PREVIEW
@@ -104,3 +101,4 @@ void road_city_canyon(int scroll,int outside,int height,const uint32_t *runs,int
 /* Compiled static wall continuation; -1 keeps the procedural fallback. */
 int road_compiled_walls_start(int scroll);
 void road_compiled_walls(int scroll,int start,int r,int g,int b);
+void road_compiled_walls_range(int scroll,int start,int end,int r,int g,int b);

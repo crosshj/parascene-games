@@ -20,5 +20,15 @@ for stage,name in enumerate(['Ridge','Climb','Drop']):
         parts.append(f'<figure><figcaption>{label}</figcaption><img src="mesh-stage{stage}-{mode}.png" alt="{name} {label}"></figure>')
     parts.append('</section>')
 parts.append('<small>Geometric LOD is checked independently against the actual path at intermediate camera and surface positions. The reference retains its old tessellation, so one-pixel outline and fixed-point shading differences are expected.</small>')
+if (out/'meridian-mesh.csv').exists():
+    rows=list(csv.DictReader((out/'meridian-mesh.csv').open()))
+    parts += ['<section><h1>Pale Meridian: branch-aware wall bake review</h1>',
+        f'<p>{len(rows)} matched native-size poses across all three stages compare the original procedural ice walls with the compiled walls. Worst mean channel difference: {max(float(r["mean_delta"]) for r in rows):.4f}/255; maximum high-contrast pixels without a one-pixel match: {max(int(r["unmatched_pixels"]) for r in rows)}. The separate route verifier exercises both fork selections.</p>',
+        '<p><a href="meridian-mesh.csv">All Meridian comparisons</a></p>']
+    for stage,name in enumerate(['The Drift','The Fork','The Verge']):
+        route_count=2 if stage else 1
+        for route in range(route_count):
+            parts.append(f'<h2>{name} — route {route}</h2><figure><figcaption>Procedural walls</figcaption><img src="meridian-mesh-stage{stage}-route{route}-reference.png"></figure><figure><figcaption>Compiled walls</figcaption><img src="meridian-mesh-stage{stage}-route{route}-candidate.png"></figure>')
+    parts.append('<small>The displayed images show the worst mean-difference pose across all stages. Meridian geometry LOD is checked independently at millions of intermediate visible samples; route-specific cuts and branch schedules are validated by the runtime mesh checker.</small></section>')
 (out/'reach-review.html').write_text('\n'.join(parts)+'\n')
 print(out/'reach-review.html')

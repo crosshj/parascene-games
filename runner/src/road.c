@@ -8,6 +8,7 @@
 #include "world_mesh.h"
 #include "reach_world_data.h"
 #include "road_world_data.h"
+#include "meridian_world_data.h"
 #ifdef RUNNER_PREVIEW
 int world_mesh_preview_legacy;
 int world_mesh_preview_depth;
@@ -47,8 +48,8 @@ static void mesh_depth_color(int z, int *near, int *far) {
 #define FAR_MAX 48
 #else
 static int compiled_view;
-#define VIEW_Z (compiled_view ? 64000 : 20000)
-#define VIEW_S (compiled_view ? 64000 : 44000)
+#define VIEW_Z (compiled_view ? compiled_view : 20000)
+#define VIEW_S (compiled_view ? compiled_view : 44000)
 #define FAR_MAX 192
 #endif
 #define FOG_Z 20000
@@ -1186,16 +1187,30 @@ int road_cloth(int s0,int s1,int side,int out0,int v0,int out1,int v1,int r,int 
 #ifdef RUNNER_PREVIEW
 int road_preview_legacy_mesh;
 #endif
+static const WorldMesh *compiled_wall_package(void) {
+#ifndef RUNNER_LEGACY_SURFACES
+    unsigned i,route=0;
+    int k;
+    for(k=0;k<path_branches() && k<3;k++)
+        route|=(unsigned)path_route(k)<<k;
+    for(i=0;i<WORLD_MESH_COUNT;i++)
+        if(!strcmp(path_id(),world_meshes[i].track) && world_meshes[i].route_mask==route) return &world_meshes[i];
+    for(i=0;i<MERIDIAN_WORLD_MESH_COUNT;i++)
+        if(!strcmp(path_id(),meridian_world_meshes[i].track) && meridian_world_meshes[i].route_mask==route)
+            return &meridian_world_meshes[i];
+#endif
+    return 0;
+}
 static const WorldMesh *compiled_walls(void) {
 #ifdef RUNNER_PREVIEW
     if(road_preview_legacy_mesh) return 0;
 #endif
-#ifndef RUNNER_LEGACY_SURFACES
-    unsigned i;
-    for(i=0;i<WORLD_MESH_COUNT;i++)
-        if(!strcmp(path_id(),world_meshes[i].track)) return &world_meshes[i];
-#endif
-    return 0;
+    return compiled_wall_package();
+}
+static unsigned mesh_stride(const WorldMesh *m,uint32_t bit) {
+    unsigned byte=bit>>3,shift=bit&7;
+    unsigned bits=m->indices[byte]|((unsigned)m->indices[byte+1]<<8);
+    return ((bits>>shift)&((1u<<m->stride_bits)-1))+1;
 }
 int road_compiled_walls_start(int scroll) {
     const WorldMesh *m=compiled_walls();
@@ -1203,9 +1218,14 @@ int road_compiled_walls_start(int scroll) {
     int band=scroll/STEP,base,i;
     if(!m || scroll<0 || band>=m->schedule_count) return -1;
     q=&m->schedules[band];base=band?band-1:0;
-    for(i=0;i<q->count;i++) {
-        int s=(base+m->indices[q->first+i])*STEP;
-        if(s>=scroll+m->near_distance) return s;
+    {
+        int relative=q->first_offset;uint32_t bit=q->first;
+        for(i=0;i<q->count;i++) {
+            int s;
+            if(i) { relative+=(int)mesh_stride(m,bit);bit+=m->stride_bits; }
+            s=(base+relative)*STEP;
+            if(s>=scroll+m->near_distance) return s;
+        }
     }
     return -1;
 }
@@ -1224,19 +1244,25 @@ static void mesh_wall_ring(const WorldRing *r,MeshWallRing *out) {
         if(on_guard(p->x,p->y,p->z)) project(p->x,p->y,p->z,&p->screen);
     }
 }
-void road_compiled_walls(int scroll,int start,int r,int g,int b) {
+static void compiled_walls_range(int scroll,int start,int end,int r,int g,int b) {
     const WorldMesh *m=compiled_walls();
     const WorldSchedule *q;
     MeshWallRing a,z;
-    int band=scroll/STEP,base,i,have=0;
+    int band=scroll/STEP,base,i,have=0,previous=-1;
     if(!m || start<0 || scroll<0 || band>=m->schedule_count) return;
     q=&m->schedules[band];base=band?band-1:0;
+    {
+    int relative=q->first_offset;uint32_t bit=q->first;
     for(i=0;i<q->count;i++) {
-        int index=base+m->indices[q->first+i],side;
-        if(index*STEP<start) continue;
-        if(!scene_room()) return;
+        int index,side;
+        if(i) { relative+=(int)mesh_stride(m,bit);bit+=m->stride_bits; }
+        index=base+relative;
+        if(end<0 && index*STEP<start) continue;
         mesh_wall_ring(&m->rings[index],&z);
-        if(have) for(side=0;side<4;side+=2) {
+        if(m->rings[index].flags&WORLD_RING_CUT_BEFORE) have=0;
+        if(have && (end<0 || (previous*STEP>=start && index*STEP<=end))) {
+        if(!scene_room()) return;
+        for(side=0;side<4;side+=2) {
             const MeshPoint *p=&a.p[side],*t=&a.p[side+1],*u=&z.p[side],*v=&z.p[side+1];
             int sort=(u->z+v->z)/2;
             int cn[3]={r,g,b},cf[3]={r,g,b};
@@ -1254,8 +1280,16 @@ void road_compiled_walls(int scroll,int start,int r,int g,int b) {
             PROF_N(PN_WORLD_SPAN);
             emit_piece(p->screen,t->screen,u->screen,v->screen,view_bucket(sort),cn,cf,0);
         }
-        a=z;have=1;
+        }
+        a=z;previous=index;have=1;
     }
+    }
+}
+void road_compiled_walls(int scroll,int start,int r,int g,int b) {
+    compiled_walls_range(scroll,start,-1,r,g,b);
+}
+void road_compiled_walls_range(int scroll,int start,int end,int r,int g,int b) {
+    if(end>=start) compiled_walls_range(scroll,start,end,r,g,b);
 }
 
 int road_lintel(int s0, int s1, int out, int v, int r, int g, int b) {
@@ -1377,12 +1411,11 @@ static void extend_bottom(XY *far, XY *near) {
     near->y = ny;
 }
 
-void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crown) {
+static void road_streaks(const LevelFrame *f, int r, int g, int b) {
     int picture = f->time >> 1;
-    /* A negative radius keeps the original geometry but draws over scenery. */
-    int overlay = radius < 0;
-    int tube = radius > 0 ? radius : TUBE_R;
-    int top = crown > 0 ? crown : TUBE_CROWN;
+    int overlay = 1;
+    int tube = TUBE_R;
+    int top = TUBE_CROWN;
     int i;
     streak_overlay = overlay;
     r = r / 2 + 40;
@@ -1414,8 +1447,7 @@ void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crow
             continue;
         if (far.y < 0 || near.y < 0)
             continue;
-        if (radius <= 0)
-            extend_bottom(&far, &near);
+        extend_bottom(&far, &near);
         bucket = ahead >> OT_SHIFT;
         if (bucket < (CHAR_Z >> OT_SHIFT))
             bucket = CHAR_Z >> OT_SHIFT;
@@ -1423,6 +1455,13 @@ void road_streaks(const LevelFrame *f, int r, int g, int b, int radius, int crow
             bucket = (CLIP >> OT_SHIFT) - 1;
         glow_line(far, near, bucket, r, g, b);
     }
+}
+
+void road_speed_lines(const LevelFrame *f) {
+    if (!style || !f || f->speed <= 0)
+        return;
+    world_asset("speed_lines", 0, "overlay");
+    road_streaks(f, style->edge[0], style->edge[1], style->edge[2]);
 }
 
 /* The deck at u across a sample, in camera space: path_cam_lr is linear
@@ -1880,10 +1919,15 @@ static int compiled_far_road(const RoadSample *seam,int scroll) {
     if(!m||band>=m->schedule_count) return 0;
     q=&m->schedules[band];base=band?band-1:0;
     if(q->count>128) return 0;
+    {
+    int relative=q->first_offset;uint32_t bit=q->first;
     for(i=0;i<q->count;i++) {
-        int index=base+m->indices[q->first+i];
+        int index;
+        if(i) { relative+=(int)mesh_stride(m,bit);bit+=m->stride_bits; }
+        index=base+relative;
         if(index*STEP<=seam->s) continue;
         mesh_road_ring(&m->rings[index],index*STEP,&ring[n++]);
+    }
     }
     if(!n) return 0;
     for(i=n-2;i>=0;i--) mesh_road_strip(&ring[i],&ring[i+1]);
@@ -2122,9 +2166,12 @@ void road_draw(const RoadStyle *st, const LevelFrame *f) {
     streak_overlay = 0;
     style = st;
 #ifndef RUNNER_LEGACY_DISTANCE
-    compiled_view = 0;
-    for(i=0;i<(int)WORLD_MESH_COUNT;i++)
-        if(!strcmp(path_id(),world_meshes[i].track)) compiled_view=1;
+    {
+        const WorldMesh *mesh=compiled_wall_package();
+        compiled_view=mesh?(int)mesh->lookahead:0;
+    }
+#else
+    compiled_view=0;
 #endif
     road_time = f->time;
     through_air(st->light, st->road_far, st->light->density, road_far);

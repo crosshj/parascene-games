@@ -185,7 +185,6 @@ static void cathedral_draw(const LevelFrame *f) {
     void_line(f->stage);
     road_draw(&road, f);
     vault(f);
-    road_streaks(f, road.edge[0], road.edge[1], road.edge[2], 0, 0);
 }
 
 static const Stage k_stages[] = {

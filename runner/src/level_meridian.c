@@ -182,9 +182,11 @@ static void ice(const LevelFrame *f) {
     int step = 512;
     int reach = ROAD_HALF + WALL_OUT;
     int s = f->scroll / step * step;
-    int s1, draw;
-    for (; (draw = road_span(s, f->scroll, step, reach, 960, &s1)) != 0; s = s1) {
+    int s1, draw, compiled_start=road_compiled_walls_start(f->scroll);
+    for (; (draw = road_span(s, f->scroll, step, reach, 960, &s1)) != 0 &&
+           (compiled_start<0 || s<compiled_start); s = s1) {
         int h, r, g, b;
+        if(compiled_start>=0 && s1>compiled_start) s1=compiled_start;
         if (draw == 2)
             continue;
         h = crack_h((s + s1) / 2, top);
@@ -195,6 +197,45 @@ static void ice(const LevelFrame *f) {
             return;
         if (!road_cloth(s, s1, 1, WALL_OUT, 0, WALL_OUT, h, r, g, b))
             return;
+    }
+    if(compiled_start>=0)
+        road_compiled_walls(f->scroll,compiled_start,road.shoulder_c[0],
+                            road.shoulder_c[1],road.shoulder_c[2]);
+
+    /* The road renderer draws the unselected side of a fork separately.
+     * Meridian's wall sheets are world scenery, so draw that route too.
+     * Use its baked route package for the far part and the normal cloth
+     * renderer only up to the package's near-distance boundary. */
+    {
+        int k;
+        for(k=0;k<path_branches();k++) {
+            int s0,s1,s,alt_start;
+            if(!path_branch(k,f->scroll,&s0,&s1)) continue;
+            if(s0<f->scroll) s0=f->scroll;
+            if(s0>=s1) continue;
+            path_swap(k);
+            alt_start=road_compiled_walls_start(f->scroll);
+            if(alt_start<0 || alt_start>s1) alt_start=s1;
+            for(s=s0;s<alt_start;) {
+                int next,draw=road_span(s,f->scroll,step,reach,960,&next);
+                if(!draw) break;
+                if(next>alt_start) next=alt_start;
+                if(draw==1) {
+                    int h=crack_h((s+next)/2,top);
+                    if(!road_cloth(s,next,-1,WALL_OUT,0,WALL_OUT,h,
+                                   road.shoulder_c[0],road.shoulder_c[1],road.shoulder_c[2]) ||
+                       !road_cloth(s,next,1,WALL_OUT,0,WALL_OUT,h,
+                                   road.shoulder_c[0],road.shoulder_c[1],road.shoulder_c[2]))
+                        break;
+                }
+                s=next;
+            }
+            if(alt_start<s1)
+                road_compiled_walls_range(f->scroll,alt_start,s1,
+                                          road.shoulder_c[0],road.shoulder_c[1],
+                                          road.shoulder_c[2]);
+            path_swap(k);
+        }
     }
 }
 
@@ -212,7 +253,6 @@ static void meridian_draw(const LevelFrame *f) {
     aurora(f->stage);
     road_draw(&road, f);
     ice(f);
-    road_streaks(f, road.edge[0], road.edge[1], road.edge[2], 200, 0);
 }
 
 static const Stage k_stages[] = {

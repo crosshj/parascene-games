@@ -1,8 +1,8 @@
 # Baking coverage and remaining work
 
-Status as of October 23, 2026. The foundation is implemented, but automatic
-scenery baking with verified visual and performance improvements across every
-world is not complete.
+Status as of October 24, 2026. The shared scene compiler now covers two corridor
+worlds and supports the route topology used by Meridian. Full rollout and matched
+emulator qualification across every world are still in progress.
 
 ## Current coverage
 
@@ -10,25 +10,62 @@ world is not complete.
 | --- | --- |
 | All 27 runnable tracks | Baked path preparation: frames, branch/cut/obstacle indexes, and curb tapers. Track opening selects immutable data instead of rebuilding it. |
 | Vesper Reach: Ridge, Climb, Drop | Shared compiled road/canyon geometry, visibility and LOD schedules, and an extended distance range. |
+| Pale Meridian: Drift, Fork, Verge | Shared compiled ice-wall geometry with crack-height profiles, cuts, and route-specific fork schedules. All three stages have native-size A/B captures. |
 | Sineworks | Specialized analytical tunnel renderer and infinite road tip. |
 | Vesper City | Specialized optimized building and window renderer. |
-| Remaining scenery | Existing renderers; shared path preparation does not mean scenery is mesh-baked. |
+| Lumenwild, Shatter, Cathedral, arcade scenery | Existing world-specific renderers; shared path preparation does not mean scenery is mesh-baked. |
 
 Sineworks and Vesper City already benefit from optimization. Migrating them to
 the shared compiler is not inherently an improvement; retain their specialized
 paths unless a replacement demonstrates better results.
 
+## Completed in this rollout pass
+
+- The compiler emits branch-specific, finite route schedules and marks cuts so
+  LOD spans never bridge a disconnected path section. It supports up to three
+  branch decisions per track; loops and unbounded tracks remain unsupported.
+- Meridian uses the shared package on all three stages, with both Fork and
+  Verge route masks. The package is 187,928 resident bytes (220,000-byte cap),
+  with a 44,032-unit lookahead and a 1.4 px sampled compiler error target.
+- Independent runtime-camera checks covered 9.33 million Meridian visible
+  chord samples; worst error was 1.446 px against the 1.5 px verifier limit.
+  Baked path data matches all 27 tracks, branch masks, reverse seeks, and band
+  edges exactly.
+- Host image checks compare all three Meridian stages at five matched poses
+  each, including both routes through Fork and Verge (25 pairs total). Worst
+  mean channel delta was 0.0218/255, with at most 9 unmatched
+  high-contrast pixels. Reach's 3,825-pose image check also passes.
+- The all-stage host pipeline checked 5,067 frame pairs with no remaining
+  failures. Reach/Meridian mesh deltas are counted and reviewed by their native
+  image checks instead of being incorrectly required to be pixel-identical to
+  the old tessellation. Path equivalence remains exact for the other tracks.
+- The console ISO build passed for music, no-music, and web variants. The
+  latest largest image+BSS was 1,751,804 bytes, leaving 279,812 bytes free
+  above the image; the existing 256 KB remains reserved.
+
+After removing banking from Vesper Hook's two bends, the compiled path package
+is 68,980 resident bytes. That track edit retains yaw curves and sets roll to
+zero on all 456 generated segments; it is not additional scenery-bake coverage.
+
+The host work counts show the practical CPU-side potential, not a frame-rate
+claim: Reach sampled surfaces fall from 512–583 to 64–66 per frame; Meridian
+falls from 480–902 to 127–348, depending on stage. Matched DuckStation timing
+has not been collected for this build.
+
 ## Remaining work
 
-1. **Represent the remaining worlds' static scenery for the compiler.**
+1. **Represent the remaining worlds' static scenery for the compiler or an
+   explicit build-time renderer.**
    Supply geometry/material descriptions or adapters that let build time replace
-   repeated runtime construction. The compiler does not automatically convert
-   arbitrary procedural level code into baked scenery.
-2. **Support the remaining track topologies.** The scene compiler currently
-   accepts continuous, finite, unbranched corridors. Loops, alternate chains,
-   and cuts need appropriate scheduling, including route-aware camera bounds
-   for branch easing. The path-preparation compiler already supports these
-   features; the scene compiler does not.
+   repeated runtime construction. Lumenwild growth, Shatter fragments,
+   Cathedral slivers, and Vesper's animated skyline need world-specific bake
+   formats or retained specialized renderers with measured build-time assets.
+   Do not force these assets into a corridor mesh that cannot represent them.
+2. **Finish topology qualification.** Finite branches and cut boundaries are
+   implemented and Meridian exercises them. Fixtures cover consecutive cuts
+   and the full eight-route cap. Branch-easing bounds still need a dedicated
+   adversarial fixture. Looped or unbounded tracks need a separate
+   bounded-window schedule design.
 3. **Make distance rendering visually coherent in each migrated world.**
    Validate road/scenery continuity, near/far seams, silhouettes, visibility,
    LOD changes, and atmosphere convergence with the backdrop. Geometry merely
@@ -36,13 +73,16 @@ paths unless a replacement demonstrates better results.
 4. **Qualify every migrated stage.** Compare native-resolution images and
    motion across the track, then measure matched emulator runs with the exact
    stage and build identified. Verify presentation deadlines and CPU headroom,
-   not just host work counts or average frame rate. Include load-time evidence
-   when claiming faster stage loading.
+   not just host work counts or average frame rate. Reach and Meridian have
+   host visual checks but still need matched emulator timing. Sineworks and
+   Vesper City need current per-stage performance and loading records before
+   their specialized optimizations count as qualified. Include load-time
+   evidence when claiming faster stage loading.
 5. **Requalify Reach after its later atmosphere and sightline changes.**
-   Earlier traversals reached 30 fps, but those measurements precede the revised
-   routes/backdrop. Only Ridge has a matched procedural timing reference; Drop's
-   earlier result also missed the additional 15% worst-frame headroom gate.
-   Do not treat these historical timings as qualification of the current build.
+   Its current native-size host image suite passes after the atmosphere changes.
+   Current matched emulator performance data remains unrecorded. Earlier 30 fps
+   traversals predate the revised routes/backdrop; Drop also missed the 15%
+   worst-frame headroom gate in that earlier run.
 
 ## Completion criterion
 
@@ -52,8 +92,10 @@ coherently, fits memory/work budgets, and meets the performance gates. Unsupport
 or unmeasured stages must remain visibly identified in coverage reports rather
 than being counted as fully baked because their path data is compiled.
 
-The remaining task is to generalize and roll out the working scenery pipeline,
-not rebuild the foundation or force every world through the same renderer.
+The next engineering work is to create explicit build-time asset adapters for
+the remaining world-specific scenery, then qualify each renderer with the same
+image, work-budget, and emulator evidence. Path data being compiled alone is
+not scenery bake coverage.
 
 ## References
 

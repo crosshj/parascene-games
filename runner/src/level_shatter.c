@@ -202,7 +202,6 @@ static void shatter_draw(const LevelFrame *f) {
     road_backdrop(&road);
     road_draw(&road, f);
     desert(f);
-    road_streaks(f, road.edge[0], road.edge[1], road.edge[2], 0, 0);
 }
 
 static const Stage k_stages[] = {

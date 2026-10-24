@@ -127,4 +127,6 @@ int path_lap(void);
  * other road for drawing; call it again to restore the route. */
 int path_branches(void);
 int path_branch(int k, int s, int *s0, int *s1);
+/* Active compiled scenery route for a branch, 0 for the authored main chain. */
+int path_route(int k);
 void path_swap(int k);

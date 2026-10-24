@@ -25,19 +25,27 @@ def project(p, camera):
     return x * 160 / z, (170 - y) * 160 / z, z
 
 
-def span_ok(rings, a, b, cameras, error):
+def span_ok(rings, a, b, cameras, error, fine_rings=None, fine_divisions=8):
     """Bound projected chord error at every omitted authored cross-section."""
     # An exactly straight span has zero error for every camera pose. Avoid
     # repeatedly projecting it, and keep this guarantee stronger than sampling.
-    if all((rings[mid][k][j] - rings[a][k][j]) * (b - a) ==
+    if fine_rings is None and all((rings[mid][k][j] - rings[a][k][j]) * (b - a) ==
            (rings[b][k][j] - rings[a][k][j]) * (mid - a)
            for mid in range(a + 1, b) for k in range(6) for j in range(3)):
         return True
+    if fine_rings is not None and all(
+            (fine_rings[mid][k][j]-rings[a][k][j]) * ((b-a)*fine_divisions) ==
+            (rings[b][k][j]-rings[a][k][j]) * (mid-a*fine_divisions)
+            for mid in range(a*fine_divisions+1,b*fine_divisions)
+            for k in range(6) for j in range(3)):
+        return True
     for camera in cameras:
         for k in range(6):
-            for mid in range(a + 1, b):
-                p = rings[mid][k]
-                t = (mid - a) / (b - a)
+            samples=(range(a*fine_divisions+1,b*fine_divisions) if fine_rings is not None
+                     else range((a+1)*fine_divisions,(b)*fine_divisions,fine_divisions))
+            for mid in samples:
+                p = fine_rings[mid][k] if fine_rings is not None else rings[mid//fine_divisions][k]
+                t = (mid - a*fine_divisions) / ((b - a)*fine_divisions)
                 chord = [rings[a][k][j] * (1 - t) + rings[b][k][j] * t for j in range(3)]
                 actual, approx = project(p, camera), project(chord, camera)
                 if actual is None or approx is None:
@@ -68,12 +76,13 @@ def outside_planes(point,bounds):
             int((y1-170)*160+264*z1<0)<<4)
 
 
-def schedules_for(rings, cameras, bands, cfg, camera_bounds=None):
+def schedules_for(rings, cameras, bands, cfg, camera_bounds=None, cuts=None, fine_rings=None):
     schedules, indices, levels = [], [], [0] * 7
+    cuts=set(cuts or ())
     step = cfg['step']
     ahead = cfg['lookahead'] // step
     for band in range(bands):
-        poses = cameras[band * 2:band * 2 + 3]
+        poses = cameras[band * 4:band * 4 + 5]
         a, end = max(0, band - 1), band + ahead
         sequence = [a]
         hidden=[0]*len(rings)
@@ -88,6 +97,7 @@ def schedules_for(rings, cameras, bands, cfg, camera_bounds=None):
             if hidden[a]:
                 mask=hidden[a];hidden_end=a
                 for index in range(a+1,min(a+max(cfg['lod_strides']),end)+1):
+                    if index in cuts: break
                     mask &= hidden[index]
                     if not mask: break
                     hidden_end=index
@@ -99,7 +109,15 @@ def schedules_for(rings, cameras, bands, cfg, camera_bounds=None):
             lod = sum(depth >= d for d in cfg['lod_depths'])
             stride = cfg['lod_strides'][lod]
             b = min(a + stride, end)
-            while b > a + 1 and not span_ok(rings, a, b, poses, cfg['max_error_px']):
+            next_cut=min((cut for cut in cuts if a < cut <= b),default=None)
+            if next_cut is not None:
+                b=min(b,next_cut-1)
+                if b==a:
+                    b=next_cut
+                    sequence.append(b);a=b;continue
+            if b in cuts:
+                sequence.append(b);a=b;continue
+            while b > a + 1 and not span_ok(rings, a, b, poses, cfg['max_error_px'],fine_rings):
                 b = a + max(1, (b - a) // 2)
             levels[(b - a).bit_length() - 1] += 1
             sequence.append(b)
@@ -108,10 +126,14 @@ def schedules_for(rings, cameras, bands, cfg, camera_bounds=None):
             raise ValueError(f'band {band}: {len(sequence)} rings exceeds schedule budget')
         if sequence != sorted(set(sequence)) or sequence[-1] >= len(rings):
             raise ValueError('invalid schedule coverage or indices')
-        schedules.append((len(indices), len(sequence)))
+        first_world=band+(cfg.get('near_distance',2200)+step-1)//step
+        sequence=[ring for ring in sequence if ring>=first_world]
+        if len(sequence)<2:
+            raise ValueError(f'band {band}: no distant geometry remains after the near region')
         relative = [r - max(0, band - 1) for r in sequence]
         if max(relative) > 255:
             raise ValueError('schedule offsets overflow uint8')
+        schedules.append((len(indices),len(sequence),relative[0]))
         indices.extend(relative)
     return schedules, indices, levels
 
@@ -129,65 +151,116 @@ def compile_world(cfg, baked, sampler):
     groups, aliases = [], []
     for track in cfg['tracks']:
         authored = next(t for t in baked['tracks'] if t['id'] == track)
-        if authored['span']['repeat'] != 'ends' or any(s['chain'] != 'main' for s in authored['segments']):
-            raise ValueError(f'{track}: prototype requires a finite, unbranched track')
+        if authored['span']['repeat'] != 'ends':
+            raise ValueError(f'{track}: scene meshes require a finite, non-looping track')
+        masks=route_masks(authored)
         if cfg.get('requires_deck') and any(not seg['deck'] for seg in authored['segments']):
             raise ValueError(f'{track}: road mesh requires continuous deck; gaps need separate mesh sections')
         length = authored['span']['s1']
         bands = (length + cfg['finish_allowance']) // 256 + 1
         limit = (bands + cfg['lookahead'] // 256) * 256
-        sampled = json.loads(subprocess.check_output([
-            str(sampler), track, '256', str(limit), str(cfg['outside']),
-            str(cfg['wall_height']), str(cfg['ceiling_height'])] +
-            ([','.join(str(v) for point in cfg['cross_section'] for v in point)] if 'cross_section' in cfg else [])))
-        if sampled['length'] != length:
-            raise ValueError(f'{track}: track length mismatch')
-        rings = sampled['rings']
-        if len(rings) > 65535 or any(abs(v) > 0x3fffffff for r in rings for p in r for v in p):
-            raise ValueError('world coordinates or ring IDs overflow')
-        # Share identical geometry across stages with different obstacles/colors.
-        group = next((i for i, g in enumerate(groups) if g['rings'] == rings and g['bands'] == bands), None)
-        if group is None:
-            schedules, indices, levels = schedules_for(rings, sampled['cameras'], bands, cfg, sampled['camera_bounds'])
-            group = len(groups)
-            axis_aligned = all(
-                r[1] == [r[0][0], r[0][1] + cfg['wall_height'], r[0][2]] and
-                r[2] == [r[0][0], r[0][1] + cfg['ceiling_height'], r[0][2]] and
-                r[5][1:] == r[0][1:] and
-                r[3] == [r[5][0], r[5][1] + cfg['ceiling_height'], r[5][2]] and
-                r[4] == [r[5][0], r[5][1] + cfg['wall_height'], r[5][2]] for r in rings)
-            groups.append(dict(rings=rings, schedules=schedules, indices=indices, bands=bands,
-                               levels=levels, axis_aligned=axis_aligned))
-        aliases.append((track, group))
+        for route_mask in masks:
+            command = ([
+                str(sampler), track, '256', str(limit), str(cfg['outside']),
+                str(cfg['wall_height']), str(cfg['ceiling_height'])] +
+                ([','.join(str(v) for point in cfg['cross_section'] for v in point)] if 'cross_section' in cfg else []))
+            if cfg.get('height_mode'):
+                if 'cross_section' not in cfg:
+                    raise ValueError('height_mode requires a custom cross_section')
+                command.append(cfg['height_mode'])
+            env=os.environ.copy()
+            env['RUNNER_BAKE_ROUTE']=str(route_mask)
+            sampled = json.loads(subprocess.check_output(command,env=env))
+            if sampled['length'] != length:
+                raise ValueError(f'{track}: track length mismatch')
+            rings = sampled['rings']
+            fine_rings = sampled.get('fine_rings')
+            if len(rings) > 65535 or any(abs(v) > 0x3fffffff for r in rings for p in r for v in p):
+                raise ValueError('world coordinates or ring IDs overflow')
+            cuts=[i for i,value in enumerate(sampled['cuts']) if value]
+            # Share identical geometry across stages with different obstacles/colors.
+            group = next((i for i, g in enumerate(groups)
+                          if g['rings'] == rings and g['cuts'] == cuts and g['bands'] == bands), None)
+            if group is None:
+                schedules, indices, levels = schedules_for(rings, sampled['cameras'], bands, cfg,
+                                                           sampled['camera_bounds'],cuts,fine_rings)
+                group = len(groups)
+                axis_aligned = all(
+                    r[1] == [r[0][0], r[0][1] + cfg['wall_height'], r[0][2]] and
+                    r[2] == [r[0][0], r[0][1] + cfg['ceiling_height'], r[0][2]] and
+                    r[5][1:] == r[0][1:] and
+                    r[3] == [r[5][0], r[5][1] + cfg['ceiling_height'], r[5][2]] and
+                    r[4] == [r[5][0], r[5][1] + cfg['wall_height'], r[5][2]] for r in rings)
+                groups.append(dict(rings=rings,cuts=cuts,schedules=schedules,indices=indices,bands=bands,
+                                   levels=levels, axis_aligned=axis_aligned))
+            aliases.append((track, route_mask, group))
     return groups, aliases
+
+
+def pack_indices(schedules, indices, stride_bits=6):
+    """Pack schedule gaps using the bit width required by the LOD strides."""
+    packed=bytearray()
+    encoded=[]
+    bit=0
+    for first,count,initial in schedules:
+        encoded.append((bit,count,initial))
+        start=indices[first] if count else 0
+        if start != initial:
+            raise ValueError('schedule initial offset changed during packing')
+        for i in range(1,count):
+            stride=indices[first+i]-indices[first+i-1]
+            if stride < 1 or stride > (1<<stride_bits):
+                raise ValueError(f'schedule stride {stride} does not fit {stride_bits} bits')
+            while len(packed) < (bit+stride_bits+7)//8:
+                packed.append(0)
+            code=stride-1
+            for n in range(stride_bits):
+                if code & (1<<n):
+                    packed[(bit+n)//8] |= 1 << ((bit+n)%8)
+            bit += stride_bits
+    if bit:
+        packed.append(0)  # Allows the runtime's two-byte unaligned read at EOF.
+    return encoded, packed
+
+
+def route_masks(authored):
+    """Enumerate the bounded alternate-chain selections for one finite track."""
+    branches = {s['chain'] for s in authored['segments'] if s['chain'] != 'main'}
+    if len(branches) > 3:
+        raise ValueError(f'{authored["id"]}: {len(branches)} forks exceed the eight-route package limit')
+    return range(1 << len(branches))
 
 
 def emit(groups, aliases, cfg):
     lines = ['/* Generated by tools/bake_worlds.py. Include world_mesh.h first. */']
     resident = 0
+    stride_bits=max(1,(max(cfg['lod_strides'])-1).bit_length())
     for i, group in enumerate(groups):
         rings, schedules, indices = (group[k] for k in ('rings', 'schedules', 'indices'))
-        resident += len(rings) * 44 + len(schedules) * 8 + len(indices)
+        encoded,packed=pack_indices(schedules,indices,stride_bits)
+        resident += len(rings) * 44 + len(encoded) * 8 + len(packed)
+        cuts=set(group.get('cuts',()))
         lines.append(f'static const WorldRing world_rings_{i}[] = {{')
-        for ring in rings:
+        for index,ring in enumerate(rings):
             offsets = [[p[j] - ring[0][j] for j in range(3)] for p in ring[1:]]
             if any(v < -32768 or v > 32767 for p in offsets for v in p):
                 raise ValueError('ring-local coordinates overflow int16')
             lines.append('    {{' + ','.join(map(str, ring[0])) + '},{' +
-                         ','.join('{' + ','.join(map(str, p)) + '}' for p in offsets) + '}},')
+                         ','.join('{' + ','.join(map(str, p)) + '}' for p in offsets) + '},' +
+                         str(int(index in cuts)) + '},')
         lines += ['};', f'static const WorldSchedule world_schedules_{i}[] = {{']
-        lines.extend(f'    {{{start},{count},0}},' for start, count in schedules)
+        lines.extend(f'    {{{start},{count},{initial}}},' for start,count,initial in encoded)
         lines += ['};', f'static const uint8_t world_indices_{i}[] = {{']
-        lines.extend('    ' + ','.join(map(str, indices[j:j + 24])) + ',' for j in range(0, len(indices), 24))
+        lines.extend('    ' + ','.join(map(str, packed[j:j + 24])) + ',' for j in range(0, len(packed), 24))
         lines.append('};')
-    resident += len(aliases) * 24  # 32-bit console pointers; excludes tiny strings/alignment.
+    resident += len(aliases) * 32  # 32-bit console pointers; excludes tiny strings/alignment.
     if 'cross_section' in cfg: resident += 36
     if resident > cfg['max_resident_bytes']:
         raise ValueError(f'{resident} resident bytes exceeds {cfg["max_resident_bytes"]}')
     lines.append('static const WorldMesh world_meshes[] = {')
-    for track, i in aliases:
+    for track, route_mask, i in aliases:
         aligned = int(groups[i].get('axis_aligned', False))
-        lines.append(f'    {{"{track}",world_rings_{i},world_schedules_{i},world_indices_{i},{groups[i]["bands"]},1,{aligned},{cfg.get("near_distance",2200)}}},')
+        lines.append(f'    {{"{track}",world_rings_{i},world_schedules_{i},world_indices_{i},{groups[i]["bands"]},1,{aligned},{cfg.get("near_distance",2200)},{route_mask},{stride_bits},{cfg.get("lookahead",44000)}}},')
     lines += ['};', '#define WORLD_MESH_COUNT (sizeof(world_meshes) / sizeof(world_meshes[0]))', '']
     header='\n'.join(lines)
     prefix=cfg.get('symbol_prefix','world')
@@ -225,11 +298,12 @@ def main():
                         str(ROOT / 'tools/sample_world.c'), '-o', str(sampler)], check=True)
         groups, aliases = compile_world(cfg, json.loads(args.tracks.read_text()), sampler)
     header, resident = emit(groups, aliases, cfg)
-    report = dict(version=1, tracks=[t for t, _ in aliases], resident_bytes=resident,
+    report = dict(version=1, tracks=sorted({t for t, _, _ in aliases}),
+                  routes=[dict(track=t,mask=route) for t,route,_ in aliases],resident_bytes=resident,
                   geometry_groups=len(groups), source_sha256=source_hash,header_sha256=hashlib.sha256(header.encode()).hexdigest(),
-                  max_error_px=cfg['max_error_px'], camera_samples_per_band=3,
+                  max_error_px=cfg['max_error_px'], camera_samples_per_band=5,
                   lookahead=cfg['lookahead'], groups=[dict(rings=len(g['rings']), schedules=len(g['schedules']),
-                  max_schedule_rings=max(n for _, n in g['schedules']), lod_span_counts=g['levels'],
+                  max_schedule_rings=max(n for _, n, _ in g['schedules']), lod_span_counts=g['levels'],
                   axis_aligned=g['axis_aligned']) for g in groups])
     args.header.parent.mkdir(parents=True, exist_ok=True)
     args.report.parent.mkdir(parents=True, exist_ok=True)

@@ -3,54 +3,83 @@
  * deck and camera frames without adding an authoring API to the console. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #define RUNNER_BAKE_PATH 1
 #include "../src/path.c"
 
 int project(int x, int y, int z, XY *out) { return z; }
 
+static void ring_at(int s,int outside,int wall,int ceiling,const int *profile,
+                    int custom,int crack_height,int points[6][3]) {
+    int i,ul,ur;
+    path_edges(s,&ul,&ur);
+    for(i=0;i<6;i++) {
+        int dx,dy,dz,rx,ry,rz;
+        int u=i<3?ul-outside:ur+outside;
+        int v=i==0||i==5?0:i==1||i==4?wall:ceiling;
+        if(custom) {
+            int side=profile[i*3];
+            u=side<0?ul-profile[i*3+1]:ur+profile[i*3+1];
+            v=profile[i*3+2];
+            if(crack_height&&v>0) {
+                const PathSeg *lip=path_at(0),*seg=path_at(s);
+                int drop=lip&&seg?lip->y-seg->y:0;
+                if(drop<0) drop=0;
+                v=220+drop/2;
+                if(v>960) v=960;
+            }
+        }
+        deck_at(s,v,&dx,&dy,&dz,&rx,&ry,&rz);
+        points[i][0]=dx+cam_x+mul_q(rx,u);
+        points[i][1]=dy+cam_y+mul_q(ry,u);
+        points[i][2]=dz+cam_z+mul_q(rz,u);
+    }
+}
+
 int main(int argc, char **argv) {
-    int s, i, limit, outside, wall, ceiling, step;
+    int s, i, limit, outside, wall, ceiling, step, crack_height, route;
     int profile[18];
-    if ((argc != 7 && argc != 8) || !path_open(argv[1]) || path_branches() || path_lap()) {
-        fprintf(stderr, "sample_world: expected a finite, unbranched track\n");
+    if ((argc != 7 && argc != 8 && argc != 9) || !path_open(argv[1]) || path_lap()) {
+        fprintf(stderr, "sample_world: expected a finite track\n");
         return 1;
     }
-    if (argc == 8 && sscanf(argv[7], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+    route = getenv("RUNNER_BAKE_ROUTE") ? atoi(getenv("RUNNER_BAKE_ROUTE")) : 0;
+    if (route < 0 || route >= (1<<path_branches())) return 1;
+    for(i=0;i<path_branches() && i<3;i++) if(route&(1<<i)) path_swap(i);
+    if (argc >= 8 && sscanf(argv[7], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
         &profile[0],&profile[1],&profile[2],&profile[3],&profile[4],&profile[5],
         &profile[6],&profile[7],&profile[8],&profile[9],&profile[10],&profile[11],
         &profile[12],&profile[13],&profile[14],&profile[15],&profile[16],&profile[17]) != 18) return 1;
+    crack_height = argc == 9 && !strcmp(argv[8], "crack");
+    if (argc == 9 && !crack_height) return 1;
     step = atoi(argv[2]); limit = atoi(argv[3]);
     outside = atoi(argv[4]); wall = atoi(argv[5]); ceiling = atoi(argv[6]);
     if (step != STEP || limit < 0 || limit > 1000000)
         return 1;
-    for (s = 1; s < path_len(); s++)
-        if (path_cut(s)) {
-            fprintf(stderr, "sample_world: discontinuous paths need separate mesh sections\n");
-            return 1;
-        }
     printf("{\"length\":%d,\"rings\":[", path_len() * STEP);
     for (s = 0; s <= limit; s += step) {
-        int ul, ur;
-        path_edges(s, &ul, &ur);
+        int points[6][3];
+        ring_at(s,outside,wall,ceiling,profile,argc>=8,crack_height,points);
         printf("%s[", s ? "," : "");
-        for (i = 0; i < 6; i++) {
-            int dx, dy, dz, rx, ry, rz;
-            int u = i < 3 ? ul - outside : ur + outside;
-            int v = i == 0 || i == 5 ? 0 : i == 1 || i == 4 ? wall : ceiling;
-            if(argc == 8) {
-                int side=profile[i*3];
-                u=side<0?ul-profile[i*3+1]:ur+profile[i*3+1];
-                v=profile[i*3+2];
-            }
-            deck_at(s, v, &dx, &dy, &dz, &rx, &ry, &rz);
-            printf("%s[%d,%d,%d]", i ? "," : "", dx + cam_x + mul_q(rx, u),
-                   dy + cam_y + mul_q(ry, u), dz + cam_z + mul_q(rz, u));
-        }
+        for(i=0;i<6;i++) printf("%s[%d,%d,%d]",i?",":"",points[i][0],points[i][1],points[i][2]);
         printf("]");
     }
+    if(crack_height) {
+        printf("],\"fine_rings\":[");
+        for(s=0;s<=limit;s+=32) {
+            int points[6][3];
+            ring_at(s,outside,wall,ceiling,profile,1,1,points);
+            printf("%s[",s?",":"");
+            for(i=0;i<6;i++) printf("%s[%d,%d,%d]",i?",":"",points[i][0],points[i][1],points[i][2]);
+            printf("]");
+        }
+    }
+    printf("],\"cuts\":[");
+    for(s=0;s<=limit;s+=step)
+        printf("%s%d",s?",":"",s>0&&path_cut(s/step));
     printf("],\"cameras\":[");
-    /* Three poses per schedule interval, including its far endpoint. */
-    for (s = 0; s <= limit; s += step / 2) {
+    /* Five poses per schedule interval, including both endpoints. */
+    for (s = 0; s <= limit; s += step / 4) {
         path_begin(s);
         printf("%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]", s ? "," : "",
                cam_x, cam_y, cam_z, cam_rx, cam_ry, cam_rz,

@@ -1769,6 +1769,7 @@ int main(int argc, const char **argv) {
             if (state == ST_COUNTDOWN)
                 countdown_draw(countdown_digit(tick),tick%60);
             PROF_LONG(PF_LEVEL, lv->draw(&frame));
+            PROF(PF_STREAKS, road_speed_lines(&frame));
             if (story_run && (state == ST_RUN || state == ST_PAUSE ||
                               state == ST_AWAY || state == ST_TALLY)) {
                 int goal = stage_end(stage_index);

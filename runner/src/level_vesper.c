@@ -323,9 +323,6 @@ static void vesper_draw(const LevelFrame *f) {
     lights(f);
     barriers(f);
     canyon(f);
-    world_asset("speed_lines",0,"overlay");
-    road_streaks(f, road.edge[0], road.edge[1], road.edge[2],
-                 -1, 0);
 }
 
 static const Stage k_stages[] = {

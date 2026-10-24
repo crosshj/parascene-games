@@ -17,6 +17,7 @@ if [ -x "$out/preview" ]; then
     PSX15=1 "$out/preview" "$out" --mesh-check || result=$?
     python3 "$here/reach_report.py" "$out" || result=$?
     PSX15=1 "$out/preview" "$out" --pipeline-check || result=$?
+    PSX15=1 "$out/preview" "$out" --speedline-check || result=$?
     PSX15=1 "$out/preview" "$out" --countdown-check || result=$?
     PSX15=1 "$out/preview" "$out" --city-check || result=$?
     PSX15=1 "$out/preview" "$out" --vesper-motion-check || result=$?

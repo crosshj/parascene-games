@@ -269,8 +269,6 @@ static void sine_draw(const LevelFrame *f) {
         world_asset("road_vanish",0,"triangle");
         road_to_vanishing_point(f->scroll);
         PROF(PF_WORLD_MESH, straight_tube(f));
-        world_asset("speed_lines",0,"lines");
-        road_streaks(f,road.edge[0],road.edge[1],road.edge[2],-1,0);
         return;
     }
     hy = path_horizon();
@@ -283,7 +281,6 @@ static void sine_draw(const LevelFrame *f) {
              live.sky[0], live.sky[1], live.sky[2]);
     road_draw(&road, f);
     tube(f);
-    road_streaks(f, road.edge[0], road.edge[1], road.edge[2], -1, 0);
 }
 
 static const Stage k_stages[] = {

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "tracks": [
+    "meridian.drift",
+    "meridian.fork",
+    "meridian.verge"
+  ],
+  "step": 256,
+  "lookahead": 44032,
+  "finish_allowance": 2048,
+  "outside": 480,
+  "wall_height": 960,
+  "ceiling_height": 0,
+  "lod_depths": [
+    4200,
+    8000,
+    16000
+  ],
+  "lod_strides": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "max_error_px": 1.4,
+  "independent_error_px": 1.5,
+  "max_schedule_rings": 128,
+  "max_resident_bytes": 220000,
+  "cross_section": [
+    [-1, 108, 0],
+    [-1, 108, 960],
+    [-1, 108, 960],
+    [1, 108, 960],
+    [1, 108, 960],
+    [1, 108, 0]
+  ],
+  "height_mode": "crack",
+  "symbol_prefix": "meridian_world",
+  "near_distance": 4200
+}
