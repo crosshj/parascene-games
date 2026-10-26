@@ -285,7 +285,7 @@ add_custom_target(check_worlds
 	COMMAND "${WORLD_HOST_CC}" -std=gnu99 -O2 -DRUNNER_PREVIEW
 		-I "${CMAKE_CURRENT_SOURCE_DIR}/src" -I "${CMAKE_CURRENT_BINARY_DIR}"
 		"${CMAKE_CURRENT_SOURCE_DIR}/tools/check_world_mesh.c"
-		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" -o "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/path.c" -lm -o "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
 	COMMAND "${CMAKE_CURRENT_BINARY_DIR}/check_world_mesh"
 	DEPENDS "${WORLD_H}" "${TRACK_H}" "${PATH_RUNTIME_H}" "${REACH_WORLD_H}" "${ROAD_WORLD_H}" "${MERIDIAN_WORLD_H}"
 	VERBATIM
