@@ -233,7 +233,7 @@ file(WRITE "${_repo}/web/manifest.json" "{
       \"id\": \"runner\",
       \"title\": \"Runner\",
       \"bin\": \"build/runner-web.bin\",
-      \"download\": \"build/runner.zip\",
+      \"download\": \"https://github.com/crosshj/parascene-games/releases/latest/download/runner.zip\",
       \"cover\": \"runner/cover.png\",
       \"share\": \"runner/share.png\",
       \"blurb\": \"Pick a runner and hit the road. A PlayStation game you can play right in your browser.\",

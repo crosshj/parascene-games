@@ -49,7 +49,7 @@ function inside(root, file) {
   return file === root || file.startsWith(root + path.sep);
 }
 
-/* The Pages build zips runner.cue and runner.bin. Rebuild it here when the disc changes. */
+/* Local builds remain downloadable here; the published player uses Releases. */
 function discZip() {
   const dir = path.join(repo, "build");
   const zip = path.join(os.tmpdir(), "parascene-runner.zip");

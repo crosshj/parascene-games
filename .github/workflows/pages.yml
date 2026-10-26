@@ -1,4 +1,4 @@
-name: pages
+name: Runner builds, releases and Pages
 
 on:
   push:
@@ -7,21 +7,100 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build ffmpeg
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/runner-sdk
+          key: runner-sdk-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci/runner-toolchain.json', 'scripts/ci/install_runner_sdk.py') }}
+      - name: Install pinned SDK and MIPS compiler
+        run: python3 scripts/ci/install_runner_sdk.py --destination "$RUNNER_TEMP/runner-sdk"
+      - name: Build all discs from source
+        run: |
+          cmake -S runner -B runner/build -G Ninja -DRUNNER_XA_MUSIC=OFF
+          cmake --build runner/build --parallel 2
+      - name: Check bakes, music controls and release handling
+        run: |
+          cmake --build runner/build --target check_worlds check_music_controls --parallel 2
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+          node --test web/test-downloads.cjs
+      - name: Package and validate the full disc
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/ci/package_runner.py --commit "$SOURCE_COMMIT" --run-url "$BUILD_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-release
+          path: runner/dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-web
+          path: |
+            build/runner-web.bin
+            web/manifest.json
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: runner-release
+          path: runner/dist
+      - name: Publish complete release and retain two successful builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPO: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python3 scripts/ci/publish_runner.py --repo "$RELEASE_REPO" \
+            --artifacts runner/dist --commit "$SOURCE_COMMIT" \
+            --run-number "$RUN_NUMBER" --attempt "$RUN_ATTEMPT"
+
   deploy:
+    needs: release
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: runner-web
+          path: .
       - name: Assemble the site
         run: |
           mkdir -p _site/build _site/runner/audio/menu
@@ -34,7 +113,6 @@ jobs:
           cp -r web/brand _site/
           cp runner/cover.png runner/share.png _site/runner/
           cp build/runner-web.bin _site/build/
-          (cd build && zip -9 ../_site/build/runner.zip runner.cue runner.bin)
           cp runner/audio/*.mp3 _site/runner/audio/
           cp runner/audio/menu/*.mp3 _site/runner/audio/menu/
           node web/game-pages.js _site

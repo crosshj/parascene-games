@@ -117,8 +117,8 @@ time, as a share of a 60 Hz frame. The disc stays in that folder.
 
 HOW TO BUILD
 ------------
-Needs PSn00bSDK, mipsel-none-elf-gcc, cmake, and ninja. macOS afconvert
-turns audio/runner1.mp3 into the 44100 Hz stereo track the disc format requires.
+Needs PSn00bSDK, mipsel-none-elf-gcc, cmake, ninja, Python 3, and FFmpeg.
+FFmpeg converts the MP3s to the 44100 Hz stereo CD audio tracks.
 
 From the repository root:
 
@@ -147,8 +147,12 @@ from the web folder:
 Open http://127.0.0.1:8643/runner/ . The picker is
 http://127.0.0.1:8643/ . The site files live in web/. GitHub Pages
 publishes that folder, plus build/runner-web.bin and runner/audio.
-It also publishes build/runner.zip, runner.cue and runner.bin with the
-CD music, which the player offers in a banner.
+The player downloads the full BIN/CUE with CD music from GitHub Releases:
+https://github.com/crosshj/parascene-games/releases/latest/download/runner.zip
+
+GitHub Actions builds from source and retains the current and previous
+successful ROM releases. build/runner.bin is a local build output and is
+not committed. See docs/releases.md for publication, retention and checks.
 
 CONTROLS
 --------

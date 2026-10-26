@@ -42,12 +42,20 @@ function gamePage(html, game) {
     .replace(/<!-- share -->[\s\S]*?<!-- \/share -->/, shareTags(game));
 }
 
+function downloadRedirect(game) {
+  const url = attr(game.download);
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=${url}">
+<link rel="canonical" href="${url}"><title>Download ${attr(game.title)}</title>
+</head><body><a href="${url}">Download the latest ${attr(game.title)} ROM</a></body></html>\n`;
+}
+
 function games(site) {
   const manifest = JSON.parse(fs.readFileSync(path.join(site, "manifest.json"), "utf8"));
   return (manifest.games || []).filter((g) => /^[a-z0-9-]+$/.test(g.id));
 }
 
-module.exports = { gamePage, games };
+module.exports = { gamePage, games, downloadRedirect };
 
 if (require.main === module) {
   const site = path.resolve(process.argv[2] || __dirname);
@@ -55,5 +63,11 @@ if (require.main === module) {
   for (const game of games(site)) {
     fs.mkdirSync(path.join(site, game.id), { recursive: true });
     fs.writeFileSync(path.join(site, game.id, "index.html"), gamePage(html, game));
+    if (/^https:\/\//.test(game.download || "")) {
+      // Old site download links keep working as browser navigations.
+      const legacy = path.join(site, "build", `${game.id}.zip`);
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, "index.html"), downloadRedirect(game));
+    }
   }
 }

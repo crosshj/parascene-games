@@ -1134,17 +1134,21 @@
       })();
     }
 
-    /* Shown only when the zip is actually published, with its real size. */
+    /* Same-origin downloads can be checked for size. Release downloads are
+       cross-origin navigations: a CORS/COEP-blocked HEAD must not hide them.
+       CI publishes the complete release before deploying this page. */
     async function offerDisc(game) {
       if (!game.download) return;
       const url = new URL(game.download, document.baseURI).href;
       let size = 0;
-      try {
-        const res = await fetch(url, { method: "HEAD" });
-        if (!res.ok) return;
-        size = Number(res.headers.get("Content-Length")) || 0;
-      } catch {
-        return;
+      if (new URL(url).origin === location.origin) {
+        try {
+          const res = await fetch(url, { method: "HEAD" });
+          if (!res.ok) return;
+          size = Number(res.headers.get("Content-Length")) || 0;
+        } catch {
+          return;
+        }
       }
       const open = document.getElementById("getdisc");
       const dialog = document.getElementById("disc");

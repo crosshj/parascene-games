@@ -2,4 +2,6 @@
 .cursor/rules/builds.mdc
 runner/build/
 runner/dist/
+/build/runner.bin
+/scripts/ci/__pycache__/
 /runner/tools/__pycache__
