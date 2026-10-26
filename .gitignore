@@ -5,3 +5,4 @@ runner/dist/
 /build/runner.bin
 /scripts/ci/__pycache__/
 /runner/tools/__pycache__
+build/runner.bin
